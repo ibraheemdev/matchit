@@ -846,3 +846,816 @@ fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
 fn char_start(b: u8) -> bool {
   b & 0xC0 != 0x80
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::panic;
+  use std::sync::Mutex;
+
+  struct TestRequest {
+    path: &'static str,
+    nil_handler: bool,
+    route: &'static str,
+    ps: Params,
+  }
+
+  impl TestRequest {
+    pub fn new(
+      path: &'static str,
+      nil_handler: bool,
+      route: &'static str,
+      ps: Params,
+    ) -> TestRequest {
+      TestRequest {
+        path,
+        nil_handler,
+        route,
+        ps,
+      }
+    }
+  }
+
+  type TestRequests = Vec<TestRequest>;
+
+  fn check_requests<T: Fn() -> String>(tree: &mut Node<T>, requests: TestRequests) {
+    for request in requests {
+      let (handler, ps, _) = tree.get_handler(request.path);
+
+      if handler.is_none() {
+        if !request.nil_handler {
+          panic!("Expected non-nil handler for route '{}'", request.path);
+        }
+      } else if request.nil_handler {
+        panic!("Expected nil handler for route '{}'", request.path);
+      } else {
+        match handler {
+          Some(h) => {
+            let res = h();
+            if res != request.route {
+              panic!(
+                "Wrong handler for route '{}'. Expected '{}', found '{}')",
+                request.path, res, request.route
+              );
+            }
+          }
+          None => {
+            panic!("handle not found");
+          }
+        }
+      }
+
+      if ps != request.ps {
+        panic!("Wrong params for route '{}'", request.path);
+      }
+    }
+  }
+
+  fn check_priorities<T: Fn() -> String>(n: &mut Node<T>) -> u32 {
+    let mut prio: u32 = 0;
+    for i in 0..n.children.len() {
+      prio += check_priorities(&mut *n.children[i]);
+    }
+
+    if n.handle.is_some() {
+      prio += 1;
+    }
+
+    if n.priority != prio {
+      panic!(
+        "priority mismatch for node '{}': found '{}', expected '{}'",
+        str::from_utf8(&n.path).unwrap(),
+        n.priority,
+        prio
+      )
+    }
+
+    prio
+  }
+
+  fn check_max_params<T: Fn() -> String>(n: &mut Node<T>) -> u8 {
+    let mut max_params: u8 = 0;
+    for i in 0..n.children.len() {
+      let params = check_max_params(&mut *n.children[i]);
+
+      if params > max_params {
+        max_params = params;
+      }
+    }
+
+    if n.node_type > NodeType::Root && !n.wild_child {
+      max_params += 1;
+    }
+
+    if n.max_params != max_params {
+      panic!(
+        "max_params mismatch for node '{}': is '{}', should be '{}'",
+        str::from_utf8(&n.path).unwrap(),
+        n.max_params,
+        max_params,
+      )
+    }
+
+    max_params
+  }
+
+  fn fake_handler(val: &'static str) -> impl Fn() -> String {
+    move || val.to_string()
+  }
+
+  #[test]
+  fn params() {
+    let params = Params(vec![
+      Param {
+        key: "hello".to_owned(),
+        value: "world".to_owned(),
+      },
+      Param {
+        key: "rust-is".to_string(),
+        value: "awesome".to_string(),
+      },
+    ]);
+
+    assert_eq!(params.by_name("hello"), Some("world"));
+    assert_eq!(params.by_name("rust-is"), Some("awesome"));
+  }
+
+  #[test]
+  fn test_count_params() {
+    assert_eq!(0, count_params(b"/path/test/other"));
+    assert_eq!(2, count_params(b"/path/:param1/static/*catch-all"));
+    assert_eq!(3, count_params(b"/path/:param1/:param2/*catch-all"));
+    assert_eq!(255, count_params("/:param".repeat(256).as_bytes()));
+  }
+
+  #[test]
+  fn test_tree_add_and_get() {
+    let mut tree = Node::default();
+
+    let routes = vec![
+      "/hi",
+      "/contact",
+      "/co",
+      "/c",
+      "/a",
+      "/ab",
+      "/doc/",
+      "/doc/go_faq.html",
+      "/doc/go1.html",
+      "/α",
+      "/β",
+    ];
+
+    for route in routes {
+      tree.add_route(route, fake_handler(route));
+    }
+
+    check_requests(
+      &mut tree,
+      vec![
+        TestRequest::new("/a", false, "/a", Params::default()),
+        TestRequest::new("/", true, "", Params::default()),
+        TestRequest::new("/hi", false, "/hi", Params::default()),
+        TestRequest::new("/contact", false, "/contact", Params::default()),
+        TestRequest::new("/co", false, "/co", Params::default()),
+        TestRequest::new("/con", true, "", Params::default()), // key mismatch
+        TestRequest::new("/cona", true, "", Params::default()), // key mismatch
+        TestRequest::new("/no", true, "", Params::default()),  // no matching child
+        TestRequest::new("/ab", false, "/ab", Params::default()),
+        TestRequest::new("/α", false, "/α", Params::default()),
+        TestRequest::new("/β", false, "/β", Params::default()),
+      ],
+    );
+
+    check_priorities(&mut tree);
+    check_max_params(&mut tree);
+  }
+
+  #[test]
+  fn test_tree_wildcard() {
+    let mut tree = Node::default();
+
+    let routes = vec![
+      "/",
+      "/cmd/:tool/:sub",
+      "/cmd/:tool/",
+      "/src/*filepath",
+      "/search/",
+      "/search/:query",
+      "/user_:name",
+      "/user_:name/about",
+      "/files/:dir/*filepath",
+      "/doc/",
+      "/doc/go_faq.html",
+      "/doc/go1.html",
+      "/info/:user/public",
+      "/info/:user/project/:project",
+    ];
+
+    for route in routes {
+      tree.add_route(route, fake_handler(route));
+    }
+
+    check_requests(
+      &mut tree,
+      vec![
+        TestRequest::new("/", false, "/", Params::default()),
+        TestRequest::new(
+          "/cmd/test/",
+          false,
+          "/cmd/:tool/",
+          Params(vec![Param::new("tool", "test")]),
+        ),
+        TestRequest::new(
+          "/cmd/test",
+          true,
+          "",
+          Params(vec![Param::new("tool", "test")]),
+        ),
+        TestRequest::new(
+          "/cmd/test/3",
+          false,
+          "/cmd/:tool/:sub",
+          Params(vec![Param::new("tool", "test"), Param::new("sub", "3")]),
+        ),
+        TestRequest::new(
+          "/src/",
+          false,
+          "/src/*filepath",
+          Params(vec![Param::new("filepath", "/")]),
+        ),
+        TestRequest::new(
+          "/src/some/file.png",
+          false,
+          "/src/*filepath",
+          Params(vec![Param::new("filepath", "/some/file.png")]),
+        ),
+        TestRequest::new("/search/", false, "/search/", Params::default()),
+        TestRequest::new(
+          "/search/someth!ng+in+ünìcodé",
+          false,
+          "/search/:query",
+          Params(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+        ),
+        TestRequest::new(
+          "/search/someth!ng+in+ünìcodé/",
+          true,
+          "",
+          Params(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+        ),
+        TestRequest::new(
+          "/user_rustacean",
+          false,
+          "/user_:name",
+          Params(vec![Param::new("name", "rustacean")]),
+        ),
+        TestRequest::new(
+          "/user_rustacean/about",
+          false,
+          "/user_:name/about",
+          Params(vec![Param::new("name", "rustacean")]),
+        ),
+        TestRequest::new(
+          "/files/js/inc/framework.js",
+          false,
+          "/files/:dir/*filepath",
+          Params(vec![
+            Param::new("dir", "js"),
+            Param::new("filepath", "/inc/framework.js"),
+          ]),
+        ),
+        TestRequest::new(
+          "/info/gordon/public",
+          false,
+          "/info/:user/public",
+          Params(vec![Param::new("user", "gordon")]),
+        ),
+        TestRequest::new(
+          "/info/gordon/project/go",
+          false,
+          "/info/:user/project/:project",
+          Params(vec![
+            Param::new("user", "gordon"),
+            Param::new("project", "go"),
+          ]),
+        ),
+      ],
+    );
+
+    check_priorities(&mut tree);
+    check_max_params(&mut tree);
+  }
+
+  type TestRoute = (&'static str, bool);
+
+  fn test_routes(routes: Vec<TestRoute>) {
+    let tree = Mutex::new(Node::default());
+
+    for route in routes {
+      let recv = panic::catch_unwind(|| {
+        let mut guard = match tree.lock() {
+          Ok(guard) => guard,
+          Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.add_route(route.0, ());
+      });
+
+      if route.1 {
+        if recv.is_ok() {
+          panic!("no panic for conflicting route '{}'", route.0);
+        }
+      } else if recv.is_err() {
+        panic!("unexpected panic for route '{}': {:?}", route.0, recv);
+      }
+    }
+  }
+
+  #[test]
+  fn test_tree_wildcard_conflict() {
+    let routes = vec![
+      ("/cmd/:tool/:sub", false),
+      ("/cmd/vet", true),
+      ("/src/*filepath", false),
+      ("/src/*filepathx", true),
+      ("/src/", true),
+      ("/src1/", false),
+      ("/src1/*filepath", true),
+      ("/src2*filepath", true),
+      ("/search/:query", false),
+      ("/search/invalid", true),
+      ("/user_:name", false),
+      ("/user_x", true),
+      ("/user_:name", true),
+      ("/id:id", false),
+      ("/id/:id", true),
+    ];
+    test_routes(routes);
+  }
+
+  #[test]
+  fn test_tree_child_conflict() {
+    let routes = vec![
+      ("/cmd/vet", false),
+      ("/cmd/:tool/:sub", true),
+      ("/src/AUTHORS", false),
+      ("/src/*filepath", true),
+      ("/user_x", false),
+      ("/user_:name", true),
+      ("/id/:id", false),
+      ("/id:id", true),
+      ("/:id", true),
+      ("/*filepath", true),
+    ];
+
+    test_routes(routes);
+  }
+
+  #[test]
+  fn test_tree_duplicate_path() {
+    let tree = Mutex::new(Node::default());
+
+    let routes = vec![
+      "/",
+      "/doc/",
+      "/src/*filepath",
+      "/search/:query",
+      "/user_:name",
+    ];
+
+    for route in routes {
+      let mut recv = panic::catch_unwind(|| {
+        let mut guard = match tree.lock() {
+          Ok(guard) => guard,
+          Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.add_route(route, fake_handler(route));
+      });
+
+      if recv.is_err() {
+        panic!("panic inserting route '{}': {:?}", route, recv);
+      }
+
+      recv = panic::catch_unwind(|| {
+        let mut guard = match tree.lock() {
+          Ok(guard) => guard,
+          Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.add_route(route, fake_handler(route));
+      });
+
+      if recv.is_ok() {
+        panic!("no panic while inserting duplicate route '{}'", route);
+      }
+    }
+
+    check_requests(
+      &mut tree.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+      vec![
+        TestRequest::new("/", false, "/", Params::default()),
+        TestRequest::new("/doc/", false, "/doc/", Params::default()),
+        TestRequest::new(
+          "/src/some/file.png",
+          false,
+          "/src/*filepath",
+          Params(vec![Param::new("filepath", "/some/file.png")]),
+        ),
+        TestRequest::new(
+          "/search/someth!ng+in+ünìcodé",
+          false,
+          "/search/:query",
+          Params(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+        ),
+        TestRequest::new(
+          "/user_rustacean",
+          false,
+          "/user_:name",
+          Params(vec![Param::new("name", "rustacean")]),
+        ),
+      ],
+    );
+  }
+
+  #[test]
+  fn test_empty_wildcard_name() {
+    let tree = Mutex::new(Node::default());
+    let routes = vec!["/user:", "/user:/", "/cmd/:/", "/src/*"];
+
+    for route in routes {
+      let recv = panic::catch_unwind(|| {
+        let mut guard = match tree.lock() {
+          Ok(guard) => guard,
+          Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.add_route(route, fake_handler(route));
+      });
+
+      if recv.is_ok() {
+        panic!(
+          "no panic while inserting route with empty wildcard name '{}",
+          route
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn test_tree_catch_all_conflict() {
+    let routes = vec![
+      ("/src/*filepath/x", true),
+      ("/src2/", false),
+      ("/src2/*filepath/x", true),
+    ];
+
+    test_routes(routes);
+  }
+
+  #[test]
+  fn test_tree_catch_all_conflict_root() {
+    let routes = vec![("/", false), ("/*filepath", true)];
+
+    test_routes(routes);
+  }
+
+  #[test]
+  fn test_tree_double_wildcard() {
+    let panic_msg = "only one wildcard per path segment is allowed";
+    let routes = vec!["/:foo:bar", "/:foo:bar/", "/:foo*bar"];
+
+    for route in routes {
+      let tree = Mutex::new(Node::default());
+      let recv = panic::catch_unwind(|| {
+        let mut guard = match tree.lock() {
+          Ok(guard) => guard,
+          Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.add_route(route, fake_handler(route));
+      });
+
+      // [TODO] Check `recv`
+      if recv.is_ok() {
+        panic!(panic_msg);
+      }
+    }
+  }
+
+  #[test]
+  fn test_tree_trailing_slash_redirect() {
+    let tree = Mutex::new(Node::default());
+    let routes = vec![
+      "/hi",
+      "/b/",
+      "/search/:query",
+      "/cmd/:tool/",
+      "/src/*filepath",
+      "/x",
+      "/x/y",
+      "/y/",
+      "/y/z",
+      "/0/:id",
+      "/0/:id/1",
+      "/1/:id/",
+      "/1/:id/2",
+      "/aa",
+      "/a/",
+      "/admin",
+      "/admin/:category",
+      "/admin/:category/:page",
+      "/doc",
+      "/doc/go_faq.html",
+      "/doc/go1.html",
+      "/no/a",
+      "/no/b",
+      "/api/hello/:name",
+    ];
+
+    for route in routes {
+      let recv = panic::catch_unwind(|| {
+        let mut guard = match tree.lock() {
+          Ok(guard) => guard,
+          Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.add_route(route, fake_handler(route));
+      });
+
+      if recv.is_err() {
+        panic!("panic inserting route '{}': {:?}", route, recv);
+      }
+    }
+
+    let tsr_routes = vec![
+      "/hi/",
+      "/b",
+      "/search/rustacean/",
+      "/cmd/vet",
+      "/src",
+      "/x/",
+      "/y",
+      "/0/go/",
+      "/1/go",
+      "/a",
+      "/admin/",
+      "/admin/config/",
+      "/admin/config/permissions/",
+      "/doc/",
+    ];
+
+    for route in tsr_routes {
+      let guard = match tree.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+      };
+      let (handler, _, tsr) = guard.get_handler(route);
+
+      if handler.is_some() {
+        panic!("non-nil handler for TSR route '{}'", route);
+      } else if !tsr {
+        panic!("expected TSR recommendation for route '{}'", route);
+      }
+    }
+
+    let no_tsr_routes = vec!["/", "/no", "/no/", "/_", "/_/", "/api/world/abc"];
+
+    for route in no_tsr_routes {
+      let guard = match tree.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+      };
+      let (handler, _, tsr) = guard.get_handler(route);
+
+      if handler.is_some() {
+        panic!("non-nil handler for TSR route '{}'", route);
+      } else if tsr {
+        panic!("expected TSR recommendation for route '{}'", route);
+      }
+    }
+  }
+
+  #[test]
+  fn test_tree_root_trailing_slash_redirect() {
+    let tree = Mutex::new(Node::default());
+
+    let recv = panic::catch_unwind(|| {
+      let mut guard = match tree.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+      };
+      guard.add_route("/:test", fake_handler("/:test"));
+    });
+
+    if recv.is_err() {
+      panic!("panic inserting test route: {:?}", recv);
+    }
+
+    let guard = match tree.lock() {
+      Ok(guard) => guard,
+      Err(poisoned) => poisoned.into_inner(),
+    };
+    let (handler, _, tsr) = guard.get_handler("/");
+
+    if handler.is_some() {
+      panic!("non-nil handler");
+    } else if tsr {
+      panic!("expected no TSR recommendation");
+    }
+  }
+
+  #[test]
+  fn test_tree_find_case_insensitive_path() {
+    let mut tree = Node::default();
+
+    let routes = vec![
+      "/hi",
+      "/b/",
+      "/ABC/",
+      "/search/:query",
+      "/cmd/:tool/",
+      "/src/*filepath",
+      "/x",
+      "/x/y",
+      "/y/",
+      "/y/z",
+      "/0/:id",
+      "/0/:id/1",
+      "/1/:id/",
+      "/1/:id/2",
+      "/aa",
+      "/a/",
+      "/doc",
+      "/doc/go_faq.html",
+      "/doc/go1.html",
+      "/doc/go/away",
+      "/no/a",
+      "/no/b",
+      "/Π",
+      "/u/apfêl/",
+      "/u/äpfêl/",
+      "/u/öpfêl",
+      "/v/Äpfêl/",
+      "/v/Öpfêl",
+      "/w/♬",
+      "/w/♭/",
+      "/w/𠜎",
+      "/w/𠜏/",
+      "/loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong",
+    ];
+
+    for route in &routes {
+      tree.add_route(route, fake_handler(route));
+    }
+
+    // Check out == in for all registered routes
+    // With fixTrailingSlash = true
+    for route in &routes {
+      let (out, found) = tree.find_case_insensitive_path(route, true);
+      if !found {
+        panic!("Route '{}' not found!", route);
+      } else if out != *route {
+        panic!("Wrong result for route '{}': {}", route, out);
+      }
+    }
+
+    // With fixTrailingSlash = false
+    for route in &routes {
+      let (out, found) = tree.find_case_insensitive_path(route, false);
+      if !found {
+        panic!("Route '{}' not found!", route);
+      } else if out != *route {
+        panic!("Wrong result for route '{}': {}", route, out);
+      }
+    }
+
+    let tests = vec![
+      ("/HI", "/hi", true, false),
+      ("/HI/", "/hi", true, true),
+      ("/B", "/b/", true, true),
+      ("/B/", "/b/", true, false),
+      ("/abc", "/ABC/", true, true),
+      ("/abc/", "/ABC/", true, false),
+      ("/aBc", "/ABC/", true, true),
+      ("/aBc/", "/ABC/", true, false),
+      ("/abC", "/ABC/", true, true),
+      ("/abC/", "/ABC/", true, false),
+      ("/SEARCH/QUERY", "/search/QUERY", true, false),
+      ("/SEARCH/QUERY/", "/search/QUERY", true, true),
+      ("/CMD/TOOL/", "/cmd/TOOL/", true, false),
+      ("/CMD/TOOL", "/cmd/TOOL/", true, true),
+      ("/SRC/FILE/PATH", "/src/FILE/PATH", true, false),
+      ("/x/Y", "/x/y", true, false),
+      ("/x/Y/", "/x/y", true, true),
+      ("/X/y", "/x/y", true, false),
+      ("/X/y/", "/x/y", true, true),
+      ("/X/Y", "/x/y", true, false),
+      ("/X/Y/", "/x/y", true, true),
+      ("/Y/", "/y/", true, false),
+      ("/Y", "/y/", true, true),
+      ("/Y/z", "/y/z", true, false),
+      ("/Y/z/", "/y/z", true, true),
+      ("/Y/Z", "/y/z", true, false),
+      ("/Y/Z/", "/y/z", true, true),
+      ("/y/Z", "/y/z", true, false),
+      ("/y/Z/", "/y/z", true, true),
+      ("/Aa", "/aa", true, false),
+      ("/Aa/", "/aa", true, true),
+      ("/AA", "/aa", true, false),
+      ("/AA/", "/aa", true, true),
+      ("/aA", "/aa", true, false),
+      ("/aA/", "/aa", true, true),
+      ("/A/", "/a/", true, false),
+      ("/A", "/a/", true, true),
+      ("/DOC", "/doc", true, false),
+      ("/DOC/", "/doc", true, true),
+      ("/NO", "", false, true),
+      ("/DOC/GO", "", false, true),
+      // TODO unicode vs ascii case sensitivity
+      // ("/π", "/Π", true, false),
+      // ("/π/", "/Π", true, true),
+      // ("/u/ÄPFÊL/", "/u/äpfêl/", true, false),
+      // ("/u/ÄPFÊL", "/u/äpfêl/", true, true),
+      // ("/u/ÖPFÊL/", "/u/öpfêl", true, true),
+      // ("/u/ÖPFÊL", "/u/öpfêl", true, false),
+      // ("/v/äpfêL/", "/v/Äpfêl/", true, false),
+      // ("/v/äpfêL", "/v/Äpfêl/", true, true),
+      // ("/v/öpfêL/", "/v/Öpfêl", true, true),
+      // ("/v/öpfêL", "/v/Öpfêl", true, false),
+      ("/w/♬/", "/w/♬", true, true),
+      ("/w/♭", "/w/♭/", true, true),
+      ("/w/𠜎/", "/w/𠜎", true, true),
+      ("/w/𠜏", "/w/𠜏/", true, true),
+      (
+        "/lOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOng/",
+        "/loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong",
+        true, true),
+    ];
+
+    struct Test {
+      inn: &'static str,
+      out: &'static str,
+      found: bool,
+      slash: bool,
+    };
+
+    let tests: Vec<Test> = tests
+      .into_iter()
+      .map(|test| Test {
+        inn: test.0,
+        out: test.1,
+        found: test.2,
+        slash: test.3,
+      })
+      .collect();
+
+    // With fixTrailingSlash = true
+    for test in &tests {
+      let (out, found) = tree.find_case_insensitive_path(test.inn, true);
+      if found != test.found || (found && (out != test.out)) {
+        panic!(
+          "Wrong result for '{}': got {}, {}; want {} {}",
+          test.inn, out, found, test.out, test.found
+        );
+      }
+    }
+
+    // With fixTrailingSlash = false
+    for test in &tests {
+      let (out, found) = tree.find_case_insensitive_path(test.inn, false);
+      if test.slash {
+        if found {
+          // test needs a trailingSlash fix. It must not be found!
+          panic!("Found without fixTrailingSlash: {}; got {}", test.inn, out);
+        }
+      } else if found != test.found || (found && (out != test.out)) {
+        panic!(
+          "Wrong result for '{}': got {}, {}; want {} {}",
+          test.inn, out, found, test.out, test.found
+        );
+      }
+    }
+  }
+
+  #[test]
+  #[should_panic(expected = "conflicts with existing wildcard")]
+  fn test_tree_wildcard_conflict_ex() {
+    let conflicts = vec![
+      "/who/are/foo",
+      "/who/are/foo/",
+      "/who/are/foo/bar",
+      "/conxxx",
+      "xxx",
+      "/conooo/xxx",
+    ];
+
+    for conflict in conflicts {
+      // I have to re-create a 'tree', because the 'tree' will be
+      // in an inconsistent state when the loop recovers from the
+      // panic which threw by 'addRoute' function.
+      let mut tree = Node::default();
+
+      let routes = vec!["/con:tact", "/who/are/*you", "/who/foo/hello"];
+
+      for route in routes {
+        tree.add_route(route, fake_handler(route));
+      }
+      tree.add_route(conflict, fake_handler(conflict));
+    }
+  }
+}
