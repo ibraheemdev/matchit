@@ -288,4 +288,167 @@ impl<T> Node<T> {
       );
     }
   }
+
+  fn insert_child(&mut self, num_params: u8, path: &[u8], full_path: &str, handle: T) {
+    self.walk_tree_for_child(0, 0, num_params, path, full_path, handle);
+  }
+
+  // walking the tree to insert a child
+  fn walk_tree_for_child(
+    &mut self,
+    mut offset: usize,
+    mut i: usize,
+    mut num_params: u8,
+    path: &[u8],
+    full_path: &str,
+    handle: T,
+  ) {
+    match num_params.cmp(&0) {
+      Ordering::Greater => {
+        let max = path.len();
+        let wildcard = path[i];
+
+        // find prefix until first wildcard
+        if wildcard != b':' && wildcard != b'*' {
+          return self.walk_tree_for_child(offset, i + 1, num_params, path, full_path, handle);
+        }
+
+        // find wildcard end (either '/' or path end)
+        let mut end = i + 1;
+        while end < max && path[end] != b'/' {
+          match path[end] {
+            // the wildcard name must not contain ':' and '*'
+            b':' | b'*' => panic!(
+              "only one wildcard per path segment is allowed, has: '{}' in path '{}'",
+              str::from_utf8(&path[i..]).unwrap(),
+              full_path
+            ),
+            _ => end += 1,
+          }
+        }
+
+        // check if this Node existing children which would be
+        // unreachable if we insert the wildcard here
+        if !self.children.is_empty() {
+          panic!(
+            "wildcard route '{}' conflicts with existing children in path '{}'",
+            str::from_utf8(&path[i..end]).unwrap(),
+            full_path
+          )
+        }
+
+        // check if the wildcard has a name
+        if end - i < 2 {
+          panic!(
+            "wildcards must be named with a non-empty name in path '{}'",
+            full_path
+          );
+        }
+
+        // Param
+        if wildcard == b':' {
+          // Insert prefix before the current wildcard
+          if i > 0 {
+            self.path = path[offset..i].to_vec();
+            offset = i;
+          }
+
+          let child = Node {
+            node_type: NodeType::Param,
+            max_params: num_params,
+            ..Node::default()
+          };
+
+          self.wild_child = true;
+          self.children = vec![Box::new(child)];
+          self.children[0].priority += 1;
+          num_params -= 1;
+
+          match end.cmp(&max) {
+            Ordering::Less => {
+              self.children[0].path = path[offset..end].to_vec();
+              offset = end;
+
+              let child = Node {
+                max_params: num_params,
+                priority: 1,
+                ..Node::default()
+              };
+
+              self.children[0].children.push(Box::new(child));
+              self.children[0].children[0].walk_tree_for_child(
+                offset,
+                i + 1,
+                num_params,
+                path,
+                full_path,
+                handle,
+              );
+            }
+            _ => {
+              self.children[0].walk_tree_for_child(
+                offset,
+                i + 1,
+                num_params,
+                path,
+                full_path,
+                handle,
+              );
+            }
+          };
+        } else {
+          // catch all
+          if end != max || num_params > 1 {
+            panic!(
+              "catch-all routes are only allowed at the end of the path in path '{}'",
+              full_path
+            );
+          }
+
+          if !self.path.is_empty() && self.path[self.path.len() - 1] == b'/' {
+            panic!(
+              "catch-all conflicts with existing handle for the path segment root in path '{}'",
+              full_path
+            );
+          }
+
+          // Currently fixed width 1 for '/'
+          i -= 1;
+          if path[i] != b'/' {
+            panic!("no / before catch-all in path '{}'", full_path);
+          }
+
+          // first node: CatchAll Node with empty path
+          let child = Node {
+            wild_child: true,
+            node_type: NodeType::CatchAll,
+            max_params: 1,
+            ..Node::default()
+          };
+
+          self.path = path[offset..i].to_vec();
+          self.children = vec![Box::new(child)];
+          self.indices = vec![path[i]];
+          self.children[0].priority += 1;
+
+          // Second node: node holding the variable
+          let child = Node {
+            path: path[i..].to_vec(),
+            node_type: NodeType::CatchAll,
+            max_params: 1,
+            handle: Some(handle),
+            priority: 1,
+            ..Node::default()
+          };
+
+          self.children[0].children.push(Box::new(child));
+        }
+      }
+      // If no wildcard was found, simply insert the path and handle
+      _ => {
+        self.path = path[offset..].to_vec();
+        self.handle = Some(handle);
+      }
+    }
+  }
 }
