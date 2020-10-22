@@ -21,44 +21,44 @@ impl<T> Default for Router<T> {
 }
 
 impl<T> Router<T> {
- // add a handler for http method GET
+  // add a handler for http method GET
   pub fn get(&mut self, path: &str, handle: T) {
     self.handle("GET", path, handle);
   }
 
- // add a handler for http method HEAD
+  // add a handler for http method HEAD
   pub fn head(&mut self, path: &str, handle: T) {
     self.handle("HEAD", path, handle);
   }
 
- // add a handler for http method OPTIONS
+  // add a handler for http method OPTIONS
   pub fn options(&mut self, path: &str, handle: T) {
     self.handle("OPTIONS", path, handle);
   }
 
- // add a handler for http method POST
+  // add a handler for http method POST
   pub fn post(&mut self, path: &str, handle: T) {
     self.handle("POST", path, handle);
   }
 
- // add a handler for http method PUT
+  // add a handler for http method PUT
   pub fn put(&mut self, path: &str, handle: T) {
     self.handle("PUT", path, handle);
   }
 
- // add a handler for http method PATCH
+  // add a handler for http method PATCH
   pub fn patch(&mut self, path: &str, handle: T) {
     self.handle("PATCH", path, handle);
   }
 
- // add a handler for http method DELTE
+  // add a handler for http method DELTE
   pub fn delete(&mut self, path: &str, handle: T) {
     self.handle("DELETE", path, handle);
   }
 
- // Handle registers a new request handle with the given path and method.
- // For GET, POST, PUT, PATCH and DELETE requests, the respective shortcut
- // functions can be used.
+  // Handle registers a new request handle with the given path and method.
+  // For GET, POST, PUT, PATCH and DELETE requests, the respective shortcut
+  // functions can be used.
   pub fn handle(&mut self, method: &str, path: &str, handle: T) {
     if !path.starts_with('/') {
       panic!("path must begin with '/' in path '{}'", path);
@@ -71,10 +71,10 @@ impl<T> Router<T> {
       .add_route(path, handle);
   }
 
- // Allows the manual lookup of a method and path.
- // Returns the handle function and the path parameter values if the path is found.
- // Otherwise, the third return value indicates whether a redirection to
- // the same path without the trailing slash should be performed.
+  // Allows the manual lookup of a method and path.
+  // Returns the handle function and the path parameter values if the path is found.
+  // Otherwise, the third return value indicates whether a redirection to
+  // the same path without the trailing slash should be performed.
   pub fn lookup(&mut self, method: &str, path: &str) -> (Option<&T>, Params, bool) {
     self
       .trees

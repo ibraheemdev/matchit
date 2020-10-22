@@ -896,8 +896,8 @@ fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
 }
 
 // This function is ported from go.
-// Reports whether the byte could be the first byte of an encoded, 
-// possibly invalid char. Second and subsequent bytes always have 
+// Reports whether the byte could be the first byte of an encoded,
+// possibly invalid char. Second and subsequent bytes always have
 // the top two bits set to 10.
 fn char_start(b: u8) -> bool {
   b & 0xC0 != 0x80
