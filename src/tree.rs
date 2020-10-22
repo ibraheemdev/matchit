@@ -1,6 +1,6 @@
 use std::cmp::{min, Ordering};
-use std::ops::Index;
 use std::mem;
+use std::ops::Index;
 use std::str;
 
 /// Param is a single URL parameter, consisting of a key and a value.
@@ -32,8 +32,8 @@ impl Default for Params {
 }
 
 impl Params {
- // ByName returns the value of the first Param which key matches the given name.
- // If no matching Param is found, an empty string is returned.
+  // ByName returns the value of the first Param which key matches the given name.
+  // If no matching Param is found, an empty string is returned.
   pub fn by_name(&self, name: &str) -> Option<&str> {
     match self.0.iter().find(|param| param.key == name) {
       Some(param) => Some(&param.value),
@@ -81,7 +81,7 @@ pub enum NodeType {
 }
 
 // A node in radix tree ordered by priority
-// priority is just the number of handles registered in sub nodes 
+// priority is just the number of handles registered in sub nodes
 // (children, grandchildren, and so on..).
 #[derive(Debug)]
 pub struct Node<T> {
@@ -110,7 +110,7 @@ impl<T> Default for Node<T> {
   }
 }
 impl<T> Node<T> {
- // increments priority of the given child and reorders if necessary
+  // increments priority of the given child and reorders if necessary
   fn increment_child_prio(&mut self, pos: usize) -> usize {
     self.children[pos].priority += 1;
     let prio = self.children[pos].priority;
@@ -137,7 +137,7 @@ impl<T> Node<T> {
     new_pos
   }
 
- // add_route adds a node with the given handle to the path.
+  // add_route adds a node with the given handle to the path.
   pub fn add_route(&mut self, path: &str, handle: T) {
     let full_path = <&str>::clone(&path);
     self.priority += 1;
@@ -451,4 +451,398 @@ impl<T> Node<T> {
       }
     }
   }
+
+  // Returns the handle registered with the given path (key). The values of
+  // wildcards are saved to a map.
+  // If no handle can be found, a TSR (trailing slash redirect) recommendation is
+  // made if a handle exists with an extra (without the) trailing slash for the
+  // given path.
+  pub fn get_handler(&self, path: &str) -> (Option<&T>, Params, bool) {
+    self.walk_tree_for_handler(path.as_ref(), Params::default())
+  }
+
+  // outer loop for walking the tree to get a path's handler
+  fn walk_tree_for_handler(&self, mut path: &[u8], ps: Params) -> (Option<&T>, Params, bool) {
+    let prefix = self.path.clone();
+    if path.len() > prefix.len() {
+      if prefix == &path[..prefix.len()] {
+        path = &path[prefix.len()..];
+
+        // If this node does not have a wildcard (Param or CatchAll)
+        // child, we can just look up the next child node and continue
+        // to walk down the tree
+        if !self.wild_child {
+          let idxc = path[0];
+          for i in 0..self.indices.len() {
+            if idxc == self.indices[i] {
+              return self.children[i].walk_tree_for_handler(path, ps);
+            }
+          }
+          // Nothing found.
+          // We can recommend to redirect to the same URL without a
+          // trailing slash if a leaf exists for that path.
+          let tsr = path == [b'/'] && self.handle.is_some();
+          return (None, ps, tsr);
+        }
+
+        return self.children[0].handle_wild_child(path, ps);
+      }
+    } else if path == prefix {
+      // We should have reached the node containing the handle.
+      // Check if this node has a handle registered.
+      if self.handle.is_some() {
+        return (self.handle.as_ref(), ps, false);
+      }
+
+      // If there is no handle for this route, but this route has a
+      // wildcard child, there must be a handle for this path with an
+      // additional trailing slash
+      if path == [b'/'] && self.wild_child && self.node_type != NodeType::Root {
+        return (self.handle.as_ref(), ps, true);
+      }
+
+      // No handle found. Check if a handle for this path + a
+      // trailing slash exists for trailing slash recommendation
+      for i in 0..self.indices.len() {
+        if self.indices[i] == b'/' {
+          let tsr = (prefix.len() == 1 && self.children[i].handle.is_some())
+            || (self.children[i].node_type == NodeType::CatchAll
+              && self.children[i].children[0].handle.is_some());
+          return (self.handle.as_ref(), ps, tsr);
+        }
+      }
+
+      return (self.handle.as_ref(), ps, false);
+    }
+
+    // Nothing found. We can recommend to redirect to the same URL with an
+    // extra trailing slash if a leaf exists for that path
+    let tsr = (path == [b'/'])
+      || (prefix.len() == path.len() + 1
+        && prefix[path.len()] == b'/'
+        && path == &prefix[..prefix.len() - 1]
+        && self.handle.is_some());
+
+    (None, ps, tsr)
+  }
+
+  fn handle_wild_child(&self, mut path: &[u8], mut p: Params) -> (Option<&T>, Params, bool) {
+    match self.node_type {
+      NodeType::Param => {
+        // find param end (either '/' or path end)
+        let mut end = 0;
+        while end < path.len() && path[end] != b'/' {
+          end += 1;
+        }
+
+        // save param value
+        if p.is_empty() {
+          // preallocate capacity
+          p = Params(Vec::with_capacity(self.max_params as usize));
+        }
+
+        p.push(Param {
+          key: String::from_utf8(self.path[1..].to_vec()).unwrap(),
+          value: String::from_utf8(path[..end].to_vec()).unwrap(),
+        });
+
+        // we need to go deeper!
+        if end < path.len() {
+          if !self.children.is_empty() {
+            path = &path[end..];
+
+            return self.children[0].walk_tree_for_handler(path, p);
+          }
+
+          // ... but we can't
+          let tsr = path.len() == end + 1;
+          return (None, p, tsr);
+        }
+
+        if self.handle.is_some() {
+          return (self.handle.as_ref(), p, false);
+        } else if self.children.len() == 1 {
+          // No handle found. Check if a handle for this path + a
+          // trailing slash exists for TSR recommendation
+          let tsr = self.children[0].path == [b'/'] && self.children[0].handle.is_some();
+          return (None, p, tsr);
+        }
+
+        (None, p, false)
+      }
+      NodeType::CatchAll => {
+        // save param value
+        if p.is_empty() {
+          // lazy allocation
+          p = Params(Vec::with_capacity(self.max_params as usize));
+        }
+
+        p.push(Param {
+          key: String::from_utf8(self.path[2..].to_vec()).unwrap(),
+          value: String::from_utf8(path.to_vec()).unwrap(),
+        });
+
+        (self.handle.as_ref(), p, false)
+      }
+      _ => panic!("invalid node type"),
+    }
+  }
+
+  pub fn find_case_insensitive_path(&self, path: &str, fix_trailing_slash: bool) -> (String, bool) {
+    let mut insensitive_path = Vec::with_capacity(path.len() + 1);
+    let found = self.find_case_insensitive_path_rec(
+      path.as_bytes(),
+      &mut insensitive_path,
+      [0; 4],
+      fix_trailing_slash,
+    );
+    (String::from_utf8(insensitive_path).unwrap(), found)
+  }
+
+  // recursive case-insensitive lookup function used by n.find_case_insensitive_path
+  fn find_case_insensitive_path_rec(
+    &self,
+    mut path: &[u8],
+    insensitive_path: &mut Vec<u8>,
+    mut buf: [u8; 4],
+    fix_trailing_slash: bool,
+  ) -> bool {
+    let lower_path: &[u8] = &path.to_ascii_lowercase();
+    if lower_path.len() >= self.path.len()
+      && (self.path.is_empty()
+        || lower_path[1..self.path.len()].eq_ignore_ascii_case(&self.path[1..]))
+    {
+      insensitive_path.append(&mut self.path.clone());
+
+      path = &path[self.path.len()..];
+
+      if !path.is_empty() {
+        let cached_lower_path = <&[u8]>::clone(&lower_path);
+
+        // If this node does not have a wildcard (param or catchAll) child,
+        // we can just look up the next child node and continue to walk down
+        // the tree
+        if !self.wild_child {
+          // skip char bytes already processed
+          buf = shift_n_bytes(buf, self.path.len());
+
+          if buf[0] != 0 {
+            // old char not finished
+            for i in 0..self.indices.len() {
+              if self.indices[i] == buf[0] {
+                // continue with child node
+                return self.children[i].find_case_insensitive_path_rec(
+                  path,
+                  insensitive_path,
+                  buf,
+                  fix_trailing_slash,
+                );
+              }
+            }
+          } else {
+            // process a new char
+            let mut current_char = 0 as char;
+
+            // find char start
+            // chars are up to 4 byte long,
+            // -4 would definitely be another char
+            let mut off = 0;
+            for j in 0..min(self.path.len(), 3) {
+              let i = self.path.len() - j;
+              if char_start(cached_lower_path[i]) {
+                // read char from cached path
+                current_char = str::from_utf8(&cached_lower_path[i..])
+                  .unwrap()
+                  .chars()
+                  .next()
+                  .unwrap();
+                off = j;
+                break;
+              }
+            }
+
+            current_char.encode_utf8(&mut buf);
+
+            // skip already processed bytes
+            buf = shift_n_bytes(buf, off);
+
+            for i in 0..self.indices.len() {
+              // lowercase matches
+              if self.indices[i] == buf[0] {
+                // must use a recursive approach since both the
+                // uppercase byte and the lowercase byte might exist
+                // as an index
+                if self.children[i].find_case_insensitive_path_rec(
+                  path,
+                  insensitive_path,
+                  buf,
+                  fix_trailing_slash,
+                ) {
+                  return true;
+                }
+
+                if insensitive_path.len() > self.children[i].path.len() {
+                  let prev_len = insensitive_path.len() - self.children[i].path.len();
+                  insensitive_path.truncate(prev_len);
+                }
+
+                break;
+              }
+            }
+
+            // same for uppercase char, if it differs
+            let up = current_char.to_ascii_uppercase();
+            if up != current_char {
+              up.encode_utf8(&mut buf);
+              buf = shift_n_bytes(buf, off);
+
+              for i in 0..self.indices.len() {
+                if self.indices[i] == buf[0] {
+                  return self.children[i].find_case_insensitive_path_rec(
+                    path,
+                    insensitive_path,
+                    buf,
+                    fix_trailing_slash,
+                  );
+                }
+              }
+            }
+          }
+
+          // Nothing found. We can recommend to redirect to the same URL
+          // without a trailing slash if a leaf exists for that path
+          return fix_trailing_slash && path == [b'/'] && self.handle.is_some();
+        }
+
+        return self.children[0].find_case_insensitive_path_rec_match(
+          path,
+          insensitive_path,
+          buf,
+          fix_trailing_slash,
+        );
+      } else {
+        // We should have reached the node containing the handle.
+        // Check if this node has a handle registered.
+        if self.handle.is_some() {
+          return true;
+        }
+
+        // No handle found.
+        // Try to fix the path by adding a trailing slash
+        if fix_trailing_slash {
+          for i in 0..self.indices.len() {
+            if self.indices[i] == b'/' {
+              if (self.children[i].path.len() == 1 && self.children[i].handle.is_some())
+                || (self.children[i].node_type == NodeType::CatchAll
+                  && self.children[i].children[0].handle.is_some())
+              {
+                insensitive_path.push(b'/');
+                return true;
+              }
+              return false;
+            }
+          }
+        }
+        return false;
+      }
+    }
+
+    // Nothing found.
+    // Try to fix the path by adding / removing a trailing slash
+    if fix_trailing_slash {
+      if path == [b'/'] {
+        return true;
+      }
+      if lower_path.len() + 1 == self.path.len()
+        && self.path[lower_path.len()] == b'/'
+        && lower_path[1..].eq_ignore_ascii_case(&self.path[1..lower_path.len()])
+        && self.handle.is_some()
+      {
+        insensitive_path.append(&mut self.path.clone());
+        return true;
+      }
+    }
+
+    false
+  }
+
+  // recursive case-insensitive lookup function used by n.findCaseInsensitivePath
+  fn find_case_insensitive_path_rec_match(
+    &self,
+    mut path: &[u8],
+    insensitive_path: &mut Vec<u8>,
+    buf: [u8; 4],
+    fix_trailing_slash: bool,
+  ) -> bool {
+    match self.node_type {
+      NodeType::Param => {
+        let mut end = 0;
+
+        while end < path.len() && path[end] != b'/' {
+          end += 1;
+        }
+
+        let mut path_k = path[..end].to_vec();
+        insensitive_path.append(&mut path_k);
+
+        if end < path.len() {
+          if !self.children.is_empty() {
+            path = &path[end..];
+
+            return self.children[0].find_case_insensitive_path_rec(
+              path,
+              insensitive_path,
+              buf,
+              fix_trailing_slash,
+            );
+          }
+
+          // ... but we can't
+          if fix_trailing_slash && path.len() == end + 1 {
+            return true;
+          }
+          return false;
+        }
+
+        if self.handle.is_some() {
+          return true;
+        } else if fix_trailing_slash
+          && self.children.len() == 1
+          && self.children[0].path == [b'/']
+          && self.children[0].handle.is_some()
+        {
+          // No handle found. Check if a handle for this path + a
+          // trailing slash exists
+          insensitive_path.push(b'/');
+          return true;
+        }
+
+        false
+      }
+      NodeType::CatchAll => {
+        insensitive_path.append(&mut path.to_vec());
+        true
+      }
+      _ => panic!("invalid node type"),
+    }
+  }
+}
+
+// Shift bytes in array by n bytes left
+fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
+  match n {
+    0 => bytes,
+    1 => [bytes[1], bytes[2], bytes[3], 0],
+    2 => [bytes[2], bytes[3], 0, 0],
+    3 => [bytes[3], 0, 0, 0],
+    _ => [0; 4],
+  }
+}
+
+// This function is ported from go.
+// Reports whether the byte could be the first byte of an encoded, 
+// possibly invalid char. Second and subsequent bytes always have 
+// the top two bits set to 10.
+fn char_start(b: u8) -> bool {
+  b & 0xC0 != 0x80
 }
