@@ -1,3 +1,59 @@
+// This radix tree implementation was ported from [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter)
+//
+// The router relies on a tree structure which makes heavy use of *common prefixes*,
+// it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie)
+// (or just [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a
+// common prefix also share a common parent. Here is a short example what the routing
+// tree for the `GET` request method could look like:
+//
+// ```
+// Priority   Path             Handle
+// 9          \                *<1>
+// 3          ├s               nil
+// 2          |├earch\         *<2>
+// 1          |└upport\        *<3>
+// 2          ├blog\           *<4>
+// 1          |    └:post      nil
+// 1          |         └\     *<5>
+// 2          ├about-us\       *<6>
+// 1          |        └team\  *<7>
+// 1          └contact\        *<8>
+// ```
+
+// Every `*<num>` represents the memory address of a handler function (a pointer).
+// If you follow a path trough the tree from the root to the leaf, you get the complete
+// route path, e.g `\blog\:post\`, where `:post` is just a placeholder ([*parameter*](#named-parameters))
+// for an actual post name. Unlike hash-maps, a tree structure also allows us to use
+// dynamic parts like the `:post` parameter, since we actually match against the routing
+// patterns instead of just comparing hashes. This works very well and efficiently.
+
+// Since URL paths have a hierarchical structure and make use only of a limited set of
+// characters (byte values), it is very likely that there are a lot of common prefixes.
+// This allows us to easily reduce the routing into ever smaller problems. Moreover the
+// router manages a separate tree for every request method. For one thing it is more
+// space efficient than holding a method -> handle map in every single node, it also allows
+// us to greatly reduce the routing problem before even starting the look-up in the prefix-tree.
+
+// For even better scalability, the child nodes on each tree level are ordered by priority,
+// where the priority is just the number of handles registered in sub nodes (children, grandchildren, and so on..).
+// This helps in two ways:
+
+// 1. Nodes which are part of the most routing paths are evaluated first. This helps to
+// make as much routes as possible to be reachable as fast as possible.
+// 2. It is some sort of cost compensation. The longest reachable path (highest cost)
+// can always be evaluated first. The following scheme visualizes the tree structure.
+// Nodes are evaluated from top to bottom and from left to right.
+
+// ```
+// ├------------
+// ├---------
+// ├-----
+// ├----
+// ├--
+// ├--
+// └-
+// ```
+
 use std::cmp::{min, Ordering};
 use std::mem;
 use std::ops::Index;
