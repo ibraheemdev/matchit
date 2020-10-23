@@ -1450,72 +1450,71 @@ mod tests {
     }
 
     let tests = vec![
-      ("/HI", "/hi", true, false),
-      ("/HI/", "/hi", true, true),
-      ("/B", "/b/", true, true),
-      ("/B/", "/b/", true, false),
-      ("/abc", "/ABC/", true, true),
-      ("/abc/", "/ABC/", true, false),
-      ("/aBc", "/ABC/", true, true),
-      ("/aBc/", "/ABC/", true, false),
-      ("/abC", "/ABC/", true, true),
-      ("/abC/", "/ABC/", true, false),
-      ("/SEARCH/QUERY", "/search/QUERY", true, false),
-      ("/SEARCH/QUERY/", "/search/QUERY", true, true),
-      ("/CMD/TOOL/", "/cmd/TOOL/", true, false),
-      ("/CMD/TOOL", "/cmd/TOOL/", true, true),
-      ("/SRC/FILE/PATH", "/src/FILE/PATH", true, false),
-      ("/x/Y", "/x/y", true, false),
-      ("/x/Y/", "/x/y", true, true),
-      ("/X/y", "/x/y", true, false),
-      ("/X/y/", "/x/y", true, true),
-      ("/X/Y", "/x/y", true, false),
-      ("/X/Y/", "/x/y", true, true),
-      ("/Y/", "/y/", true, false),
-      ("/Y", "/y/", true, true),
-      ("/Y/z", "/y/z", true, false),
-      ("/Y/z/", "/y/z", true, true),
-      ("/Y/Z", "/y/z", true, false),
-      ("/Y/Z/", "/y/z", true, true),
-      ("/y/Z", "/y/z", true, false),
-      ("/y/Z/", "/y/z", true, true),
-      ("/Aa", "/aa", true, false),
-      ("/Aa/", "/aa", true, true),
-      ("/AA", "/aa", true, false),
-      ("/AA/", "/aa", true, true),
-      ("/aA", "/aa", true, false),
-      ("/aA/", "/aa", true, true),
-      ("/A/", "/a/", true, false),
-      ("/A", "/a/", true, true),
-      ("/DOC", "/doc", true, false),
-      ("/DOC/", "/doc", true, true),
-      ("/NO", "", false, true),
-      ("/DOC/GO", "", false, true),
+      ("/HI", "/hi", false),
+      ("/HI/", "/hi", true),
+      ("/B", "/b/", true),
+      ("/B/", "/b/", false),
+      ("/abc", "/ABC/", true),
+      ("/abc/", "/ABC/", false),
+      ("/aBc", "/ABC/", true),
+      ("/aBc/", "/ABC/", false),
+      ("/abC", "/ABC/", true),
+      ("/abC/", "/ABC/", false),
+      ("/SEARCH/QUERY", "/search/QUERY", false),
+      ("/SEARCH/QUERY/", "/search/QUERY", true),
+      ("/CMD/TOOL/", "/cmd/TOOL/", false),
+      ("/CMD/TOOL", "/cmd/TOOL/", true),
+      ("/SRC/FILE/PATH", "/src/FILE/PATH", false),
+      ("/x/Y", "/x/y", false),
+      ("/x/Y/", "/x/y", true),
+      ("/X/y", "/x/y", false),
+      ("/X/y/", "/x/y", true),
+      ("/X/Y", "/x/y", false),
+      ("/X/Y/", "/x/y", true),
+      ("/Y/", "/y/", false),
+      ("/Y", "/y/", true),
+      ("/Y/z", "/y/z", false),
+      ("/Y/z/", "/y/z", true),
+      ("/Y/Z", "/y/z", false),
+      ("/Y/Z/", "/y/z", true),
+      ("/y/Z", "/y/z", false),
+      ("/y/Z/", "/y/z", true),
+      ("/Aa", "/aa", false),
+      ("/Aa/", "/aa", true),
+      ("/AA", "/aa", false),
+      ("/AA/", "/aa", true),
+      ("/aA", "/aa", false),
+      ("/aA/", "/aa", true),
+      ("/A/", "/a/", false),
+      ("/A", "/a/", true),
+      ("/DOC", "/doc", false),
+      ("/DOC/", "/doc", true),
+      ("/NO", "", true),
+      ("/DOC/GO", "", true),
       // TODO unicode vs ascii case sensitivity
-      // ("/π", "/Π", true, false),
-      // ("/π/", "/Π", true, true),
-      // ("/u/ÄPFÊL/", "/u/äpfêl/", true, false),
-      // ("/u/ÄPFÊL", "/u/äpfêl/", true, true),
-      // ("/u/ÖPFÊL/", "/u/öpfêl", true, true),
-      // ("/u/ÖPFÊL", "/u/öpfêl", true, false),
-      // ("/v/äpfêL/", "/v/Äpfêl/", true, false),
-      // ("/v/äpfêL", "/v/Äpfêl/", true, true),
-      // ("/v/öpfêL/", "/v/Öpfêl", true, true),
-      // ("/v/öpfêL", "/v/Öpfêl", true, false),
-      ("/w/♬/", "/w/♬", true, true),
-      ("/w/♭", "/w/♭/", true, true),
-      ("/w/𠜎/", "/w/𠜎", true, true),
-      ("/w/𠜏", "/w/𠜏/", true, true),
+      // ("/π", "/Π", false)
+      // ("/π/", "/Π", true),
+      // ("/u/ÄPFÊL/", "/u/äpfêl/", false)
+      // ("/u/ÄPFÊL", "/u/äpfêl/", true),
+      // ("/u/ÖPFÊL/", "/u/öpfêl", true),
+      // ("/u/ÖPFÊL", "/u/öpfêl", false)
+      // ("/v/äpfêL/", "/v/Äpfêl/", false)
+      // ("/v/äpfêL", "/v/Äpfêl/", true),
+      // ("/v/öpfêL/", "/v/Öpfêl", true),
+      // ("/v/öpfêL", "/v/Öpfêl", false)
+      ("/w/♬/", "/w/♬", true),
+      ("/w/♭", "/w/♭/", true),
+      ("/w/𠜎/", "/w/𠜎", true),
+      ("/w/𠜏", "/w/𠜏/", true),
       (
         "/lOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOng/",
         "/loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong",
-        true, true),
+        true),
     ];
 
     struct Test {
       inn: &'static str,
       out: &'static str,
-      found: bool,
       slash: bool,
     };
 
@@ -1524,8 +1523,7 @@ mod tests {
       .map(|test| Test {
         inn: test.0,
         out: test.1,
-        found: test.2,
-        slash: test.3,
+        slash: test.2,
       })
       .collect();
 
@@ -1550,7 +1548,7 @@ mod tests {
         Some(res) => {
           if test.slash {
             // test needs a trailingSlash fix. It must not be found!
-          panic!("Found without fixTrailingSlash: {}; got {}", test.inn, res);
+            panic!("Found without fixTrailingSlash: {}; got {}", test.inn, res);
           }
           if res != test.out {
             panic!("Wrong result for route '{}': {}", res, test.out);
