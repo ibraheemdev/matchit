@@ -79,7 +79,7 @@ impl<T> Router<T> {
     self
       .trees
       .get_mut(method)
-      .map(|n| n.get_handler(path))
+      .map(|n| n.get_value(path))
       .unwrap_or((None, Params::default(), false))
   }
 
@@ -102,7 +102,7 @@ impl<T> Router<T> {
           }
 
           if let Some(tree) = self.trees.get(method) {
-            let (handle, _, _) = tree.get_handler(path);
+            let (handle, _, _) = tree.get_value(path);
 
             if handle.is_some() {
               allowed.push(method.to_string());
