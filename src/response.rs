@@ -1,5 +1,6 @@
+use crate::request::Request;
 use futures::future::{ok, Future, Ready};
-use hyper::Error;
+use hyper::{Body, Error, Response};
 
 /// Trait implemented by types that can be converted to a http response.
 ///
@@ -9,18 +10,18 @@ pub trait ToReponse {
   type Error: Into<Error>;
 
   /// The future response value.
-  type Future: Future<Output = Result<crate::Response, Self::Error>>;
+  type Future: Future<Output = Result<Response<Body>, Self::Error>>;
 
   /// Convert itself to `Future` or `Error`.
-  fn respond_to(self, req: crate::Request) -> Self::Future;
+  fn respond_to(self, req: &Request) -> Self::Future;
 }
 
-impl ToReponse for crate::Response {
+impl ToReponse for Response<Body> {
   type Error = Error;
-  type Future = Ready<Result<crate::Response, Error>>;
+  type Future = Ready<Result<Response<Body>, Error>>;
 
   #[inline]
-  fn respond_to(self, _: crate::Request) -> Self::Future {
+  fn respond_to(self, _: &Request) -> Self::Future {
     ok(self)
   }
 }

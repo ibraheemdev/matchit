@@ -1,11 +1,11 @@
 #![allow(clippy::unknown_clippy_lints)]
 
-use crate::request::FromRequest;
+use crate::request::{FromRequest, Request};
 use crate::response::ToReponse;
 use futures::future::Future;
 use futures::ready;
 use hyper::service::Service;
-use hyper::{Body, Request, Response};
+use hyper::{Body, Response};
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -69,13 +69,13 @@ where
   }
 }
 
-impl<F, T, R, O> Service<(T, crate::Request)> for Handler<F, T, R, O>
+impl<F, T, R, O> Service<(T, Request)> for Handler<F, T, R, O>
 where
   F: Factory<T, R, O>,
   R: Future<Output = O>,
   O: ToReponse,
 {
-  type Response = crate::Response;
+  type Response = Response<Body>;
   type Error = Infallible;
   type Future = HandlerServiceResponse<R, O>;
 
@@ -83,7 +83,7 @@ where
     Poll::Ready(Ok(()))
   }
 
-  fn call(&mut self, (param, req): (T, crate::Request)) -> Self::Future {
+  fn call(&mut self, (param, req): (T, Request)) -> Self::Future {
     HandlerServiceResponse {
       fut: self.handler.call(param),
       fut2: None,
@@ -102,7 +102,7 @@ where
   fut: T,
   #[pin]
   fut2: Option<R::Future>,
-  req: Option<crate::Request>,
+  req: Option<Request>,
 }
 
 impl<T, R> Future for HandlerServiceResponse<T, R>
@@ -110,24 +110,25 @@ where
   T: Future<Output = R>,
   R: ToReponse,
 {
-  type Output = Result<crate::Response, Infallible>;
+  type Output = Result<Response<Body>, Infallible>;
 
   fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
     let this = self.as_mut().project();
-    // let (parts, body)  = this.req.unwrap().into_parts();
 
-    // TODO
     if let Some(fut) = this.fut2.as_pin_mut() {
       return match fut.poll(cx) {
-        Poll::Ready(Ok(_)) => Poll::Ready(Ok(Response::default())),
+        Poll::Ready(Ok(res)) => Poll::Ready(Ok(res)),
         Poll::Pending => Poll::Pending,
-        Poll::Ready(Err(_)) => Poll::Ready(Ok(Response::default())),
+        Poll::Ready(Err(_err)) => Poll::Ready(Ok(
+          // [TODO] error response
+          Response::new(Body::default()),
+        )),
       };
     }
 
     match this.fut.poll(cx) {
       Poll::Ready(res) => {
-        let fut = res.respond_to(Request::new(Body::default()));
+        let fut = res.respond_to(this.req.as_ref().unwrap());
         self.as_mut().project().fut2.set(Some(fut));
         self.poll(cx)
       }
@@ -151,25 +152,23 @@ impl<T: FromRequest, S> Extract<T, S> {
   }
 }
 
-
-impl<T: FromRequest, S> Service<crate::Request> for Extract<T, S>
+impl<T: FromRequest, S> Service<Request> for Extract<T, S>
 where
-  S: Service<(T, crate::Request), Response = crate::Response, Error = Infallible> + Clone,
+  S: Service<(T, Request), Response = Response<Body>, Error = Infallible> + Clone,
 {
-  type Response = crate::Response;
-  type Error = (hyper::Error, crate::Request);
+  type Response = Response<Body>;
+  type Error = (hyper::Error, Request);
   type Future = ExtractResponse<T, S>;
 
   fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
     Poll::Ready(Ok(()))
   }
 
-  fn call(&mut self, req: crate::Request) -> Self::Future {
-    let (parts, body)  = req.into_parts();
-    let fut = T::from_request(Request::from_parts(parts, body));
-    // TODO somehow clone request
+  fn call(&mut self, req: Request) -> Self::Future {
+    let fut = T::from_request(&req);
 
     ExtractResponse {
+      req,
       fut,
       fut_s: None,
       service: self.service.clone(),
@@ -178,7 +177,8 @@ where
 }
 
 #[pin_project::pin_project]
-pub struct ExtractResponse<T: FromRequest, S: Service<(T, crate::Request)>> {
+pub struct ExtractResponse<T: FromRequest, S: Service<(T, Request)>> {
+  req: Request,
   service: S,
   #[pin]
   fut: T::Future,
@@ -188,9 +188,9 @@ pub struct ExtractResponse<T: FromRequest, S: Service<(T, crate::Request)>> {
 
 impl<T: FromRequest, S> Future for ExtractResponse<T, S>
 where
-  S: Service<(T, crate::Request), Response = crate::Response, Error = Infallible>,
+  S: Service<(T, Request), Response = Response<Body>, Error = Infallible>,
 {
-  type Output = Result<crate::Response, (hyper::Error, crate::Request)>;
+  type Output = Result<Response<Body>, (hyper::Error, Request)>;
 
   fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
     let this = self.as_mut().project();
@@ -200,14 +200,9 @@ where
     }
 
     match ready!(this.fut.poll(cx)) {
-      Err(e) => {
-        // TODO somehow clone request
-        let req = Request::new(Body::default());
-        Poll::Ready(Err((e.into(), req)))
-      }
+      Err(e) => Poll::Ready(Err((e.into(), this.req.clone()))),
       Ok(item) => {
-        // TODO somehow clone request
-        let fut = Some(this.service.call((item, Request::new(Body::default()))));
+        let fut = Some(this.service.call((item, this.req.clone())));
         self.as_mut().project().fut_s.set(fut);
         self.poll(cx)
       }

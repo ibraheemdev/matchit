@@ -1523,7 +1523,7 @@ mod tests {
       ("/DOC/", "/doc", true),
       ("/NO", "", true),
       ("/DOC/GO", "", true),
-      // TODO unicode vs ascii case sensitivity
+      // [TODO] unicode vs ascii case sensitivity
       // ("/π", "/Π", false)
       // ("/π/", "/Π", true),
       // ("/u/ÄPFÊL/", "/u/äpfêl/", false)

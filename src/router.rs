@@ -121,6 +121,7 @@ mod tests {
   #[test]
   #[should_panic(expected = "path must begin with '/' in path 'invalid'")]
   fn handle_invalid_path() {
+    use crate::request::Request;
     use crate::router::{Params, Router};
     use hyper::{Body, Method, Response};
 
@@ -129,7 +130,7 @@ mod tests {
     router.handle(
       Method::GET,
       "invalid",
-      |_req: crate::Request, _: Params| -> crate::Response { Response::new(Body::from("test")) },
+      |_req: Request, _: Params| -> Response<Body> { Response::new(Body::from("test")) },
     );
   }
 }

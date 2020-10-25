@@ -1,9 +1,9 @@
 use crate::handler::{Extract, Factory, Handler};
-use crate::request::FromRequest;
+use crate::request::{FromRequest, Request};
 use crate::response::ToReponse;
 use futures::future::{Future, FutureExt, LocalBoxFuture};
 use hyper::service::Service;
-use hyper::{Response};
+use hyper::{Body, Response};
 use std::task::{Context, Poll};
 
 type BoxedRouteService<Req, Res> = Box<
@@ -20,7 +20,7 @@ type BoxedRouteService<Req, Res> = Box<
 /// Route uses builder-like pattern for configuration.
 /// If handler is not explicitly set, default *404 Not Found* handler is used.
 pub struct Route {
-  pub handler: BoxedRouteService<crate::Request, crate::Response>,
+  pub handler: BoxedRouteService<Request, Response<Body>>,
 }
 
 impl Route {
@@ -37,25 +37,26 @@ impl Route {
   }
 }
 
-struct RouteService<T: Service<crate::Request>> {
+struct RouteService<T: Service<Request>> {
   service: T,
 }
 
 impl<T> RouteService<T>
 where
-  T: Service<crate::Request, Response = crate::Response, Error = (hyper::Error, crate::Request)>,
+  T::Future: 'static,
+  T: Service<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
 {
   fn new(service: T) -> Self {
     RouteService { service }
   }
 }
 
-impl<T> Service<crate::Request> for RouteService<T>
+impl<T> Service<Request> for RouteService<T>
 where
   T::Future: 'static,
-  T: Service<crate::Request, Response = crate::Response, Error = (hyper::Error, crate::Request)>,
+  T: Service<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
 {
-  type Response = crate::Response;
+  type Response = Response<Body>;
   type Error = hyper::Error;
   type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -63,13 +64,16 @@ where
     self.service.poll_ready(cx).map_err(|(e, _)| e)
   }
 
-  fn call(&mut self, req: crate::Request) -> Self::Future {
+  fn call(&mut self, req: Request) -> Self::Future {
     self
       .service
       .call(req)
       .map(|res| match res {
         Ok(res) => Ok(res),
-        Err((_, req)) => Ok(Response::builder().body(req.into_body()).unwrap()),
+        Err((_err, _req)) => Ok(
+          // [TODO] error response
+          Response::new(Body::default()),
+        ),
       })
       .boxed_local()
   }
