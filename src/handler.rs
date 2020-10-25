@@ -238,15 +238,3 @@ mod m {
   factory_tuple!((0, A), (1, B), (2, C), (3, D), (4, E), (5, F), (6, G), (7, H), (8, I));
   factory_tuple!((0, A), (1, B), (2, C), (3, D), (4, E), (5, F), (6, G), (7, H), (8, I), (9, J));
 }
-
-#[cfg(test)]
-mod test {
-  use crate::handler::Handler;
-  use futures::future::ready;
-  use hyper::Response;
-
-  #[test]
-  fn test() {
-    Handler::new(|| ready(Response::default()));
-  }
-}

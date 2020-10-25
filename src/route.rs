@@ -78,3 +78,29 @@ where
       .boxed_local()
   }
 }
+
+#[cfg(test)]
+mod test {
+  use crate::request::Request;
+  use crate::route::Route;
+  use hyper::{Body, Response};
+
+  #[test]
+  fn test() {
+    Route::new(index);
+    Route::new(index1);
+    Route::new(index2);
+  }
+
+  async fn index() -> Response<Body> {
+    Response::default()
+  }
+
+  async fn index1(_: Request) -> Response<Body> {
+    Response::default()
+  }
+
+  async fn index2(_: Request, _: Request) -> Response<Body> {
+    Response::default()
+  }
+}
