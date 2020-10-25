@@ -5,7 +5,7 @@ use hyper::{Body, Error, Response};
 /// Trait implemented by types that can be converted to a http response.
 ///
 /// Types that implement this trait can be used as the return type of a handler.
-pub trait ToReponse {
+pub trait ToResponse {
   /// The associated error which can be returned.
   type Error: Into<Error>;
 
@@ -16,7 +16,7 @@ pub trait ToReponse {
   fn respond_to(self, req: &Request) -> Self::Future;
 }
 
-impl ToReponse for Response<Body> {
+impl ToResponse for Response<Body> {
   type Error = Error;
   type Future = Ready<Result<Response<Body>, Error>>;
 

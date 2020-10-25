@@ -1,6 +1,6 @@
 use crate::handler::{Extract, Factory, Handler};
 use crate::request::{FromRequest, Request};
-use crate::response::ToReponse;
+use crate::response::ToResponse;
 use futures::future::{Future, FutureExt, LocalBoxFuture};
 use hyper::service::Service;
 use hyper::{Body, Response};
@@ -29,7 +29,7 @@ impl Route {
     F: Factory<T, R, U>,
     T: FromRequest + 'static,
     R: Future<Output = U> + 'static,
-    U: ToReponse + 'static,
+    U: ToResponse + 'static,
   {
     Route {
       handler: Box::new(RouteService::new(Extract::new(Handler::new(handler)))),

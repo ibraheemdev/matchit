@@ -1,7 +1,7 @@
 #![allow(clippy::unknown_clippy_lints)]
 
 use crate::request::{FromRequest, Request};
-use crate::response::ToReponse;
+use crate::response::ToResponse;
 use futures::future::Future;
 use futures::ready;
 use hyper::service::Service;
@@ -15,7 +15,7 @@ use std::task::{Context, Poll};
 pub trait Factory<T, R, O>: Clone + 'static
 where
   R: Future<Output = O>,
-  O: ToReponse,
+  O: ToResponse,
 {
   fn call(&self, param: T) -> R;
 }
@@ -24,7 +24,7 @@ impl<F, R, O> Factory<(), R, O> for F
 where
   F: Fn() -> R + Clone + 'static,
   R: Future<Output = O>,
-  O: ToReponse,
+  O: ToResponse,
 {
   fn call(&self, _: ()) -> R {
     (self)()
@@ -35,7 +35,7 @@ pub struct Handler<F, T, R, O>
 where
   F: Factory<T, R, O>,
   R: Future<Output = O>,
-  O: ToReponse,
+  O: ToResponse,
 {
   handler: F,
   _t: PhantomData<(T, R, O)>,
@@ -45,7 +45,7 @@ impl<F, T, R, O> Handler<F, T, R, O>
 where
   F: Factory<T, R, O>,
   R: Future<Output = O>,
-  O: ToReponse,
+  O: ToResponse,
 {
   pub fn new(handler: F) -> Self {
     Handler {
@@ -59,7 +59,7 @@ impl<F, T, R, O> Clone for Handler<F, T, R, O>
 where
   F: Factory<T, R, O>,
   R: Future<Output = O>,
-  O: ToReponse,
+  O: ToResponse,
 {
   fn clone(&self) -> Self {
     Handler {
@@ -73,7 +73,7 @@ impl<F, T, R, O> Service<(T, Request)> for Handler<F, T, R, O>
 where
   F: Factory<T, R, O>,
   R: Future<Output = O>,
-  O: ToReponse,
+  O: ToResponse,
 {
   type Response = Response<Body>;
   type Error = Infallible;
@@ -96,7 +96,7 @@ where
 pub struct HandlerServiceResponse<T, R>
 where
   T: Future<Output = R>,
-  R: ToReponse,
+  R: ToResponse,
 {
   #[pin]
   fut: T,
@@ -108,7 +108,7 @@ where
 impl<T, R> Future for HandlerServiceResponse<T, R>
 where
   T: Future<Output = R>,
-  R: ToReponse,
+  R: ToResponse,
 {
   type Output = Result<Response<Body>, Infallible>;
 
@@ -215,7 +215,7 @@ macro_rules! factory_tuple ({ $(($n:tt, $T:ident)),+} => {
   impl<Func, $($T,)+ Res, O> Factory<($($T,)+), Res, O> for Func
   where Func: Fn($($T,)+) -> Res + Clone + 'static,
     Res: Future<Output = O>,
-    O: ToReponse,
+    O: ToResponse,
   {
     fn call(&self, param: ($($T,)+)) -> Res {
       (self)($(param.$n,)+)
