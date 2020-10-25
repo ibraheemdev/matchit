@@ -1,4 +1,4 @@
-//! This radix tree implementation was ported from [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter)
+//! This radix tree implementation was derived from [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter)
 //! so the license from it's repository is included below:
 //! ```ignore
 //! BSD 3-Clause License
