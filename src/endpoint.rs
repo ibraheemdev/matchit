@@ -6,7 +6,7 @@ use hyper::service::Service;
 use hyper::{Body, Response};
 use std::task::{Context, Poll};
 
-type BoxedRouteService<Req, Res> = Box<
+type BoxedEndpointService<Req, Res> = Box<
   dyn Service<
     Req,
     Response = Res,
@@ -15,15 +15,12 @@ type BoxedRouteService<Req, Res> = Box<
   >,
 >;
 
-/// Resource route definition
-///
-/// Route uses builder-like pattern for configuration.
-/// If handler is not explicitly set, default *404 Not Found* handler is used.
-pub struct Route {
-  pub handler: BoxedRouteService<Request, Response<Body>>,
+/// Resource Endpoint definition
+pub struct Endpoint {
+  pub handler: BoxedEndpointService<Request, Response<Body>>,
 }
 
-impl Route {
+impl Endpoint {
   pub fn new<F, T, R, U>(handler: F) -> Self
   where
     F: Factory<T, R, U>,
@@ -31,27 +28,27 @@ impl Route {
     R: Future<Output = U> + 'static,
     U: ToResponse + 'static,
   {
-    Route {
-      handler: Box::new(RouteService::new(Extract::new(Handler::new(handler)))),
+    Endpoint {
+      handler: Box::new(EndpointService::new(Extract::new(Handler::new(handler)))),
     }
   }
 }
 
-struct RouteService<T: Service<Request>> {
+struct EndpointService<T: Service<Request>> {
   service: T,
 }
 
-impl<T> RouteService<T>
+impl<T> EndpointService<T>
 where
   T::Future: 'static,
   T: Service<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
 {
   fn new(service: T) -> Self {
-    RouteService { service }
+    EndpointService { service }
   }
 }
 
-impl<T> Service<Request> for RouteService<T>
+impl<T> Service<Request> for EndpointService<T>
 where
   T::Future: 'static,
   T: Service<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
@@ -81,15 +78,15 @@ where
 
 #[cfg(test)]
 mod test {
+  use crate::endpoint::Endpoint;
   use crate::request::Request;
-  use crate::route::Route;
   use hyper::{Body, Response};
 
   #[test]
   fn test() {
-    Route::new(index);
-    Route::new(index1);
-    Route::new(index2);
+    Endpoint::new(index);
+    Endpoint::new(index1);
+    Endpoint::new(index2);
   }
 
   async fn index() -> Response<Body> {
