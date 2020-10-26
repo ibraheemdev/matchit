@@ -54,95 +54,65 @@
 //! └-
 //! ```
 //!
-use crate::endpoint::Endpoint;
-use http::Method;
-use std::cmp::{min, Ordering};
+use std::cmp::{min, Eq, Ordering};
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::mem;
 use std::ops::Index;
 use std::str;
 
 /// Router is container which can be used to dispatch requests to different
 /// handler functions via configurable routes
-pub struct Router {
-  pub methods: HashMap<Method, Node<Endpoint>>,
+pub struct Router<K: Eq + Hash, V> {
+  pub map: HashMap<K, Node<V>>,
 }
 
-impl Default for Router {
+impl<K: Eq + Hash, V> Default for Router<K, V> {
   fn default() -> Self {
     Router {
-      methods: HashMap::with_capacity(7),
+      map: HashMap::new(),
     }
   }
 }
 
-// The route returned by `lookup`
-pub struct Route<'a, T> {
-  pub endpoint: &'a T,
-  pub params: Params,
-}
+impl<K: Eq + Hash, V> Router<K, V> {
+  pub fn with_capacity(capacity: usize) -> Self {
+    Router {
+      map: HashMap::with_capacity(capacity),
+    }
+  }
 
-impl Router {
-  /// Add registers a new request handle with the given path and method.
-  /// For GET, POST, PUT, PATCH and DELETE requests, the respective shortcut
-  /// functions can be used.
-  pub fn add(&mut self, method: Method, path: &str, handle: Endpoint) {
+  /// Add registers a new request handle with the given key and value in the route map
+  pub fn add(&mut self, key: K, value: V, path: &str) {
     if !path.starts_with('/') {
       panic!("path must begin with '/' in path '{}'", path);
     }
 
     self
-      .methods
-      .entry(method)
+      .map
+      .entry(key)
       .or_insert_with(Node::default)
-      .add_route(path, handle);
+      .add_route(path, value);
   }
 
-  /// Allows the manual lookup of a method and path.
-  /// Returns the handle function and the path parameter values if the path is found.
-  /// If no handle can be found, a TSR (trailing slash redirect) recommendation is
-  /// made if a handle exists with an extra (without the) trailing slash for the
+  /// Allows the manual lookup of a path in the route map.
+  /// Returns the value and the path parameter values if the path is found.
+  /// If no match can be found, a TSR (trailing slash redirect) recommendation is
+  /// made if a match exists with an extra (without the) trailing slash for the
   /// given path.
-  pub fn lookup(&mut self, method: &Method, path: &str) -> Result<Route<Endpoint>, bool> {
+  pub fn lookup(&mut self, key: &K, path: &str) -> Result<RouteLookup<V>, bool> {
     self
-      .methods
-      .get_mut(method)
+      .map
+      .get_mut(key)
       .map(|n| n.get_value(path))
       .unwrap_or(Err(false))
   }
+}
 
-  /// returns a list of the allowed methods for a specific path
-  /// eg: 'GET, PATCH, OPTIONS'
-  pub fn allowed(&self, path: &str, req_method: Method) -> String {
-    let mut allowed: Vec<Method> = Vec::new();
-    match path {
-      "*" => {
-        for method in self.methods.keys() {
-          if method != Method::OPTIONS {
-            allowed.push(method.clone());
-          }
-        }
-      }
-      _ => {
-        for method in self.methods.keys() {
-          if method == req_method || method == Method::OPTIONS {
-            continue;
-          }
-          if let Some(tree) = self.methods.get(&method.clone()) {
-            if tree.get_value(path).is_ok() {
-              allowed.push(method.clone());
-            }
-          };
-        }
-      }
-    };
-
-    if !allowed.is_empty() {
-      allowed.push(Method::OPTIONS)
-    }
-
-    allowed.iter().map(|method| method.to_string()).collect()
-  }
+// The response returned by `lookup`
+pub struct RouteLookup<'a, V> {
+  pub value: &'a V,
+  pub params: Params,
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
@@ -211,7 +181,7 @@ pub enum NodeType {
 /// A node in radix tree ordered by priority
 /// priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
-// #[derive(Debug)]
+#[derive(Debug)]
 pub struct Node<T> {
   path: Vec<u8>,
   wild_child: bool,
@@ -521,12 +491,12 @@ impl<T> Node<T> {
   /// If no value can be found, a TSR (trailing slash redirect) recommendation is
   /// made if a value exists with an extra (without the) trailing slash for the
   /// given path.
-  pub fn get_value(&self, path: &str) -> Result<Route<T>, bool> {
+  pub fn get_value(&self, path: &str) -> Result<RouteLookup<T>, bool> {
     self.get_value_helper(path.as_ref(), Params::default())
   }
 
   // outer loop for walking the tree to get a path's value
-  fn get_value_helper(&self, mut path: &[u8], ps: Params) -> Result<Route<T>, bool> {
+  fn get_value_helper(&self, mut path: &[u8], ps: Params) -> Result<RouteLookup<T>, bool> {
     let prefix = self.path.clone();
     if path.len() > prefix.len() {
       if prefix == &path[..prefix.len()] {
@@ -554,11 +524,8 @@ impl<T> Node<T> {
     } else if path == prefix {
       // We should have reached the node containing the value.
       // Check if this node has a value registered.
-      if let Some(endpoint) = self.value.as_ref() {
-        return Ok(Route {
-          endpoint,
-          params: ps,
-        });
+      if let Some(value) = self.value.as_ref() {
+        return Ok(RouteLookup { value, params: ps });
       }
 
       // If there is no value for this route, but this route has a
@@ -594,7 +561,7 @@ impl<T> Node<T> {
   }
 
   // helper function for handling a wildcard child used by `get_value`
-  fn handle_wild_child(&self, mut path: &[u8], mut p: Params) -> Result<Route<T>, bool> {
+  fn handle_wild_child(&self, mut path: &[u8], mut p: Params) -> Result<RouteLookup<T>, bool> {
     match self.node_type {
       NodeType::Param => {
         // find param end (either '/' or path end)
@@ -621,11 +588,8 @@ impl<T> Node<T> {
           return Err(tsr);
         }
 
-        if let Some(endpoint) = self.value.as_ref() {
-          return Ok(Route {
-            endpoint,
-            params: p,
-          });
+        if let Some(value) = self.value.as_ref() {
+          return Ok(RouteLookup { value, params: p });
         } else if self.children.len() == 1 {
           // No value found. Check if a value for this path + a
           // trailing slash exists for TSR recommendation
@@ -642,10 +606,7 @@ impl<T> Node<T> {
         });
 
         match self.value.as_ref() {
-          Some(endpoint) => Ok(Route {
-            endpoint,
-            params: p,
-          }),
+          Some(value) => Ok(RouteLookup { value, params: p }),
           None => Err(false),
         }
       }
@@ -984,7 +945,7 @@ mod tests {
           if request.nil_value {
             panic!("Expected nil value for route '{}'", request.path);
           }
-          let res = (route.endpoint)();
+          let res = (route.value)();
           if res != request.route {
             panic!(
               "Wrong value for route '{}'. Expected '{}', found '{}')",
