@@ -9,6 +9,4 @@
 
 # License
 
-This repository is licensed under the MIT license as stated in [LICENSE](https://github.com/ibraheemdev/turbo-rs/blob/master/LICENSE).
-
-The radix tree implementation (`src/tree.rs`) was derived from [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter), and so the license from it's repository (BSD 3-Clause License) is included in `src/tree.rs`.
+See the LICENSE file for licensing information as it pertains to files in this repository.
