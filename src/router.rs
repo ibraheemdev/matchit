@@ -113,6 +113,9 @@ impl<K: Eq + Hash, V> Router<K, V> {
 pub struct RouteLookup<'a, V> {
   pub value: &'a V,
   pub params: Params,
+  // the values of all the parent nodes
+  // of the matching node, including the node itself
+  pub parent_values: Vec<&'a V>,
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
@@ -181,18 +184,17 @@ pub enum NodeType {
 /// A node in radix tree ordered by priority
 /// priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
-#[derive(Debug)]
-pub struct Node<T> {
+pub struct Node<V> {
   path: Vec<u8>,
   wild_child: bool,
   node_type: NodeType,
   indices: Vec<u8>,
-  children: Vec<Box<Node<T>>>,
-  value: Option<T>,
+  children: Vec<Box<Node<V>>>,
+  value: Option<V>,
   priority: u32,
 }
 
-impl<T> Default for Node<T> {
+impl<V> Default for Node<V> {
   fn default() -> Self {
     Node {
       path: Vec::new(),
@@ -205,7 +207,8 @@ impl<T> Default for Node<T> {
     }
   }
 }
-impl<T> Node<T> {
+
+impl<V> Node<V> {
   /// increments priority of the given child and reorders if necessary
   /// returns the new position (index) of the child
   fn increment_child_prio(&mut self, pos: usize) -> usize {
@@ -235,7 +238,7 @@ impl<T> Node<T> {
   }
 
   /// add_route adds a node with the given value to the path.
-  pub fn add_route(&mut self, path: &str, value: T) {
+  pub fn add_route(&mut self, path: &str, value: V) {
     let full_path = <&str>::clone(&path);
     self.priority += 1;
 
@@ -248,7 +251,7 @@ impl<T> Node<T> {
     self.add_route_helper(path.as_ref(), full_path, value);
   }
 
-  fn add_route_helper(&mut self, mut path: &[u8], full_path: &str, value: T) {
+  fn add_route_helper(&mut self, mut path: &[u8], full_path: &str, value: V) {
     // Find the longest common prefix.
     // This also implies that the common prefix contains no ':' or '*'
     // since the existing key can't contain those chars.
@@ -327,7 +330,7 @@ impl<T> Node<T> {
     }
   }
 
-  fn wild_child_conflict(&mut self, path: &[u8], full_path: &str, value: T) {
+  fn wild_child_conflict(&mut self, path: &[u8], full_path: &str, value: V) {
     self.priority += 1;
 
     // Check if the wildcard matches
@@ -363,7 +366,7 @@ impl<T> Node<T> {
     }
   }
 
-  fn insert_child(&mut self, mut path: &[u8], full_path: &str, value: T) {
+  fn insert_child(&mut self, mut path: &[u8], full_path: &str, value: V) {
     let (wildcard, wildcard_index, valid) = find_wildcard(path);
 
     let wildcard = match wildcard_index {
@@ -491,12 +494,17 @@ impl<T> Node<T> {
   /// If no value can be found, a TSR (trailing slash redirect) recommendation is
   /// made if a value exists with an extra (without the) trailing slash for the
   /// given path.
-  pub fn get_value(&self, path: &str) -> Result<RouteLookup<T>, bool> {
-    self.get_value_helper(path.as_ref(), Params::default())
+  pub fn get_value(&self, path: &str) -> Result<RouteLookup<V>, bool> {
+    self.get_value_helper(path.as_ref(), Params::default(), Vec::new())
   }
 
   // outer loop for walking the tree to get a path's value
-  fn get_value_helper(&self, mut path: &[u8], ps: Params) -> Result<RouteLookup<T>, bool> {
+  fn get_value_helper<'a>(
+    &'a self,
+    mut path: &[u8],
+    params: Params,
+    mut parent_values: Vec<&'a V>,
+  ) -> Result<RouteLookup<V>, bool> {
     let prefix = self.path.clone();
     if path.len() > prefix.len() {
       if prefix == &path[..prefix.len()] {
@@ -509,7 +517,8 @@ impl<T> Node<T> {
           let idxc = path[0];
           for i in 0..self.indices.len() {
             if idxc == self.indices[i] {
-              return self.children[i].get_value_helper(path, ps);
+              parent_values = self.collect_parents(parent_values);
+              return self.children[i].get_value_helper(path, params, parent_values);
             }
           }
           // Nothing found.
@@ -519,13 +528,18 @@ impl<T> Node<T> {
           return Err(tsr);
         }
 
-        return self.children[0].handle_wild_child(path, ps);
+        parent_values = self.collect_parents(parent_values);
+        return self.children[0].handle_wild_child(path, params, parent_values);
       }
     } else if path == prefix {
       // We should have reached the node containing the value.
       // Check if this node has a value registered.
       if let Some(value) = self.value.as_ref() {
-        return Ok(RouteLookup { value, params: ps });
+        return Ok(RouteLookup {
+          value,
+          params,
+          parent_values,
+        });
       }
 
       // If there is no value for this route, but this route has a
@@ -561,7 +575,12 @@ impl<T> Node<T> {
   }
 
   // helper function for handling a wildcard child used by `get_value`
-  fn handle_wild_child(&self, mut path: &[u8], mut p: Params) -> Result<RouteLookup<T>, bool> {
+  fn handle_wild_child<'a>(
+    &'a self,
+    mut path: &[u8],
+    mut params: Params,
+    mut parent_values: Vec<&'a V>,
+  ) -> Result<RouteLookup<V>, bool> {
     match self.node_type {
       NodeType::Param => {
         // find param end (either '/' or path end)
@@ -570,7 +589,7 @@ impl<T> Node<T> {
           end += 1;
         }
 
-        p.push(Param {
+        params.push(Param {
           key: String::from_utf8(self.path[1..].to_vec()).unwrap(),
           value: String::from_utf8(path[..end].to_vec()).unwrap(),
         });
@@ -580,7 +599,8 @@ impl<T> Node<T> {
           if !self.children.is_empty() {
             path = &path[end..];
 
-            return self.children[0].get_value_helper(path, p);
+            parent_values = self.collect_parents(parent_values);
+            return self.children[0].get_value_helper(path, params, parent_values);
           }
 
           // ... but we can't
@@ -589,7 +609,11 @@ impl<T> Node<T> {
         }
 
         if let Some(value) = self.value.as_ref() {
-          return Ok(RouteLookup { value, params: p });
+          return Ok(RouteLookup {
+            value,
+            params,
+            parent_values,
+          });
         } else if self.children.len() == 1 {
           // No value found. Check if a value for this path + a
           // trailing slash exists for TSR recommendation
@@ -600,13 +624,17 @@ impl<T> Node<T> {
         Err(false)
       }
       NodeType::CatchAll => {
-        p.push(Param {
+        params.push(Param {
           key: String::from_utf8(self.path[2..].to_vec()).unwrap(),
           value: String::from_utf8(path.to_vec()).unwrap(),
         });
 
         match self.value.as_ref() {
-          Some(value) => Ok(RouteLookup { value, params: p }),
+          Some(value) => Ok(RouteLookup {
+            value,
+            params,
+            parent_values,
+          }),
           None => Err(false),
         }
       }
@@ -614,6 +642,20 @@ impl<T> Node<T> {
     }
   }
 
+  fn collect_parents<'a>(&'a self, mut values: Vec<&'a V>) -> Vec<&'a V> {
+    if let Some(value) = self.value.as_ref() {
+      // [TODO]: Collector trait
+      // if value.should_collect() {
+      values.push(value)
+      // }
+    };
+    values
+  }
+
+  /// Makes a case-insensitive lookup of the given path and tries to find a handler.
+  /// It can optionally also fix trailing slashes.
+  /// It returns the case-corrected path and a bool indicating whether the lookup
+  /// was successful.
   pub fn find_case_insensitive_path(&self, path: &str, fix_trailing_slash: bool) -> Option<String> {
     let mut insensitive_path = Vec::with_capacity(path.len() + 1);
     let found = self.find_case_insensitive_path_helper(
@@ -908,23 +950,23 @@ mod tests {
 
   struct TestRequest {
     path: &'static str,
-    nil_value: bool,
+    should_be_nil: bool,
     route: &'static str,
-    ps: Params,
+    params: Params,
   }
 
   impl TestRequest {
     pub fn new(
       path: &'static str,
-      nil_value: bool,
+      should_be_nil: bool,
       route: &'static str,
-      ps: Params,
+      params: Params,
     ) -> TestRequest {
       TestRequest {
         path,
-        nil_value,
+        should_be_nil,
         route,
-        ps,
+        params,
       }
     }
   }
@@ -937,30 +979,32 @@ mod tests {
 
       match res {
         Err(_) => {
-          if !request.nil_value {
+          if !request.should_be_nil {
             panic!("Expected non-nil value for route '{}'", request.path);
           }
         }
-        Ok(route) => {
-          if request.nil_value {
+        Ok(result) => {
+          if request.should_be_nil {
             panic!("Expected nil value for route '{}'", request.path);
           }
-          let res = (route.value)();
-          if res != request.route {
+          let value = (result.value)();
+          if value != request.route {
             panic!(
               "Wrong value for route '{}'. Expected '{}', found '{}')",
-              request.path, res, request.route
+              request.path, value, request.route
             );
           }
-          if route.params != request.ps {
-            panic!("Wrong params for route '{}'", request.path);
-          }
+          assert_eq!(
+            result.params, request.params,
+            "Wrong params for route '{}'",
+            request.path
+          );
         }
       };
     }
   }
 
-  fn check_priorities<T: Fn() -> String>(n: &mut Node<T>) -> u32 {
+  fn check_priorities<F: Fn() -> String>(n: &mut Node<F>) -> u32 {
     let mut prio: u32 = 0;
     for i in 0..n.children.len() {
       prio += check_priorities(&mut *n.children[i]);
@@ -1017,7 +1061,7 @@ mod tests {
       "/doc/",
       "/doc/go_faq.html",
       "/doc/go1.html",
-      "/α",
+      "/ʯ",
       "/β",
     ];
 
@@ -1037,7 +1081,7 @@ mod tests {
         TestRequest::new("/cona", true, "", Params::default()), // key mismatch
         TestRequest::new("/no", true, "", Params::default()),  // no matching child
         TestRequest::new("/ab", false, "/ab", Params::default()),
-        TestRequest::new("/α", false, "/α", Params::default()),
+        TestRequest::new("/ʯ", false, "/ʯ", Params::default()),
         TestRequest::new("/β", false, "/β", Params::default()),
       ],
     );
@@ -1677,6 +1721,42 @@ mod tests {
         tree.add_route(route, fake_value(route));
       }
       tree.add_route(conflict, fake_value(conflict));
+    }
+  }
+
+  #[test]
+  fn test_tree_get_parent_values() {
+    let requests = vec![
+      ("/", vec![]),
+      ("/users", vec!["/"]),
+      ("/users/:id", vec!["/", "/users"]),
+      ("/users/:id/edit", vec!["/", "/users", "/users/:id"]),
+      ("/blog", vec!["/"]),
+      ("/blog/pages", vec!["/", "/blog"]),
+      ("/blog/pages/:id", vec!["/", "/blog", "/blog/pages"]),
+      ("/t/:id/other/another", vec!["/"]),
+      ("/other/:id", vec!["/"]),
+      ("/userst/other/another", vec!["/", "/users"]),
+      ("/wild/*wildcard", vec!["/"]),
+    ];
+
+    let mut tree = Node::default();
+    for request in &requests {
+      tree.add_route(request.0, fake_value(request.0))
+    }
+
+    for request in requests {
+      let res = tree.get_value(request.0);
+      if let Ok(res) = res {
+        assert_eq!(
+          res
+            .parent_values
+            .iter()
+            .map(|x| x())
+            .collect::<Vec<String>>(),
+          request.1
+        );
+      }
     }
   }
 
