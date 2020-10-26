@@ -1,7 +1,8 @@
 use crate::handler::{Extract, Factory, Handler};
 use crate::request::{FromRequest, Request};
 use crate::response::ToResponse;
-use futures::future::{Future, FutureExt, LocalBoxFuture};
+use futures::future::{ready, Future, FutureExt, LocalBoxFuture};
+use http::{Method, StatusCode};
 use hyper::service::Service;
 use hyper::{Body, Response};
 use std::task::{Context, Poll};
@@ -15,22 +16,145 @@ type BoxedEndpointService<Req, Res> = Box<
   >,
 >;
 
-/// Resource Endpoint definition
+/// Resource endpoint definition
+///
+/// Endpoint uses builder-like pattern for configuration.
 pub struct Endpoint {
+  pub method: Option<Method>,
   pub handler: BoxedEndpointService<Request, Response<Body>>,
 }
 
 impl Endpoint {
-  pub fn new<F, T, R, U>(handler: F) -> Self
+  #[allow(clippy::new_without_default)]
+  /// Create new endpoint which matches any request
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::new().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn new() -> Self {
+    Endpoint {
+      method: None,
+      handler: Box::new(EndpointService::new(Extract::new(Handler::new(|| {
+        ready(
+          Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::default())
+            .unwrap(),
+        )
+      })))),
+    }
+  }
+
+  /// Create *endpoint* for http `GET` requests.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::get().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn method(method: Method) -> Endpoint {
+    Endpoint::new().set_method(method)
+  }
+
+  /// Create *endpoint* for http `GET` requests.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::patch().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn get() -> Endpoint {
+    Endpoint::new().set_method(Method::GET)
+  }
+
+  /// Create *endpoint* for http `POST` requests.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::post().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn post() -> Endpoint {
+    Endpoint::new().set_method(Method::POST)
+  }
+
+  /// Create *endpoint* for http `PUT` requests.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::put().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn put() -> Endpoint {
+    Endpoint::new().set_method(Method::PUT)
+  }
+
+  /// Create *endpoint* for http `PATCH` requests.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::patch().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn patch() -> Endpoint {
+    Endpoint::new().set_method(Method::PATCH)
+  }
+
+  /// Create *endpoint* for http `DELETE` requests.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::delete().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn delete() -> Endpoint {
+    Endpoint::new().set_method(Method::DELETE)
+  }
+
+  /// Create *endpoint* for http `HEAD` requests.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::head().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn head() -> Endpoint {
+    Endpoint::new().set_method(Method::HEAD)
+  }
+
+  /// Set handler function, use request extractors for parameters.
+  /// ```rust
+  /// use turbo_rs::{Endpoint, Response, Body};
+  ///
+  /// Endpoint::new().to(|| async {
+  ///   Response::new(Body::default())
+  /// });
+  /// ```
+  pub fn to<F, T, R, U>(mut self, handler: F) -> Self
   where
     F: Factory<T, R, U>,
     T: FromRequest + 'static,
     R: Future<Output = U> + 'static,
     U: ToResponse + 'static,
   {
-    Endpoint {
-      handler: Box::new(EndpointService::new(Extract::new(Handler::new(handler)))),
-    }
+    self.handler = Box::new(EndpointService::new(Extract::new(Handler::new(handler))));
+    self
+  }
+
+  /// Assign the endpoint to an HTTP Method.
+  pub fn set_method(mut self, method: Method) -> Self {
+    self.method = Some(method);
+    self
   }
 }
 
@@ -73,31 +197,5 @@ where
         ),
       })
       .boxed_local()
-  }
-}
-
-#[cfg(test)]
-mod test {
-  use crate::endpoint::Endpoint;
-  use crate::request::Request;
-  use hyper::{Body, Response};
-
-  #[test]
-  fn test() {
-    Endpoint::new(index);
-    Endpoint::new(index1);
-    Endpoint::new(index2);
-  }
-
-  async fn index() -> Response<Body> {
-    Response::default()
-  }
-
-  async fn index1(_: Request) -> Response<Body> {
-    Response::default()
-  }
-
-  async fn index2(_: Request, _: Request) -> Response<Body> {
-    Response::default()
   }
 }
