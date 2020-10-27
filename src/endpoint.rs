@@ -1,19 +1,19 @@
-use crate::handler::{Extract, Factory, Handler};
+use crate::handler::{Extractor, Factory, Handler};
 use crate::request::{FromRequest, Request};
 use crate::response::ToResponse;
-use futures::future::{ready, Future, FutureExt, LocalBoxFuture};
+use futures::future::{ready, BoxFuture, Future, FutureExt};
 use http::{Method, StatusCode};
 use hyper::service::Service;
 use hyper::{Body, Response};
 use std::task::{Context, Poll};
 
-type BoxedEndpointService<Req, Res> = Box<
+type BoxedMakeEndpoint<Req, Res> = Box<
   dyn Service<
-    Req,
-    Response = Res,
-    Error = hyper::Error,
-    Future = LocalBoxFuture<'static, Result<Res, hyper::Error>>,
-  >,
+      Req,
+      Response = Res,
+      Error = hyper::Error,
+      Future = BoxFuture<'static, Result<Res, hyper::Error>>,
+    > + Send,
 >;
 
 /// Resource endpoint definition
@@ -21,7 +21,7 @@ type BoxedEndpointService<Req, Res> = Box<
 /// Endpoint uses builder-like pattern for configuration.
 pub struct Endpoint {
   pub method: Option<Method>,
-  pub handler: BoxedEndpointService<Request, Response<Body>>,
+  pub handler: BoxedMakeEndpoint<Request, Response<Body>>,
 }
 
 impl Endpoint {
@@ -37,7 +37,7 @@ impl Endpoint {
   pub fn new() -> Self {
     Endpoint {
       method: None,
-      handler: Box::new(EndpointService::new(Extract::new(Handler::new(|| {
+      handler: Box::new(MakeEndpoint::new(Extractor::new(Handler::new(|| {
         ready(
           Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -142,12 +142,12 @@ impl Endpoint {
   /// ```
   pub fn to<F, T, R, U>(mut self, handler: F) -> Self
   where
-    F: Factory<T, R, U>,
+    F: Factory<T, R, U> + Send,
     T: FromRequest + 'static,
-    R: Future<Output = U> + 'static,
+    R: Future<Output = U> + Send + 'static,
     U: ToResponse + 'static,
   {
-    self.handler = Box::new(EndpointService::new(Extract::new(Handler::new(handler))));
+    self.handler = Box::new(MakeEndpoint::new(Extractor::new(Handler::new(handler))));
     self
   }
 
@@ -158,28 +158,28 @@ impl Endpoint {
   }
 }
 
-struct EndpointService<T: Service<Request>> {
+struct MakeEndpoint<T: Service<Request>> {
   service: T,
 }
 
-impl<T> EndpointService<T>
+impl<T> MakeEndpoint<T>
 where
   T::Future: 'static,
   T: Service<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
 {
   fn new(service: T) -> Self {
-    EndpointService { service }
+    MakeEndpoint { service }
   }
 }
 
-impl<T> Service<Request> for EndpointService<T>
+impl<T> Service<Request> for MakeEndpoint<T>
 where
-  T::Future: 'static,
+  T::Future: 'static + Send,
   T: Service<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
 {
   type Response = Response<Body>;
   type Error = hyper::Error;
-  type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
+  type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
   fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
     self.service.poll_ready(cx).map_err(|(e, _)| e)
@@ -196,6 +196,6 @@ where
           Response::new(Body::default()),
         ),
       })
-      .boxed_local()
+      .boxed()
   }
 }

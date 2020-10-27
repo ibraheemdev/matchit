@@ -10,11 +10,13 @@ pub mod router;
 
 // re-export common components
 #[doc(hidden)]
+pub use app::App;
+#[doc(hidden)]
 pub use endpoint::Endpoint;
 #[doc(hidden)]
 pub use http::{HeaderValue, Method, Response};
 #[doc(hidden)]
-pub use hyper::{Body, Error};
+pub use hyper::{Body, Error, StatusCode};
 #[doc(hidden)]
 pub use request::Request;
 

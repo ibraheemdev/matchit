@@ -137,28 +137,28 @@ where
   }
 }
 
-/// Extract arguments from handler
-pub struct Extract<T: FromRequest, S> {
+/// Extractor arguments from handler
+pub struct Extractor<T: FromRequest, S> {
   service: S,
   _t: PhantomData<T>,
 }
 
-impl<T: FromRequest, S> Extract<T, S> {
+impl<T: FromRequest, S> Extractor<T, S> {
   pub fn new(service: S) -> Self {
-    Extract {
+    Extractor {
       service,
       _t: PhantomData,
     }
   }
 }
 
-impl<T: FromRequest, S> Service<Request> for Extract<T, S>
+impl<T: FromRequest, S> Service<Request> for Extractor<T, S>
 where
   S: Service<(T, Request), Response = Response<Body>, Error = Infallible> + Clone,
 {
   type Response = Response<Body>;
   type Error = (hyper::Error, Request);
-  type Future = ExtractResponse<T, S>;
+  type Future = ExtractorResponse<T, S>;
 
   fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
     Poll::Ready(Ok(()))
@@ -167,7 +167,7 @@ where
   fn call(&mut self, req: Request) -> Self::Future {
     let fut = T::from_request(&req);
 
-    ExtractResponse {
+    ExtractorResponse {
       req,
       fut,
       fut_s: None,
@@ -177,7 +177,7 @@ where
 }
 
 #[pin_project::pin_project]
-pub struct ExtractResponse<T: FromRequest, S: Service<(T, Request)>> {
+pub struct ExtractorResponse<T: FromRequest, S: Service<(T, Request)>> {
   req: Request,
   service: S,
   #[pin]
@@ -186,7 +186,7 @@ pub struct ExtractResponse<T: FromRequest, S: Service<(T, Request)>> {
   fut_s: Option<S::Future>,
 }
 
-impl<T: FromRequest, S> Future for ExtractResponse<T, S>
+impl<T: FromRequest, S> Future for ExtractorResponse<T, S>
 where
   S: Service<(T, Request), Response = Response<Body>, Error = Infallible>,
 {
