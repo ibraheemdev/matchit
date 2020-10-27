@@ -28,7 +28,7 @@ impl Endpoint {
   #[allow(clippy::new_without_default)]
   /// Create new endpoint which matches any request
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::new().to(|| async {
   ///   Response::new(Body::default())
@@ -50,7 +50,7 @@ impl Endpoint {
 
   /// Create *endpoint* for http `GET` requests.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::get().to(|| async {
   ///   Response::new(Body::default())
@@ -62,7 +62,7 @@ impl Endpoint {
 
   /// Create *endpoint* for http `GET` requests.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::patch().to(|| async {
   ///   Response::new(Body::default())
@@ -74,7 +74,7 @@ impl Endpoint {
 
   /// Create *endpoint* for http `POST` requests.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::post().to(|| async {
   ///   Response::new(Body::default())
@@ -86,7 +86,7 @@ impl Endpoint {
 
   /// Create *endpoint* for http `PUT` requests.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::put().to(|| async {
   ///   Response::new(Body::default())
@@ -98,7 +98,7 @@ impl Endpoint {
 
   /// Create *endpoint* for http `PATCH` requests.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::patch().to(|| async {
   ///   Response::new(Body::default())
@@ -110,7 +110,7 @@ impl Endpoint {
 
   /// Create *endpoint* for http `DELETE` requests.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::delete().to(|| async {
   ///   Response::new(Body::default())
@@ -122,7 +122,7 @@ impl Endpoint {
 
   /// Create *endpoint* for http `HEAD` requests.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::head().to(|| async {
   ///   Response::new(Body::default())
@@ -134,7 +134,7 @@ impl Endpoint {
 
   /// Set handler function, use request extractors for parameters.
   /// ```rust
-  /// use turbo_rs::{Endpoint, Response, Body};
+  /// use turbofish::{Endpoint, Response, Body};
   ///
   /// Endpoint::new().to(|| async {
   ///   Response::new(Body::default())
