@@ -1,13 +1,6 @@
+use crate::Request;
 use futures::future::{ok, Future, Ready};
 use hyper::error::Error;
-use std::sync::Arc;
-
-/// `Request` is a `hyper::Request` wrapped in a reference-counting pointer.
-/// The request needs to be wrapped in a pointer in order to be passed around
-/// and cloned throughout the `turbofish` service chain
-// [TODO] find another way to deal with service chaining, `Arc` is too expensive
-#[derive(Clone)]
-pub struct Request(pub Arc<hyper::Request<hyper::Body>>);
 
 /// Trait implemented by types that can be extracted from request.
 ///

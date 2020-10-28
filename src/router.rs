@@ -1,10 +1,10 @@
-//! This radix tree implementation was derived from [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter)
-//!
 //! The router relies on a tree structure which makes heavy use of *common prefixes*,
 //! it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie)
 //! (or just [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a
-//! common prefix also share a common parent. Here is a short example what the routing
-//! tree for the `GET` request method could look like:
+//! common prefix also share a common parent. The radix tree implementation was derived
+//! from [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter)
+//!
+//! Here is a short example what the routing tree for the `GET` request method could look like:
 //!
 //! ```ignore
 //! Priority   Path             value
@@ -109,7 +109,8 @@ impl<K: Eq + Hash, V> Router<K, V> {
   }
 }
 
-// The response returned by `lookup`
+/// The response returned when getting the value for
+/// a specific path with `lookup`
 pub struct RouteLookup<'a, V> {
   pub value: &'a V,
   pub params: Params,
@@ -147,8 +148,7 @@ impl Default for Params {
 }
 
 impl Params {
-  /// ByName returns the value of the first Param which key matches the given name.
-  /// If no matching Param is found, an empty string is returned.
+  /// Returns the value of the first `Param` whose key matches the given name.
   pub fn by_name(&self, name: &str) -> Option<&str> {
     match self.0.iter().find(|param| param.key == name) {
       Some(param) => Some(&param.value),
@@ -160,6 +160,7 @@ impl Params {
     self.0.is_empty()
   }
 
+  /// Add a URL paramter to the list (`Param`)
   pub fn push(&mut self, p: Param) {
     self.0.push(p);
   }
@@ -173,12 +174,17 @@ impl Index<usize> for Params {
   }
 }
 
+/// The types of nodes the tree can hold
 #[derive(PartialEq, PartialOrd, Debug)]
 pub enum NodeType {
-  Static,
+  /// The root path
   Root,
+  /// A URL parameter, ex: `/:id`. See `Param`
   Param,
+  /// A wilcard parameter, ex: `/*static`
   CatchAll,
+  /// Anything else
+  Static,
 }
 
 /// A node in radix tree ordered by priority
@@ -1764,7 +1770,7 @@ mod tests {
   // [TODO]
   // #[should_panic(expected = "path must begin with '/' in path 'invalid'")]
   // fn handle_invalid_path() {
-  // use crate::request::Request;
+  // use crate::Request;
   // use crate::router::{Params, Router};
   // use hyper::{Body, Method, Response};
 

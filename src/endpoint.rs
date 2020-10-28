@@ -1,6 +1,7 @@
+use crate::extractors::FromRequest;
 use crate::handler::{Extractor, Factory, Handler};
-use crate::request::{FromRequest, Request};
-use crate::response::ToResponse;
+use crate::responder::ToResponse;
+use crate::Request;
 use futures::future::{ready, BoxFuture, Future, FutureExt};
 use http::{Method, StatusCode};
 use hyper::service::Service;

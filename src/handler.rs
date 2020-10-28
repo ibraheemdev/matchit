@@ -1,7 +1,8 @@
 #![allow(clippy::unknown_clippy_lints)]
 
-use crate::request::{FromRequest, Request};
-use crate::response::ToResponse;
+use crate::extractors::FromRequest;
+use crate::responder::ToResponse;
+use crate::Request;
 use futures::future::Future;
 use futures::ready;
 use hyper::service::Service;
