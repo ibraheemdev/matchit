@@ -61,7 +61,7 @@ use hyper::{Body, Error, Response};
 ///   }
 /// });
 /// ```
-pub trait ToResponse: Send {
+pub trait ToResponse: Send + Sync {
   /// The associated error which can be returned.
   type Error: Into<Error>;
 

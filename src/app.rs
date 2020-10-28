@@ -3,31 +3,41 @@ use crate::router::Router;
 use crate::{Body, Response, StatusCode};
 use futures::future::BoxFuture;
 use http::Method;
-use hyper::service::Service;
-use std::task::{Context, Poll};
+use hyper::service::{make_service_fn, service_fn};
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 pub struct App {
-  pub router: Router<Method, Endpoint>,
+  router: Router<Method, Endpoint>,
+  addr: SocketAddr,
+}
+
+impl Default for App {
+  fn default() -> Self {
+    App {
+      router: Router::default(),
+      addr: ([127, 0, 0, 1], 3000).into(),
+    }
+  }
 }
 
 impl App {
-  pub async fn serve(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let addr = ([127, 0, 0, 1], 3000).into();
-    hyper::Server::bind(&addr).serve(MakeApp()).await?;
+  pub async fn serve(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let app = Arc::new(self);
+    let addr = app.addr;
+    let service = make_service_fn(move |_| {
+      let app = app.clone();
+      async move { Ok::<_, Infallible>(service_fn(move |req| app.clone().serve_http(req))) }
+    });
+    hyper::Server::bind(&addr).serve(service).await?;
     Ok(())
   }
-}
 
-impl Service<http::Request<Body>> for App {
-  type Response = Response<Body>;
-  type Error = hyper::Error;
-  type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-  fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-    Poll::Ready(Ok(()))
-  }
-
-  fn call(&mut self, _: http::Request<Body>) -> Self::Future {
+  fn serve_http(
+    &self,
+    _: http::Request<Body>,
+  ) -> BoxFuture<'static, Result<Response<Body>, hyper::Error>> {
     let fut = async move {
       Ok(
         Response::builder()
@@ -36,90 +46,18 @@ impl Service<http::Request<Body>> for App {
           .unwrap(),
       )
     };
+
     Box::pin(fut)
   }
 }
 
-struct MakeApp();
-
-impl<T> Service<T> for MakeApp {
-  type Response = App;
-  type Error = hyper::Error;
-  type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-  fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-    Poll::Ready(Ok(()))
-  }
-
-  fn call(&mut self, _: T) -> Self::Future {
-    let fut = async move {
-      Ok(App {
-        router: Router::default(),
-      })
-    };
-    Box::pin(fut)
-  }
+pub struct AppBuilder {
+  addr: Option<SocketAddr>,
 }
 
-// use crate::endpoint::Endpoint;
-// use crate::router::Router;
-// use crate::{Body, Request, Response, StatusCode};
-// use futures::future::BoxFuture;
-// use http::Method;
-// use hyper::service::Service;
-// use std::task::{Context, Poll};
-
-// pub struct App {
-//   pub router: Router<Method, Endpoint>,
-// }
-
-// impl App {
-//   pub async fn serve(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//     let addr = ([127, 0, 0, 1], 3000).into();
-//     hyper::Server::bind(&addr).serve(MakeApp()).await?;
-//     Ok(())
-//   }
-// }
-
-// impl Service<http::Request<Body>> for App {
-//   type Response = Response<Body>;
-//   type Error = hyper::Error;
-//   type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-//   fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-//     Poll::Ready(Ok(()))
-//   }
-
-//   fn call(&mut self, _: http::Request<Body>) -> Self::Future {
-//     let fut = async move {
-//       Ok(
-//         Response::builder()
-//           .status(StatusCode::IM_USED)
-//           .body(Body::from("HEY!!!"))
-//           .unwrap(),
-//       )
-//     };
-//     Box::pin(fut)
-//   }
-// }
-
-// struct MakeApp();
-
-// impl<T> Service<T> for MakeApp {
-//   type Response = App;
-//   type Error = hyper::Error;
-//   type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-//   fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
-//     Poll::Ready(Ok(()))
-//   }
-
-//   fn call(&mut self, _: T) -> Self::Future {
-//     let fut = async move {
-//       Ok(App {
-//         router: Router::default(),
-//       })
-//     };
-//     Box::pin(fut)
-//   }
-// }
+impl AppBuilder {
+  pub fn bind(&mut self, addr: impl Into<SocketAddr>) -> &Self {
+    self.addr = Some(addr.into());
+    self
+  }
+}

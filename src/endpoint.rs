@@ -14,7 +14,8 @@ type BoxedMakeEndpoint<Req, Res> = Box<
       Response = Res,
       Error = hyper::Error,
       Future = BoxFuture<'static, Result<Res, hyper::Error>>,
-    > + Send,
+    > + Send
+    + Sync,
 >;
 
 /// Resource endpoint definition
@@ -143,9 +144,9 @@ impl Endpoint {
   /// ```
   pub fn to<F, T, R, U>(mut self, handler: F) -> Self
   where
-    F: Factory<T, R, U> + Send,
+    F: Factory<T, R, U> + Send + Sync,
     T: FromRequest + 'static,
-    R: Future<Output = U> + Send + 'static,
+    R: Future<Output = U> + Send + Sync + 'static,
     U: ToResponse + 'static,
   {
     self.handler = Box::new(MakeEndpoint::new(Extractor::new(Handler::new(handler))));

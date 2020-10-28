@@ -5,7 +5,7 @@ use hyper::error::Error;
 /// Trait implemented by types that can be extracted from request.
 ///
 /// Types that implement this trait can be used with `Route` handlers.
-pub trait FromRequest: Sized + Send {
+pub trait FromRequest: Sized + Send + Sync {
   /// The associated error which can be returned.
   type Error: Into<Error>;
 
