@@ -1,13 +1,9 @@
-use crate::endpoint::{Endpoint, Extractor, Factory, Handler};
-use crate::extractors::FromRequest;
-use crate::responder::ToResponse;
-use crate::Request;
-use futures::future::{ready, BoxFuture, Future, FutureExt};
-use http::{Method, StatusCode};
-use hyper::{Body, Response};
+use crate::handler::{Extractor, Factory, Handler, MakeService};
+use crate::{Body, FromRequest, Method, Request, Response, Service, StatusCode, ToResponse};
+use futures::future::{ready, BoxFuture, Future};
 
-type BoxedEndpoint<Req, Res> = Box<
-  dyn Endpoint<
+type BoxedService<Req, Res> = Box<
+  dyn Service<
       Req,
       Response = Res,
       Error = hyper::Error,
@@ -15,12 +11,13 @@ type BoxedEndpoint<Req, Res> = Box<
     > + Send
     + Sync,
 >;
-/// Resource Route definition
+
+/// Resource Route definition.
 ///
 /// Route uses builder-like pattern for configuration.
 pub struct Route {
   pub method: Option<Method>,
-  pub handler: BoxedEndpoint<Request, Response<Body>>,
+  pub handler: BoxedService<Request, Response<Body>>,
 }
 
 impl Route {
@@ -36,7 +33,7 @@ impl Route {
   pub fn new() -> Self {
     Route {
       method: None,
-      handler: Box::new(MakeRoute::new(Extractor::new(Handler::new(|| {
+      handler: Box::new(MakeService::new(Extractor::new(Handler::new(|| {
         ready(
           Response::builder()
             .status(StatusCode::NOT_FOUND)
@@ -146,7 +143,7 @@ impl Route {
     R: Future<Output = U> + Send + Sync + 'static,
     U: ToResponse + 'static,
   {
-    self.handler = Box::new(MakeRoute::new(Extractor::new(Handler::new(handler))));
+    self.handler = Box::new(MakeService::new(Extractor::new(Handler::new(handler))));
     self
   }
 
@@ -154,43 +151,5 @@ impl Route {
   pub fn set_method(mut self, method: Method) -> Self {
     self.method = Some(method);
     self
-  }
-}
-
-struct MakeRoute<T: Endpoint<Request>> {
-  service: T,
-}
-
-impl<T> MakeRoute<T>
-where
-  T::Future: 'static,
-  T: Endpoint<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
-{
-  fn new(service: T) -> Self {
-    MakeRoute { service }
-  }
-}
-
-impl<T> Endpoint<Request> for MakeRoute<T>
-where
-  T::Future: 'static + Send,
-  T: Endpoint<Request, Response = Response<Body>, Error = (hyper::Error, Request)>,
-{
-  type Response = Response<Body>;
-  type Error = hyper::Error;
-  type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-  fn call(&self, req: Request) -> Self::Future {
-    self
-      .service
-      .call(req)
-      .map(|res| match res {
-        Ok(res) => Ok(res),
-        Err((_err, _req)) => Ok(
-          // [TODO] error response
-          Response::new(Body::default()),
-        ),
-      })
-      .boxed()
   }
 }

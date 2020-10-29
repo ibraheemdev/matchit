@@ -23,22 +23,24 @@ impl Default for App {
   }
 }
 
-pub struct AppService(Arc<App>);
-
 impl App {
   pub async fn serve(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = Arc::new(self);
     let addr = app.addr;
     let service = make_service_fn(move |_| {
       let app = app.clone();
-      async move { Ok::<_, Infallible>(AppService(app.clone())) }
+      async move { Ok::<_, Infallible>(MakeApp(app.clone())) }
     });
     hyper::Server::bind(&addr).serve(service).await?;
     Ok(())
   }
 }
 
-impl Service<hyper::Request<Body>> for AppService {
+/// Convert `App` to a `hyper::Service`
+pub struct MakeApp(Arc<App>);
+
+/// The entrypoint `Service` of turbofish applications
+impl Service<hyper::Request<Body>> for MakeApp {
   type Response = Response<Body>;
   type Error = hyper::Error;
   type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
