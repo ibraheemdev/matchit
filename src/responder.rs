@@ -11,10 +11,10 @@
 //! # Example
 //!
 //! ```
-//! use turbofish::{Response, Endpoint, Body};
+//! use turbofish::{Response, Route, Body};
 //!
 //! // Returns a `200 OK` response with custom header and body.
-//! let hello = Endpoint::get().to(|| async {
+//! let hello = Route::get().to(|| async {
 //!   Response::builder()
 //!     .header("my-custom-header", "some-value")
 //!     .body(Body::from("Hello World"))
@@ -31,7 +31,7 @@ use hyper::{Body, Error, Response};
 /// # Example
 ///
 /// ```rust
-/// use turbofish::{Request, Response, Endpoint, ToResponse, Body};
+/// use turbofish::{Request, Response, Route, ToResponse, Body};
 /// use hyper::Error;
 /// use futures::future::{ok, Future, Ready};
 ///
@@ -55,7 +55,7 @@ use hyper::{Body, Error, Response};
 /// }
 ///
 /// // Returns a `200 OK` response with custom header and body.
-/// let hello_world = Endpoint::get().to(|| async {
+/// let hello_world = Route::get().to(|| async {
 ///   MyResponse {
 ///     message: String::from("Hello World")
 ///   }

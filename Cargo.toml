@@ -14,3 +14,4 @@ http = "0.2.1"
 hyper = "0.13.8"
 log = "0.4.11"
 pin-project = "1.0.1"
+tokio = { version = "0.2.2", features = ["full"] }
