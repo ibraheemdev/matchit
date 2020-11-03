@@ -1,11 +1,11 @@
 [package]
-name = "httprouter-rs"
+name = "httprouter"
 version = "0.0.0"
 license = "MIT"
 authors = ["ibraheem <ibrah1440@gmail.com>"]
 edition = "2018"
 description = "A high performance HTTP request router that scales well."
-repository = "https://github.com/ibraheemdev/turbofish/"
+repository = "https://github.com/ibraheemdev/httprouter-rs/"
 readme = "README.md"
 
 [dependencies]
