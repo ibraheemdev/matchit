@@ -99,12 +99,6 @@ use std::str;
 pub struct Router<T> {
   pub trees: HashMap<Method, Node<T>>,
 
-  /// If enabled, adds the matched route path onto the `Request` context
-  /// before invoking the handler.
-  /// The matched route path is only added to handlers of routes that were
-  /// registered when this option was enabled.
-  pub save_matched_route_path: bool,
-
   /// Enables automatic redirection if the current route can't be matched but a
   /// handler for the path with (without) the trailing slash exists.
   /// For example if `/foo/` is requested but a route only exists for `/foo`, the
@@ -204,11 +198,6 @@ impl<T> Router<T> {
       panic!("path must begin with '/' in path '{}'", path);
     }
 
-    if self.save_matched_route_path {
-      // [TODO]
-      // handle = r.saveMatchedRoutePath(path, handle)
-    }
-
     self
       .trees
       .entry(method)
@@ -284,7 +273,6 @@ impl<'a, T: Handler<'a>> Default for Router<T> {
       global_options: None,
       method_not_allowed: None,
       not_found: None,
-      save_matched_route_path: false,
     }
   }
 }
