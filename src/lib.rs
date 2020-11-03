@@ -1,3 +1,6 @@
+//! Httprouter is a trie based high performance HTTP request router.
+//!
+//! See [`router`](./router/index.html) for more details
 #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 

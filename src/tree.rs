@@ -1272,7 +1272,6 @@ mod tests {
         guard.add_route(route, fake_value(route));
       });
 
-      // [TODO] Check `recv`
       if recv.is_ok() {
         panic!(panic_msg);
       }

@@ -1,7 +1,15 @@
-//! Httprouter is a trie based high performance HTTP request router.
+//! HttpRouter is a lightweight high performance HTTP request router.
+//! It is a Rust port of [`julienschmidt/httprouter`](https://github.com/julienschmidt/httprouter).
+//!
+//! This router supports variables in the routing pattern and matches against
+//! the request method. It also scales better.
+//!
+//! The router is optimized for high performance and a small memory footprint.
+//! It scales well even with very long paths and a large number of routes.
+//! A compressing dynamic trie (radix tree) structure is used for efficient matching.
 //!
 //! A trivial example is:
-//!  ```ignore
+//!  ```rust
 //!  import (
 //!      "fmt"
 //!      "github.com/julienschmidt/httprouter"
@@ -34,19 +42,25 @@
 //!
 //! The registered path, against which the router matches incoming requests, can
 //! contain two types of parameters:
+//! ```ignore
 //!  Syntax    Type
 //!  :name     named parameter
 //!  *name     catch-all parameter
+//! ```
 //!
 //! Named parameters are dynamic path segments. They match anything until the
 //! next '/' or the path end:
+//! ```ignore
 //!  Path: /blog/:category/:post
+//! ```
 //!
 //!  Requests:
+//! ```ignore
 //!   /blog/rust/request-routers            match: category="rust", post="request-routers"
 //!   /blog/rust/request-routers/           no match, but the router would redirect
 //!   /blog/rust/                           no match
 //!   /blog/rust/request-routers/comments   no match
+//! ```
 //!
 //! Catch-all parameters match anything until the path end, including the
 //! directory index (the '/' before the catch-all). Since they match anything
@@ -54,21 +68,25 @@
 //!  Path: /files/*filepath
 //!
 //!  Requests:
+//! ```ignore
 //!   /files/                             match: filepath="/"
 //!   /files/LICENSE                      match: filepath="/LICENSE"
 //!   /files/templates/article.html       match: filepath="/templates/article.html"
 //!   /files                              no match, but the router would redirect
-//!
+//! ```
 //! The value of parameters is saved as a slice of the Param struct, consisting
 //! each of a key and a value. The slice is passed to the Handle func as a third
 //! parameter.
 //! There are two ways to retrieve the value of a parameter:
-//!  // by the name of the parameter
+//!  1) by the name of the parameter
+//! ```ignore
 //!  let user = params.by_name("user") // defined by :user or *user
-//!
-//!  // by the index of the parameter. This way you can also get the name (key)
+//! ```
+//!  2) by the index of the parameter. This way you can also get the name (key)
+//! ```ignore
 //!  thirdKey   := params[2].key   // the name of the 3rd parameter
 //!  thirdValue := params[2].value // the value of the 3rd parameter
+//! ```
 use crate::path::clean_path;
 use crate::tree::{Node, RouteLookup};
 use futures::future::{ok, BoxFuture};
@@ -81,7 +99,7 @@ use std::str;
 pub struct Router<T> {
   pub trees: HashMap<Method, Node<T>>,
 
-  /// If enabled, adds the matched route path onto the http.Request context
+  /// If enabled, adds the matched route path onto the `Request` context
   /// before invoking the handler.
   /// The matched route path is only added to handlers of routes that were
   /// registered when this option was enabled.
@@ -89,41 +107,41 @@ pub struct Router<T> {
 
   /// Enables automatic redirection if the current route can't be matched but a
   /// handler for the path with (without) the trailing slash exists.
-  /// For example if /foo/ is requested but a route only exists for /foo, the
-  /// client is redirected to /foo with http status code 301 for GET requests
+  /// For example if `/foo/` is requested but a route only exists for `/foo`, the
+  /// client is redirected to /foo with http status code 301 for `GET` requests
   /// and 307 for all other request methods.
   pub redirect_trailing_slash: bool,
 
   /// If enabled, the router tries to fix the current request path, if no
   /// handle is registered for it.
-  /// First superfluous path elements like ../ or // are removed.
+  /// First superfluous path elements like `../` or `//` are removed.
   /// Afterwards the router does a case-insensitive lookup of the cleaned path.
   /// If a handle can be found for this route, the router makes a redirection
-  /// to the corrected path with status code 301 for GET requests and 307 for
+  /// to the corrected path with status code 301 for `GET` requests and 307 for
   /// all other request methods.
-  /// For example /FOO and /..//Foo could be redirected to /foo.
-  /// RedirectTrailingSlash is independent of this option.
+  /// For example `/FOO` and `/..//Foo` could be redirected to `/foo`.
+  /// `redirect_trailing_slash` is independent of this option.
   pub redirect_fixed_path: bool,
 
   /// If enabled, the router checks if another method is allowed for the
   /// current route, if the current request can not be routed.
-  /// If this is the case, the request is answered with 'Method Not Allowed'
+  /// If this is the case, the request is answered with `MethodNotAllowed`
   /// and HTTP status code 405.
-  /// If no other Method is allowed, the request is delegated to the NotFound
+  /// If no other Method is allowed, the request is delegated to the `NotFound`
   /// handler.
   pub handle_method_not_allowed: bool,
 
   /// If enabled, the router automatically replies to OPTIONS requests.
-  /// Custom OPTIONS handlers take priority over automatic replies.
+  /// Custom `OPTIONS` handlers take priority over automatic replies.
   pub handle_options: bool,
 
-  /// An optional handler that is called on automatic OPTIONS requests.
-  /// The handler is only called if HandleOPTIONS is true and no OPTIONS
+  /// An optional handler that is called on automatic `OPTIONS` requests.
+  /// The handler is only called if `handle_options` is true and no `OPTIONS`
   /// handler for the specific path was set.
-  /// The "Allowed" header is set before calling the handler.
+  /// The `Allowed` header is set before calling the handler.
   pub global_options: Option<T>,
 
-  /// Cached value of global (*) allowed methods
+  /// Cached value of global `(*)` allowed methods
   pub global_allowed: String,
 
   /// Configurable handler which is called when no matching route is
@@ -131,44 +149,44 @@ pub struct Router<T> {
   pub not_found: Option<T>,
 
   /// Configurable handler which is called when a request
-  /// cannot be routed and HandleMethodNotAllowed is true.
-  /// The "Allow" header with allowed request methods is set before the handler
+  /// cannot be routed and `handle_method_not_allowed` is true.
+  /// The `Allow` header with allowed request methods is set before the handler
   /// is called.
   pub method_not_allowed: Option<T>,
 }
 
 impl<T> Router<T> {
-  /// get is a shortcut for router.handle("Method::GET, path, handle)
+  /// get is a shortcut for `router.handle(Method::GET, path, handle)`
   pub fn get(&mut self, path: &str, handle: T) {
     self.handle(Method::GET, path, handle);
   }
 
-  /// head is a shortcut for router.handle(Method::HEAD, path, handle)
+  /// head is a shortcut for `router.handle(Method::HEAD, path, handle)`
   pub fn head(&mut self, path: &str, handle: T) {
     self.handle(Method::HEAD, path, handle);
   }
 
-  /// options is a shortcut for router.handle(Method::OPTIONS, path, handle)
+  /// options is a shortcut for `router.handle(Method::OPTIONS, path, handle)`
   pub fn options(&mut self, path: &str, handle: T) {
     self.handle(Method::OPTIONS, path, handle);
   }
 
-  /// post is a shortcut for router.handle(Method::POST, path, handle)
+  /// post is a shortcut for `router.handle(Method::POST, path, handle)`
   pub fn post(&mut self, path: &str, handle: T) {
     self.handle(Method::POST, path, handle);
   }
 
-  /// put is a shortcut for router.handle(Method::POST, path, handle)
+  /// put is a shortcut for `router.handle(Method::POST, path, handle)`
   pub fn put(&mut self, path: &str, handle: T) {
     self.handle(Method::PUT, path, handle);
   }
 
-  /// patch is a shortcut for router.handle(Method::PATCH, path, handle)
+  /// patch is a shortcut for `router.handle(Method::PATCH, path, handle)`
   pub fn patch(&mut self, path: &str, handle: T) {
     self.handle(Method::PATCH, path, handle);
   }
 
-  /// delete is a shortcut for router.handle(Method::DELETE, path, handle)
+  /// delete is a shortcut for `router.handle(Method::DELETE, path, handle)`
   pub fn delete(&mut self, path: &str, handle: T) {
     self.handle(Method::DELETE, path, handle);
   }
@@ -187,7 +205,7 @@ impl<T> Router<T> {
     }
 
     if self.save_matched_route_path {
-      // TODO
+      // [TODO]
       // handle = r.saveMatchedRoutePath(path, handle)
     }
 
@@ -211,7 +229,7 @@ impl<T> Router<T> {
       .unwrap_or(Err(false))
   }
 
-  // TODO
+  /// [TODO]
   pub fn serve_files() {
     unimplemented!()
   }
@@ -271,7 +289,7 @@ impl<'a, T: Handler<'a>> Default for Router<T> {
   }
 }
 
-/// An asynchrounous http handler
+/// An asynchronous http handler
 pub trait Handler<'a>: 'a {
   /// Errors produced by the handler.
   type Error: Sync + Send;
