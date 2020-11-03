@@ -70,7 +70,7 @@
 //!  thirdKey   := params[2].key   // the name of the 3rd parameter
 //!  thirdValue := params[2].value // the value of the 3rd parameter
 use crate::path::clean_path;
-use crate::tree::{Node, Params, RouteLookup};
+use crate::tree::{Node, RouteLookup};
 use futures::future::{ok, BoxFuture};
 use hyper::body::HttpBody;
 use hyper::http::{header, StatusCode};
@@ -78,12 +78,13 @@ use hyper::{Body, Method, Request, Response};
 use std::collections::HashMap;
 use std::str;
 
-pub trait Handle {
+pub trait Handler<'a> {
+  type Error: Sync + Send + 'a;
+
   fn handle(
     &self,
     req: Request<impl HttpBody>,
-    params: Params,
-  ) -> BoxFuture<'static, Result<Response<Body>, Box<dyn std::error::Error + Sync + Send>>>;
+  ) -> BoxFuture<'a, Result<Response<Body>, Box<Self::Error>>>;
 }
 
 /// Router is container which can be used to dispatch requests to different
@@ -147,7 +148,7 @@ pub struct Router<T> {
   pub method_not_allowed: Option<T>,
 }
 
-impl<T: Handle> Default for Router<T> {
+impl<T> Default for Router<T> {
   fn default() -> Self {
     Router::<T> {
       trees: HashMap::new(),
@@ -164,7 +165,7 @@ impl<T: Handle> Default for Router<T> {
   }
 }
 
-impl<T: Handle> Router<T> {
+impl<T> Router<T> {
   /// get is a shortcut for router.handle("Method::GET, path, handle)
   pub fn get(&mut self, path: &str, handle: T) {
     self.handle(Method::GET, path, handle);
@@ -278,17 +279,20 @@ impl<T: Handle> Router<T> {
 
     allowed.join(", ")
   }
+}
 
+impl<'a, T: Handler<'a>> Router<T> {
   pub fn serve_http(
     &self,
-    req: Request<impl HttpBody>,
-  ) -> BoxFuture<'static, Result<Response<Body>, Box<dyn std::error::Error + Sync + Send>>> {
+    mut req: Request<impl HttpBody>,
+  ) -> BoxFuture<'a, Result<Response<Body>, Box<T::Error>>> {
     let root = self.trees.get(req.method());
     let path = req.uri().path();
     if let Some(root) = root {
       match root.get_value(path) {
         Ok(lookup) => {
-          return lookup.value.handle(req, lookup.params);
+          req.extensions_mut().insert(lookup.params);
+          return lookup.value.handle(req);
         }
         Err(tsr) => {
           if req.method() != Method::CONNECT && path != "/" {
@@ -338,7 +342,7 @@ impl<T: Handle> Router<T> {
       let allow = self.allowed(path, &Method::OPTIONS);
       if allow != "" {
         match &self.global_options {
-          Some(handler) => return handler.handle(req, Params::default()),
+          Some(handler) => return handler.handle(req),
           None => {
             return Box::pin(ok(
               Response::builder()
@@ -354,7 +358,7 @@ impl<T: Handle> Router<T> {
 
       if !allow.is_empty() {
         if let Some(ref method_not_allowed) = self.method_not_allowed {
-          return method_not_allowed.handle(req, Params::default());
+          return method_not_allowed.handle(req);
         }
         return Box::pin(ok(
           Response::builder()
@@ -367,7 +371,7 @@ impl<T: Handle> Router<T> {
     };
 
     match &self.not_found {
-      Some(handler) => handler.handle(req, Params::default()),
+      Some(handler) => handler.handle(req),
       None => Box::pin(ok(
         Response::builder().status(404).body(Body::empty()).unwrap(),
       )),
