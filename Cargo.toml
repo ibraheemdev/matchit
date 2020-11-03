@@ -1,17 +1,16 @@
 [package]
-name = "turbofish"
+name = "httprouter-rs"
 version = "0.0.0"
 license = "MIT"
 authors = ["ibraheem <ibrah1440@gmail.com>"]
 edition = "2018"
-description = "A fast lightweight rust framework built on top of hyper (wip)."
+description = "A high performance HTTP request router that scales well."
 repository = "https://github.com/ibraheemdev/turbofish/"
 readme = "README.md"
 
 [dependencies]
 futures = "0.3.6"
-http = "0.2.1"
 hyper = "0.13.8"
-log = "0.4.11"
-pin-project = "1.0.1"
-tokio = { version = "0.2.2", features = ["full"] }
+
+[dev-dependencies]
+doc-comment = "0.3.3"

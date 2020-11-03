@@ -8,9 +8,6 @@ use std::str;
 pub struct RouteLookup<'a, V> {
   pub value: &'a V,
   pub params: Params,
-  // the values of all the parent nodes
-  // of the matching node, including the node itself
-  pub parent_values: Vec<&'a V>,
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
@@ -41,6 +38,10 @@ impl Default for Params {
   }
 }
 
+// MATCHED_ROUTE_PATH_PARAM is the Param name under which the path of the matched
+// route is stored, if Router.SaveMatchedRoutePath is set.
+const MATCHED_ROUTE_PATH_PARAM: &str = "$matchedRoutePath";
+
 impl Params {
   /// Returns the value of the first `Param` whose key matches the given name.
   pub fn by_name(&self, name: &str) -> Option<&str> {
@@ -57,6 +58,13 @@ impl Params {
   /// Add a URL paramter to the list (`Param`)
   pub fn push(&mut self, p: Param) {
     self.0.push(p);
+  }
+
+  // MatchedRoutePath retrieves the path of the matched route.
+  // Router.SaveMatchedRoutePath must have been enabled when the respective
+  // handler was added, otherwise this function always returns `None`.
+  pub fn matched_route_path(&self) -> Option<&str> {
+    self.by_name(MATCHED_ROUTE_PATH_PARAM)
   }
 }
 
@@ -230,6 +238,7 @@ impl<V> Node<V> {
     }
   }
 
+  #[inline]
   fn wild_child_conflict(&mut self, path: &[u8], full_path: &str, value: V) {
     self.priority += 1;
 
@@ -395,15 +404,15 @@ impl<V> Node<V> {
   /// made if a value exists with an extra (without the) trailing slash for the
   /// given path.
   pub fn get_value(&self, path: &str) -> Result<RouteLookup<V>, bool> {
-    self.get_value_helper(path.as_ref(), Params::default(), Vec::new())
+    self.get_value_helper(path.as_ref(), Params::default())
   }
 
   // outer loop for walking the tree to get a path's value
+  #[inline]
   fn get_value_helper<'a>(
     &'a self,
     mut path: &[u8],
     params: Params,
-    mut parent_values: Vec<&'a V>,
   ) -> Result<RouteLookup<V>, bool> {
     let prefix = self.path.clone();
     if path.len() > prefix.len() {
@@ -417,8 +426,7 @@ impl<V> Node<V> {
           let idxc = path[0];
           for i in 0..self.indices.len() {
             if idxc == self.indices[i] {
-              parent_values = self.collect_parents(parent_values);
-              return self.children[i].get_value_helper(path, params, parent_values);
+              return self.children[i].get_value_helper(path, params);
             }
           }
           // Nothing found.
@@ -428,18 +436,13 @@ impl<V> Node<V> {
           return Err(tsr);
         }
 
-        parent_values = self.collect_parents(parent_values);
-        return self.children[0].handle_wild_child(path, params, parent_values);
+        return self.children[0].handle_wild_child(path, params);
       }
     } else if path == prefix {
       // We should have reached the node containing the value.
       // Check if this node has a value registered.
       if let Some(value) = self.value.as_ref() {
-        return Ok(RouteLookup {
-          value,
-          params,
-          parent_values,
-        });
+        return Ok(RouteLookup { value, params });
       }
 
       // If there is no value for this route, but this route has a
@@ -475,11 +478,11 @@ impl<V> Node<V> {
   }
 
   // helper function for handling a wildcard child used by `get_value`
+  #[inline]
   fn handle_wild_child<'a>(
     &'a self,
     mut path: &[u8],
     mut params: Params,
-    mut parent_values: Vec<&'a V>,
   ) -> Result<RouteLookup<V>, bool> {
     match self.node_type {
       NodeType::Param => {
@@ -499,8 +502,7 @@ impl<V> Node<V> {
           if !self.children.is_empty() {
             path = &path[end..];
 
-            parent_values = self.collect_parents(parent_values);
-            return self.children[0].get_value_helper(path, params, parent_values);
+            return self.children[0].get_value_helper(path, params);
           }
 
           // ... but we can't
@@ -509,11 +511,7 @@ impl<V> Node<V> {
         }
 
         if let Some(value) = self.value.as_ref() {
-          return Ok(RouteLookup {
-            value,
-            params,
-            parent_values,
-          });
+          return Ok(RouteLookup { value, params });
         } else if self.children.len() == 1 {
           // No value found. Check if a value for this path + a
           // trailing slash exists for TSR recommendation
@@ -530,26 +528,12 @@ impl<V> Node<V> {
         });
 
         match self.value.as_ref() {
-          Some(value) => Ok(RouteLookup {
-            value,
-            params,
-            parent_values,
-          }),
+          Some(value) => Ok(RouteLookup { value, params }),
           None => Err(false),
         }
       }
       _ => panic!("invalid node type"),
     }
-  }
-
-  fn collect_parents<'a>(&'a self, mut values: Vec<&'a V>) -> Vec<&'a V> {
-    if let Some(value) = self.value.as_ref() {
-      // [TODO]: Collector trait
-      // if value.should_collect() {
-      values.push(value)
-      // }
-    };
-    values
   }
 
   /// Makes a case-insensitive lookup of the given path and tries to find a handler.
@@ -1623,58 +1607,4 @@ mod tests {
       tree.add_route(conflict, fake_value(conflict));
     }
   }
-
-  #[test]
-  fn test_tree_get_parent_values() {
-    let requests = vec![
-      ("/", vec![]),
-      ("/users", vec!["/"]),
-      ("/users/:id", vec!["/", "/users"]),
-      ("/users/:id/edit", vec!["/", "/users", "/users/:id"]),
-      ("/blog", vec!["/"]),
-      ("/blog/pages", vec!["/", "/blog"]),
-      ("/blog/pages/:id", vec!["/", "/blog", "/blog/pages"]),
-      ("/t/:id/other/another", vec!["/"]),
-      ("/other/:id", vec!["/"]),
-      ("/userst/other/another", vec!["/", "/users"]),
-      ("/wild/*wildcard", vec!["/"]),
-    ];
-
-    let mut tree = Node::default();
-    for request in &requests {
-      tree.add_route(request.0, fake_value(request.0))
-    }
-
-    for request in requests {
-      let res = tree.get_value(request.0);
-      if let Ok(res) = res {
-        assert_eq!(
-          res
-            .parent_values
-            .iter()
-            .map(|x| x())
-            .collect::<Vec<String>>(),
-          request.1
-        );
-      }
-    }
-  }
-
-  // #[test]
-  // [TODO]
-  // #[should_panic(expected = "path must begin with '/' in path 'invalid'")]
-  // fn handle_invalid_path() {
-  // use crate::Request;
-  // use crate::router::{Params, Router};
-  // use hyper::{Body, Method, Response};
-
-  // let mut router = Router::default();
-
-  // TODO
-  // router.handle(
-  //   Method::GET,
-  //   "invalid",
-  //   |_req: Request, _: Params| -> Response<Body> { Response::new(Body::from("test")) },
-  // );
-  // }
 }

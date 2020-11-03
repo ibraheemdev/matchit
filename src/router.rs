@@ -1,109 +1,376 @@
-//! The router relies on a tree structure which makes heavy use of *common prefixes*,
-//! it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie)
-//! (or just [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a
-//! common prefix also share a common parent. The radix tree implementation was derived
-//! from [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter)
+//! Httprouter is a trie based high performance HTTP request router.
 //!
-//! Here is a short example what the routing tree for the `GET` request method could look like:
+//! A trivial example is:
+//!  ```ignore
+//!  import (
+//!      "fmt"
+//!      "github.com/julienschmidt/httprouter"
+//!      "net/http"
+//!      "log"
+//!  )
 //!
-//! ```ignore
-//! Priority   Path             value
-//! 9          \                *<1>
-//! 3          ├s               nil
-//! 2          |├earch\         *<2>
-//! 1          |└upport\        *<3>
-//! 2          ├blog\           *<4>
-//! 1          |    └:post      nil
-//! 1          |         └\     *<5>
-//! 2          ├about-us\       *<6>
-//! 1          |        └team\  *<7>
-//! 1          └contact\        *<8>
-//! ```
-
-//! Every `*<num>` represents the memory address of a value.
-//! If you follow a path trough the tree from the root to the leaf, you get the complete
-//! route path, e.g `\blog\:post\`, where `:post` is just a placeholder ([*parameter*](#named-parameters))
-//! for an actual post name. Unlike hash-maps, a tree structure also allows us to use
-//! dynamic parts like the `:post` parameter, since we actually match against the routing
-//! patterns instead of just comparing hashes. This works very well and efficiently.
-
-//! Since URL paths have a hierarchical structure and make use only of a limited set of
-//! characters (byte values), it is very likely that there are a lot of common prefixes.
-//! This allows us to easily reduce the routing into ever smaller problems. Moreover the
-//! router manages a separate tree for every request method. For one thing it is more
-//! space efficient than holding a method -> value map in every single node, it also allows
-//! us to greatly reduce the routing problem before even starting the look-up in the prefix-tree.
-
-//! For even better scalability, the child nodes on each tree level are ordered by priority,
-//! where the priority is just the number of values registered in sub nodes (children, grandchildren, and so on..).
-//! This helps in two ways:
-
-//! 1. Nodes which are part of the most routing paths are evaluated first. This helps to
-//! make as much routes as possible to be reachable as fast as possible.
-//! 2. It is some sort of cost compensation. The longest reachable path (highest cost)
-//! can always be evaluated first. The following scheme visualizes the tree structure.
-//! Nodes are evaluated from top to bottom and from left to right.
-
-//! ```ignore
-//! ├------------
-//! ├---------
-//! ├-----
-//! ├----
-//! ├--
-//! ├--
-//! └-
-//! ```
+//!  func Index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+//!      fmt.Fprint(w, "Welcome!\n")
+//!  }
 //!
-use crate::tree::{Node, RouteLookup};
-use std::cmp::Eq;
+//!  func Hello(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+//!      fmt.Fprintf(w, "hello, %s!\n", ps.ByName("name"))
+//!  }
+//!
+//!  func main() {
+//!      router := httprouter.New()
+//!      router.GET("/", Index)
+//!      router.GET("/hello/:name", Hello)
+//!
+//!      log.Fatal(http.ListenAndServe(":8080", router))
+//!  }
+//!  ```
+//!
+//! The router matches incoming requests by the request method and the path.
+//! If a handle is registered for this path and method, the router delegates the
+//! request to that function.
+//! For the methods GET, POST, PUT, PATCH, DELETE and OPTIONS shortcut functions exist to
+//! register handles, for all other methods router.Handle can be used.
+//!
+//! The registered path, against which the router matches incoming requests, can
+//! contain two types of parameters:
+//!  Syntax    Type
+//!  :name     named parameter
+//!  *name     catch-all parameter
+//!
+//! Named parameters are dynamic path segments. They match anything until the
+//! next '/' or the path end:
+//!  Path: /blog/:category/:post
+//!
+//!  Requests:
+//!   /blog/rust/request-routers            match: category="rust", post="request-routers"
+//!   /blog/rust/request-routers/           no match, but the router would redirect
+//!   /blog/rust/                           no match
+//!   /blog/rust/request-routers/comments   no match
+//!
+//! Catch-all parameters match anything until the path end, including the
+//! directory index (the '/' before the catch-all). Since they match anything
+//! until the end, catch-all parameters must always be the final path element.
+//!  Path: /files/*filepath
+//!
+//!  Requests:
+//!   /files/                             match: filepath="/"
+//!   /files/LICENSE                      match: filepath="/LICENSE"
+//!   /files/templates/article.html       match: filepath="/templates/article.html"
+//!   /files                              no match, but the router would redirect
+//!
+//! The value of parameters is saved as a slice of the Param struct, consisting
+//! each of a key and a value. The slice is passed to the Handle func as a third
+//! parameter.
+//! There are two ways to retrieve the value of a parameter:
+//!  // by the name of the parameter
+//!  let user = params.by_name("user") // defined by :user or *user
+//!
+//!  // by the index of the parameter. This way you can also get the name (key)
+//!  thirdKey   := params[2].key   // the name of the 3rd parameter
+//!  thirdValue := params[2].value // the value of the 3rd parameter
+use crate::path::clean_path;
+use crate::tree::{Node, Params, RouteLookup};
+use futures::future::{ok, BoxFuture};
+use hyper::body::HttpBody;
+use hyper::http::{header, StatusCode};
+use hyper::{Body, Method, Request, Response};
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::str;
+
+pub trait Handle {
+  fn handle(
+    &self,
+    req: Request<impl HttpBody>,
+    params: Params,
+  ) -> BoxFuture<'static, Result<Response<Body>, Box<dyn std::error::Error + Sync + Send>>>;
+}
 
 /// Router is container which can be used to dispatch requests to different
 /// handler functions via configurable routes
-pub struct Router<K: Eq + Hash, V> {
-  pub map: HashMap<K, Node<V>>,
+pub struct Router<T> {
+  pub trees: HashMap<Method, Node<T>>,
+
+  /// If enabled, adds the matched route path onto the http.Request context
+  /// before invoking the handler.
+  /// The matched route path is only added to handlers of routes that were
+  /// registered when this option was enabled.
+  pub save_matched_route_path: bool,
+
+  /// Enables automatic redirection if the current route can't be matched but a
+  /// handler for the path with (without) the trailing slash exists.
+  /// For example if /foo/ is requested but a route only exists for /foo, the
+  /// client is redirected to /foo with http status code 301 for GET requests
+  /// and 307 for all other request methods.
+  pub redirect_trailing_slash: bool,
+
+  /// If enabled, the router tries to fix the current request path, if no
+  /// handle is registered for it.
+  /// First superfluous path elements like ../ or // are removed.
+  /// Afterwards the router does a case-insensitive lookup of the cleaned path.
+  /// If a handle can be found for this route, the router makes a redirection
+  /// to the corrected path with status code 301 for GET requests and 307 for
+  /// all other request methods.
+  /// For example /FOO and /..//Foo could be redirected to /foo.
+  /// RedirectTrailingSlash is independent of this option.
+  pub redirect_fixed_path: bool,
+
+  /// If enabled, the router checks if another method is allowed for the
+  /// current route, if the current request can not be routed.
+  /// If this is the case, the request is answered with 'Method Not Allowed'
+  /// and HTTP status code 405.
+  /// If no other Method is allowed, the request is delegated to the NotFound
+  /// handler.
+  pub handle_method_not_allowed: bool,
+
+  /// If enabled, the router automatically replies to OPTIONS requests.
+  /// Custom OPTIONS handlers take priority over automatic replies.
+  pub handle_options: bool,
+
+  /// An optional handler that is called on automatic OPTIONS requests.
+  /// The handler is only called if HandleOPTIONS is true and no OPTIONS
+  /// handler for the specific path was set.
+  /// The "Allowed" header is set before calling the handler.
+  pub global_options: Option<T>,
+
+  /// Cached value of global (*) allowed methods
+  pub global_allowed: String,
+
+  /// Configurable handler which is called when no matching route is
+  /// found.
+  pub not_found: Option<T>,
+
+  /// Configurable handler which is called when a request
+  /// cannot be routed and HandleMethodNotAllowed is true.
+  /// The "Allow" header with allowed request methods is set before the handler
+  /// is called.
+  pub method_not_allowed: Option<T>,
 }
 
-impl<K: Eq + Hash, V> Default for Router<K, V> {
+impl<T: Handle> Default for Router<T> {
   fn default() -> Self {
-    Router {
-      map: HashMap::new(),
+    Router::<T> {
+      trees: HashMap::new(),
+      redirect_trailing_slash: true,
+      redirect_fixed_path: true,
+      handle_method_not_allowed: true,
+      handle_options: true,
+      global_allowed: String::new(),
+      global_options: None,
+      method_not_allowed: None,
+      not_found: None,
+      save_matched_route_path: false,
     }
   }
 }
 
-impl<K: Eq + Hash, V> Router<K, V> {
-  pub fn with_capacity(capacity: usize) -> Self {
-    Router {
-      map: HashMap::with_capacity(capacity),
-    }
+impl<T: Handle> Router<T> {
+  /// get is a shortcut for router.handle("Method::GET, path, handle)
+  pub fn get(&mut self, path: &str, handle: T) {
+    self.handle(Method::GET, path, handle);
   }
 
-  /// Add registers a new request handle with the given key and value in the route map
-  pub fn add(&mut self, key: K, value: V, path: &str) {
+  /// head is a shortcut for router.handle(Method::HEAD, path, handle)
+  pub fn head(&mut self, path: &str, handle: T) {
+    self.handle(Method::HEAD, path, handle);
+  }
+
+  /// options is a shortcut for router.handle(Method::OPTIONS, path, handle)
+  pub fn options(&mut self, path: &str, handle: T) {
+    self.handle(Method::OPTIONS, path, handle);
+  }
+
+  /// post is a shortcut for router.handle(Method::POST, path, handle)
+  pub fn post(&mut self, path: &str, handle: T) {
+    self.handle(Method::POST, path, handle);
+  }
+
+  /// put is a shortcut for router.handle(Method::POST, path, handle)
+  pub fn put(&mut self, path: &str, handle: T) {
+    self.handle(Method::PUT, path, handle);
+  }
+
+  /// patch is a shortcut for router.handle(Method::PATCH, path, handle)
+  pub fn patch(&mut self, path: &str, handle: T) {
+    self.handle(Method::PATCH, path, handle);
+  }
+
+  /// delete is a shortcut for router.handle(Method::DELETE, path, handle)
+  pub fn delete(&mut self, path: &str, handle: T) {
+    self.handle(Method::DELETE, path, handle);
+  }
+
+  // Handle registers a new request handle with the given path and method.
+  //
+  // For GET, POST, PUT, PATCH and DELETE requests the respective shortcut
+  // functions can be used.
+  //
+  // This function is intended for bulk loading and to allow the usage of less
+  // frequently used, non-standardized or custom methods (e.g. for internal
+  // communication with a proxy).
+  pub fn handle(&mut self, method: Method, path: &str, handle: T) {
     if !path.starts_with('/') {
       panic!("path must begin with '/' in path '{}'", path);
     }
 
+    if self.save_matched_route_path {
+      // TODO
+      // handle = r.saveMatchedRoutePath(path, handle)
+    }
+
     self
-      .map
-      .entry(key)
+      .trees
+      .entry(method)
       .or_insert_with(Node::default)
-      .add_route(path, value);
+      .add_route(path, handle);
   }
 
-  /// Allows the manual lookup of a path in the route map.
-  /// Returns the value and the path parameter values if the path is found.
-  /// If no match can be found, a TSR (trailing slash redirect) recommendation is
-  /// made if a match exists with an extra (without the) trailing slash for the
-  /// given path.
-  pub fn lookup(&mut self, key: &K, path: &str) -> Result<RouteLookup<V>, bool> {
+  /// Lookup allows the manual lookup of a method + path combo.
+  /// This is e.g. useful to build a framework around this router.
+  /// If the path was found, it returns the handle function and the path parameter
+  /// values. Otherwise the third return value indicates whether a redirection to
+  /// the same path with an extra / without the trailing slash should be performed.
+  pub fn lookup(&mut self, method: &Method, path: &str) -> Result<RouteLookup<T>, bool> {
     self
-      .map
-      .get_mut(key)
+      .trees
+      .get_mut(method)
       .map(|n| n.get_value(path))
       .unwrap_or(Err(false))
+  }
+
+  // TODO
+  pub fn serve_files() {
+    unimplemented!()
+  }
+
+  // returns a list of the allowed methods for a specific path
+  // eg: 'GET, PATCH, OPTIONS'
+  pub fn allowed(&self, path: &str, req_method: &Method) -> String {
+    let mut allowed: Vec<String> = Vec::new();
+    match path {
+      "*" => {
+        for method in self.trees.keys() {
+          if method != "OPTIONS" {
+            allowed.push(method.to_string());
+          }
+        }
+      }
+      _ => {
+        for method in self.trees.keys() {
+          if method == req_method || method == "OPTIONS" {
+            continue;
+          }
+
+          if let Some(tree) = self.trees.get(method) {
+            let handler = tree.get_value(path);
+
+            if handler.is_ok() {
+              allowed.push(method.to_string());
+            }
+          };
+        }
+      }
+    };
+
+    if !allowed.is_empty() {
+      allowed.push(String::from("OPTIONS"))
+    }
+
+    allowed.join(", ")
+  }
+
+  pub fn serve_http(
+    &self,
+    req: Request<impl HttpBody>,
+  ) -> BoxFuture<'static, Result<Response<Body>, Box<dyn std::error::Error + Sync + Send>>> {
+    let root = self.trees.get(req.method());
+    let path = req.uri().path();
+    if let Some(root) = root {
+      match root.get_value(path) {
+        Ok(lookup) => {
+          return lookup.value.handle(req, lookup.params);
+        }
+        Err(tsr) => {
+          if req.method() != Method::CONNECT && path != "/" {
+            let code = match *req.method() {
+              // Moved Permanently, request with GET method
+              Method::GET => StatusCode::MOVED_PERMANENTLY,
+              // Permanent Redirect, request with same method
+              _ => StatusCode::PERMANENT_REDIRECT,
+            };
+
+            if tsr && self.redirect_trailing_slash {
+              let path = if path.len() > 1 && path.ends_with('/') {
+                path[..path.len() - 1].to_string()
+              } else {
+                path.to_string() + "/"
+              };
+
+              return Box::pin(ok(
+                Response::builder()
+                  .header(header::LOCATION, path.as_str())
+                  .status(code)
+                  .body(Body::empty())
+                  .unwrap(),
+              ));
+            };
+
+            if self.redirect_fixed_path {
+              if let Some(fixed_path) = root.find_case_insensitive_path(
+                &clean_path(req.uri().path()),
+                self.redirect_trailing_slash,
+              ) {
+                return Box::pin(ok(
+                  Response::builder()
+                    .header(header::LOCATION, fixed_path.as_str())
+                    .status(code)
+                    .body(Body::empty())
+                    .unwrap(),
+                ));
+              }
+            };
+          };
+        }
+      }
+    };
+
+    if req.method() == Method::OPTIONS && self.handle_options {
+      let allow = self.allowed(path, &Method::OPTIONS);
+      if allow != "" {
+        match &self.global_options {
+          Some(handler) => return handler.handle(req, Params::default()),
+          None => {
+            return Box::pin(ok(
+              Response::builder()
+                .header(header::ALLOW, allow)
+                .body(Body::empty())
+                .unwrap(),
+            ));
+          }
+        };
+      }
+    } else if self.handle_method_not_allowed {
+      let allow = self.allowed(path, req.method());
+
+      if !allow.is_empty() {
+        if let Some(ref method_not_allowed) = self.method_not_allowed {
+          return method_not_allowed.handle(req, Params::default());
+        }
+        return Box::pin(ok(
+          Response::builder()
+            .header(header::ALLOW, allow)
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(Body::empty())
+            .unwrap(),
+        ));
+      }
+    };
+
+    match &self.not_found {
+      Some(handler) => handler.handle(req, Params::default()),
+      None => Box::pin(ok(
+        Response::builder().status(404).body(Body::empty()).unwrap(),
+      )),
+    }
   }
 }
