@@ -11,6 +11,3 @@ readme = "README.md"
 [dependencies]
 futures = "0.3.6"
 hyper = "0.13.8"
-
-[dev-dependencies]
-doc-comment = "0.3.3"
