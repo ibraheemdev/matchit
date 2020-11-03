@@ -72,19 +72,29 @@
 use crate::path::clean_path;
 use crate::tree::{Node, RouteLookup};
 use futures::future::{ok, BoxFuture};
-use hyper::body::HttpBody;
-use hyper::http::{header, StatusCode};
-use hyper::{Body, Method, Request, Response};
+use http::{header, Method, Request, Response, StatusCode};
 use std::collections::HashMap;
 use std::str;
 
-pub trait Handler<'a> {
-  type Error: Sync + Send + 'a;
+/// An http handler
+pub trait Handler<'a>: 'a {
+  /// Errors produced by the handler.
+  type Error: Sync + Send;
 
+  /// The body type for the `Request` and `Response`
+  type Body: Sync + Send + Empty;
+
+  /// Handle the request and return the response asynchronously.
   fn handle(
     &self,
-    req: Request<impl HttpBody>,
-  ) -> BoxFuture<'a, Result<Response<Body>, Box<Self::Error>>>;
+    req: Request<Self::Body>,
+  ) -> BoxFuture<'a, Result<Response<Self::Body>, Self::Error>>;
+}
+
+/// A trait used for the `Response` and `Reqwest` body to create a response with
+/// an empty body
+pub trait Empty {
+  fn empty() -> Self;
 }
 
 /// Router is container which can be used to dispatch requests to different
@@ -284,8 +294,8 @@ impl<T> Router<T> {
 impl<'a, T: Handler<'a>> Router<T> {
   pub fn serve_http(
     &self,
-    mut req: Request<impl HttpBody>,
-  ) -> BoxFuture<'a, Result<Response<Body>, Box<T::Error>>> {
+    mut req: Request<T::Body>,
+  ) -> BoxFuture<'a, Result<Response<T::Body>, T::Error>> {
     let root = self.trees.get(req.method());
     let path = req.uri().path();
     if let Some(root) = root {
@@ -314,21 +324,20 @@ impl<'a, T: Handler<'a>> Router<T> {
                 Response::builder()
                   .header(header::LOCATION, path.as_str())
                   .status(code)
-                  .body(Body::empty())
+                  .body(T::Body::empty())
                   .unwrap(),
               ));
             };
 
             if self.redirect_fixed_path {
-              if let Some(fixed_path) = root.find_case_insensitive_path(
-                &clean_path(req.uri().path()),
-                self.redirect_trailing_slash,
-              ) {
+              if let Some(fixed_path) =
+                root.find_case_insensitive_path(&clean_path(path), self.redirect_trailing_slash)
+              {
                 return Box::pin(ok(
                   Response::builder()
                     .header(header::LOCATION, fixed_path.as_str())
                     .status(code)
-                    .body(Body::empty())
+                    .body(T::Body::empty())
                     .unwrap(),
                 ));
               }
@@ -347,7 +356,7 @@ impl<'a, T: Handler<'a>> Router<T> {
             return Box::pin(ok(
               Response::builder()
                 .header(header::ALLOW, allow)
-                .body(Body::empty())
+                .body(T::Body::empty())
                 .unwrap(),
             ));
           }
@@ -364,7 +373,7 @@ impl<'a, T: Handler<'a>> Router<T> {
           Response::builder()
             .header(header::ALLOW, allow)
             .status(StatusCode::METHOD_NOT_ALLOWED)
-            .body(Body::empty())
+            .body(T::Body::empty())
             .unwrap(),
         ));
       }
@@ -373,7 +382,10 @@ impl<'a, T: Handler<'a>> Router<T> {
     match &self.not_found {
       Some(handler) => handler.handle(req),
       None => Box::pin(ok(
-        Response::builder().status(404).body(Body::empty()).unwrap(),
+        Response::builder()
+          .status(404)
+          .body(T::Body::empty())
+          .unwrap(),
       )),
     }
   }

@@ -10,4 +10,4 @@ readme = "README.md"
 
 [dependencies]
 futures = "0.3.6"
-hyper = "0.13.8"
+http = "0.2.1"
