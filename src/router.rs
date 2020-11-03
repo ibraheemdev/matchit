@@ -76,27 +76,6 @@ use http::{header, Method, Request, Response, StatusCode};
 use std::collections::HashMap;
 use std::str;
 
-/// An http handler
-pub trait Handler<'a>: 'a {
-  /// Errors produced by the handler.
-  type Error: Sync + Send;
-
-  /// The body type for the `Request` and `Response`
-  type Body: Sync + Send + Empty;
-
-  /// Handle the request and return the response asynchronously.
-  fn handle(
-    &self,
-    req: Request<Self::Body>,
-  ) -> BoxFuture<'a, Result<Response<Self::Body>, Self::Error>>;
-}
-
-/// A trait used for the `Response` and `Reqwest` body to create a response with
-/// an empty body
-pub trait Empty {
-  fn empty() -> Self;
-}
-
 /// Router is container which can be used to dispatch requests to different
 /// handler functions via configurable routes
 pub struct Router<T> {
@@ -156,23 +135,6 @@ pub struct Router<T> {
   /// The "Allow" header with allowed request methods is set before the handler
   /// is called.
   pub method_not_allowed: Option<T>,
-}
-
-impl<T> Default for Router<T> {
-  fn default() -> Self {
-    Router::<T> {
-      trees: HashMap::new(),
-      redirect_trailing_slash: true,
-      redirect_fixed_path: true,
-      handle_method_not_allowed: true,
-      handle_options: true,
-      global_allowed: String::new(),
-      global_options: None,
-      method_not_allowed: None,
-      not_found: None,
-      save_matched_route_path: false,
-    }
-  }
 }
 
 impl<T> Router<T> {
@@ -291,8 +253,48 @@ impl<T> Router<T> {
   }
 }
 
+/// The default httprouter configuration
+impl<'a, T: Handler<'a>> Default for Router<T> {
+  fn default() -> Self {
+    Router {
+      trees: HashMap::new(),
+      redirect_trailing_slash: true,
+      redirect_fixed_path: true,
+      handle_method_not_allowed: true,
+      handle_options: true,
+      global_allowed: String::new(),
+      global_options: None,
+      method_not_allowed: None,
+      not_found: None,
+      save_matched_route_path: false,
+    }
+  }
+}
+
+/// An asynchrounous http handler
+pub trait Handler<'a>: 'a {
+  /// Errors produced by the handler.
+  type Error: Sync + Send;
+
+  /// The body type for the `Request` and `Response`
+  type Body: Sync + Send + Empty;
+
+  /// Handle the request and return the response asynchronously.
+  fn handle(
+    &self,
+    req: Request<Self::Body>,
+  ) -> BoxFuture<'a, Result<Response<Self::Body>, Self::Error>>;
+}
+
+/// A trait used for the `Response` and `Request` body to create a response with
+/// an empty body
+pub trait Empty {
+  fn empty() -> Self;
+}
+
+/// Accepts http requests, and returns the appropriate response based on the request path
 impl<'a, T: Handler<'a>> Router<T> {
-  pub fn serve_http(
+  pub fn serve(
     &self,
     mut req: Request<T::Body>,
   ) -> BoxFuture<'a, Result<Response<T::Body>, T::Error>> {
