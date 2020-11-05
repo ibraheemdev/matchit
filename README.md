@@ -8,11 +8,11 @@ The router is optimized for high performance and a small memory footprint. It sc
 
 ## Features
 
-**Not tied to any http implementation** httprouter is not tied to any http implementation. It uses the [`http`](https://crates.io/crates/http) crate for generic http types, and can be used with any http server, such as [`hyper`](https://crates.io/crates/hyper), or [`tiny-http`](https://github.com/tiny-http/tiny-http).
+**Not tied to any http implementation** httprouter is not tied to any http implementation, as the `Router` is generic. It currently has a [`hyper`](https://crates.io/crates/hyper) backend that can be enabled with the `hyper-server` feature. A [`tiny-http`](https://github.com/tiny-http/tiny-http) backend is coming soon.
 
 **Only explicit matches:** With other routers, a requested URL path could match multiple patterns. Therefore they have some awkward pattern priority rules, like *longest match* or *first registered, first matched*. By design of this router, a request can only match exactly one or no route. As a result, there are also no unintended matches, which makes it great for SEO and improves the user experience.
 
-**Stop caring about trailing slashes:** Choose the URL style you like, the router automatically redirects the client if a trailing slash is missing or if there is one extra. Of course it only does so, if the new path has a handler. If you don't like it, you can [turn off this behavior](https://godoc.org/github.com/julienschmidt/httprouter#Router.RedirectTrailingSlash).
+**Stop caring about trailing slashes:** Choose the URL style you like, the router automatically redirects the client if a trailing slash is missing or if there is one extra. Of course it only does so, if the new path has a handler. If you don't like it, you can [turn off this behavior](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.redirect_trailing_slash).
 
 **Path auto-correction:** Besides detecting the missing or additional trailing slash at no extra cost, the router can also fix wrong cases and remove superfluous path elements (like `../` or `//`). Is [CAPTAIN CAPS LOCK](http://www.urbandictionary.com/define.php?term=Captain+Caps+Lock) one of your users? HttpRouter can help him by making a case-insensitive look-up and redirecting him to the correct URL.
 
@@ -22,43 +22,34 @@ The router is optimized for high performance and a small memory footprint. It sc
 
 **Best Performance:** [Benchmarks speak for themselves](https://github.com/julienschmidt/go-http-routing-benchmark). See below for technical details of the implementation.
 
-**No more server crashes:** You can set a [Panic handler](https://godoc.org/github.com/julienschmidt/httprouter#Router.PanicHandler) to deal with panics occurring during handling a HTTP request. The router then recovers and lets the `PanicHandler` log what happened and deliver a nice error page.
-
 **Perfect for APIs:** The router design encourages to build sensible, hierarchical RESTful APIs. Moreover it has built-in native support for [OPTIONS requests](http://zacstewart.com/2012/04/14/http-options-method.html) and `405 Method Not Allowed` replies.
 
-Of course you can also set **custom [`NotFound`](https://godoc.org/github.com/julienschmidt/httprouter#Router.NotFound) and  [`MethodNotAllowed`](https://godoc.org/github.com/julienschmidt/httprouter#Router.MethodNotAllowed) handlers** and [**serve static files**](https://godoc.org/github.com/julienschmidt/httprouter#Router.ServeFiles).
+Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowedd) handlers** and [**serve static files**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#impl).
 
 ## Usage
 
-This is just a quick introduction, view the [GoDoc](http://godoc.org/github.com/julienschmidt/httprouter) for details.
+This is just a quick introduction, view the [Docs](https://docs.rs/httprouter/0.0.0/httprouter/index.html) for details.
 
-Let's start with a trivial example:
+Let's start with a trivial example with hyper:
 
 ```rust
-package main
+use httprouter::{Router, Params};
+use std::convert::Infallible;
+use hyper::{Request, Response, Body};
 
-import (
-    "fmt"
-    "net/http"
-    "log"
-
-    "github.com/julienschmidt/httprouter"
-)
-
-func Index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-    fmt.Fprint(w, "Welcome!\n")
+async fn index(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+    Ok(Response::new("Hello, World!".into()))
 }
 
-func Hello(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-    fmt.Fprintf(w, "hello, %s!\n", ps.ByName("name"))
+async fn hello(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    let params = req.extensions().get::<Params>().unwrap();
+    Ok(Response::new(format!("Hello, {}", params.by_name("name").unwrap()).into()))
 }
 
-func main() {
-    router := httprouter.New()
-    router.GET("/", Index)
-    router.GET("/hello/:name", Hello)
-
-    log.Fatal(http.ListenAndServe(":8080", router))
+fn main() {
+    let router = Router::default();
+    router.get("/", index);
+    router.get("/hello/:name", hello);
 }
 ```
 
@@ -70,7 +61,7 @@ When using a `http.Handler` (using `router.Handler` or `http.HandlerFunc`) inste
 
 Named parameters only match a single path segment:
 
-```
+```ignore
 Pattern: /user/:user
 
  /user/gordon              match
@@ -85,7 +76,7 @@ Pattern: /user/:user
 
 The second type are *catch-all* parameters and have the form `*name`. Like the name suggests, they match everything. Therefore they must always be at the **end** of the pattern:
 
-```
+```ignore
 Pattern: /src/*filepath
 
  /src/                     match
@@ -97,7 +88,7 @@ Pattern: /src/*filepath
 
 The router relies on a tree structure which makes heavy use of *common prefixes*, it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie) (or just [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a common prefix also share a common parent. Here is a short example what the routing tree for the `GET` request method could look like:
 
-```
+```ignore
 Priority   Path             Handle
 9          \                *<1>
 3          ├s               nil
@@ -120,7 +111,7 @@ For even better scalability, the child nodes on each tree level are ordered by p
 1. Nodes which are part of the most routing paths are evaluated first. This helps to make as much routes as possible to be reachable as fast as possible.
 2. It is some sort of cost compensation. The longest reachable path (highest cost) can always be evaluated first. The following scheme visualizes the tree structure. Nodes are evaluated from top to bottom and from left to right.
 
-```
+```ignore
 ├------------
 ├---------
 ├-----
@@ -136,7 +127,7 @@ For even better scalability, the child nodes on each tree level are ordered by p
 
 Named parameters can be accessed `request.Context`:
 
-``rust
+```ignore
 func Hello(w http.ResponseWriter, r *http.Request) {
     params := httprouter.ParamsFromContext(r.Context())
 
@@ -153,7 +144,7 @@ Just try it out for yourself, the usage of HttpRouter is very straightforward. T
 One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers.
 This can be achieved using the [`Router.GlobalOPTIONS`](https://godoc.org/github.com/julienschmidt/httprouter#Router.GlobalOPTIONS) handler:
 
-``rust
+```ignore
 router.GlobalOPTIONS = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     if r.Header.Get("Access-Control-Request-Method") != "" {
         // Set CORS headers
@@ -179,7 +170,7 @@ Here is a quick example: Does your server serve multiple domains / hosts?
 You want to use sub-domains?
 Define a router per host!
 
-``rust
+```ignore
 // We need an object that implements the http.Handler interface.
 // Therefore we need a type for which we implement the ServeHTTP method.
 // We just use a map here, in which we map host names (with port) to http.Handlers
@@ -217,7 +208,7 @@ func main() {
 
 Another quick example: Basic Authentication (RFC 2617) for handles:
 
-``rust
+```ignore
 package main
 
 import (
@@ -274,7 +265,7 @@ You can use another [`http.Handler`](https://golang.org/pkg/net/http/#Handler), 
 
 The `NotFound` handler can for example be used to serve static files from the root path `/` (like an `index.html` file along with other assets):
 
-``rust
+```ignore
 // Serve static files from the ./public directory
 router.NotFound = http.FileServer(http.Dir("public"))
 ```

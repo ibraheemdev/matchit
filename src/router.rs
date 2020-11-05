@@ -89,10 +89,28 @@
 //! ```
 use crate::path::clean_path;
 use crate::tree::{Node, RouteLookup};
-use futures::future::{ok, BoxFuture};
-use http::{header, Method, Request, Response, StatusCode};
+use futures::future::{BoxFuture, Future};
+use http::Method;
 use std::collections::HashMap;
 use std::str;
+
+/// An asynchronous http handler
+pub trait Handler {
+  /// Errors produced by the handler.
+  type Error: Sync + Send;
+
+  /// Responses given by the handler.
+  type Response: Sync + Send + Default;
+
+  /// Requests recieved by the handler.
+  type Request: Sync + Send + Default;
+
+  /// The future response value.
+  type Future: Future<Output = Result<Self::Response, Self::Error>> + Send;
+
+  /// Handle the request and return the response asynchronously.
+  fn handle(&self, req: Self::Request) -> Self::Future;
+}
 
 /// Router is container which can be used to dispatch requests to different
 /// handler functions via configurable routes
@@ -230,14 +248,14 @@ impl<T> Router<T> {
     match path {
       "*" => {
         for method in self.trees.keys() {
-          if method != "OPTIONS" {
+          if method != Method::OPTIONS {
             allowed.push(method.to_string());
           }
         }
       }
       _ => {
         for method in self.trees.keys() {
-          if method == req_method || method == "OPTIONS" {
+          if method == req_method || method == Method::OPTIONS {
             continue;
           }
 
@@ -253,7 +271,7 @@ impl<T> Router<T> {
     };
 
     if !allowed.is_empty() {
-      allowed.push(String::from("OPTIONS"))
+      allowed.push(Method::OPTIONS.to_string())
     }
 
     allowed.join(", ")
@@ -261,7 +279,7 @@ impl<T> Router<T> {
 }
 
 /// The default httprouter configuration
-impl<'a, T: Handler<'a>> Default for Router<T> {
+impl<T> Default for Router<T> {
   fn default() -> Self {
     Router {
       trees: HashMap::new(),
@@ -277,124 +295,154 @@ impl<'a, T: Handler<'a>> Default for Router<T> {
   }
 }
 
-/// An asynchronous http handler
-pub trait Handler<'a>: 'a {
-  /// Errors produced by the handler.
-  type Error: Sync + Send;
+#[cfg(feature = "hyper-server")]
+pub mod hyper_server {
+  use super::*;
+  use hyper::{header, Body, Request, Response, StatusCode};
+  use std::convert::Infallible;
+  use std::marker::PhantomData;
 
-  /// The body type for the `Request` and `Response`
-  type Body: Sync + Send + Empty;
+  pub struct HandlerS<F, O>
+  where
+    F: Fn(Request<Body>) -> O,
+    O: Future<Output = Result<Response<Body>, Infallible>> + Send,
+  {
+    handler: F,
+    _t: PhantomData<O>,
+  }
 
-  /// Handle the request and return the response asynchronously.
-  fn handle(
-    &self,
-    req: Request<Self::Body>,
-  ) -> BoxFuture<'a, Result<Response<Self::Body>, Self::Error>>;
-}
+  impl<F, O> HandlerS<F, O>
+  where
+    F: Fn(Request<Body>) -> O,
+    O: Future<Output = Result<Response<Body>, Infallible>> + Send,
+  {
+    /// Create a `Handler` from an asynchronous user-defined handler function (`Factory`)
+    pub fn new(handler: F) -> Self {
+      HandlerS {
+        handler,
+        _t: PhantomData,
+      }
+    }
+  }
 
-/// A trait used for the `Response` and `Request` body to create a response with
-/// an empty body
-pub trait Empty {
-  fn empty() -> Self;
-}
+  impl<F, O> Handler for HandlerS<F, O>
+  where
+    F: Fn(Request<Body>) -> O,
+    O: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
+  {
+    type Request = Request<Body>;
+    type Response = Response<Body>;
+    type Error = Infallible;
+    type Future = BoxFuture<'static, Result<Response<Body>, Infallible>>;
 
-/// Accepts http requests, and returns the appropriate response based on the request path
-impl<'a, T: Handler<'a>> Router<T> {
-  pub fn serve(
-    &self,
-    mut req: Request<T::Body>,
-  ) -> BoxFuture<'a, Result<Response<T::Body>, T::Error>> {
-    let root = self.trees.get(req.method());
-    let path = req.uri().path();
-    if let Some(root) = root {
-      match root.get_value(path) {
-        Ok(lookup) => {
-          req.extensions_mut().insert(lookup.params);
-          return lookup.value.handle(req);
-        }
-        Err(tsr) => {
-          if req.method() != Method::CONNECT && path != "/" {
-            let code = match *req.method() {
-              // Moved Permanently, request with GET method
-              Method::GET => StatusCode::MOVED_PERMANENTLY,
-              // Permanent Redirect, request with same method
-              _ => StatusCode::PERMANENT_REDIRECT,
-            };
+    fn handle(
+      &self,
+      req: Self::Request,
+    ) -> BoxFuture<'static, Result<Self::Response, Self::Error>> {
+      Box::pin((self.handler)(req))
+    }
+  }
 
-            if tsr && self.redirect_trailing_slash {
-              let path = if path.len() > 1 && path.ends_with('/') {
-                path[..path.len() - 1].to_string()
-              } else {
-                path.to_string() + "/"
+  pub type BoxedHandler = Box<
+    dyn Handler<
+        Request = Request<Body>,
+        Response = Response<Body>,
+        Error = Infallible,
+        Future = BoxFuture<'static, Result<Response<Body>, Infallible>>,
+      > + Send
+      + Sync,
+  >;
+
+  impl Router<BoxedHandler> {
+    /// Serve the router on a hyper server
+    pub async fn serve(&self, mut req: Request<Body>) -> Result<Response<Body>, Infallible> {
+      let root = self.trees.get(req.method());
+      let path = req.uri().path();
+      if let Some(root) = root {
+        match root.get_value(path) {
+          Ok(lookup) => {
+            req.extensions_mut().insert(lookup.params);
+            return lookup.value.handle(req).await;
+          }
+          Err(tsr) => {
+            if req.method() != Method::CONNECT && path != "/" {
+              let code = match *req.method() {
+                // Moved Permanently, request with GET method
+                Method::GET => StatusCode::MOVED_PERMANENTLY,
+                // Permanent Redirect, request with same method
+                _ => StatusCode::PERMANENT_REDIRECT,
               };
 
-              return Box::pin(ok(
-                Response::builder()
-                  .header(header::LOCATION, path.as_str())
-                  .status(code)
-                  .body(T::Body::empty())
-                  .unwrap(),
-              ));
-            };
+              if tsr && self.redirect_trailing_slash {
+                let path = if path.len() > 1 && path.ends_with('/') {
+                  path[..path.len() - 1].to_string()
+                } else {
+                  path.to_string() + "/"
+                };
 
-            if self.redirect_fixed_path {
-              if let Some(fixed_path) =
-                root.find_case_insensitive_path(&clean_path(path), self.redirect_trailing_slash)
-              {
-                return Box::pin(ok(
+                return Ok(
                   Response::builder()
-                    .header(header::LOCATION, fixed_path.as_str())
+                    .header(header::LOCATION, path.as_str())
                     .status(code)
-                    .body(T::Body::empty())
+                    .body(Body::empty())
                     .unwrap(),
-                ));
-              }
+                );
+              };
+
+              if self.redirect_fixed_path {
+                if let Some(fixed_path) =
+                  root.find_case_insensitive_path(&clean_path(path), self.redirect_trailing_slash)
+                {
+                  return Ok(
+                    Response::builder()
+                      .header(header::LOCATION, fixed_path.as_str())
+                      .status(code)
+                      .body(Body::empty())
+                      .unwrap(),
+                  );
+                }
+              };
             };
+          }
+        }
+      };
+
+      if req.method() == Method::OPTIONS && self.handle_options {
+        let allow = self.allowed(path, &Method::OPTIONS);
+        if allow != "" {
+          match &self.global_options {
+            Some(handler) => return handler.handle(req).await,
+            None => {
+              return Ok(
+                Response::builder()
+                  .header(header::ALLOW, allow)
+                  .body(Body::empty())
+                  .unwrap(),
+              );
+            }
           };
         }
-      }
-    };
+      } else if self.handle_method_not_allowed {
+        let allow = self.allowed(path, req.method());
 
-    if req.method() == Method::OPTIONS && self.handle_options {
-      let allow = self.allowed(path, &Method::OPTIONS);
-      if allow != "" {
-        match &self.global_options {
-          Some(handler) => return handler.handle(req),
-          None => {
-            return Box::pin(ok(
-              Response::builder()
-                .header(header::ALLOW, allow)
-                .body(T::Body::empty())
-                .unwrap(),
-            ));
+        if !allow.is_empty() {
+          if let Some(ref handler) = self.method_not_allowed {
+            return handler.handle(req).await;
           }
-        };
-      }
-    } else if self.handle_method_not_allowed {
-      let allow = self.allowed(path, req.method());
-
-      if !allow.is_empty() {
-        if let Some(ref method_not_allowed) = self.method_not_allowed {
-          return method_not_allowed.handle(req);
+          return Ok(
+            Response::builder()
+              .header(header::ALLOW, allow)
+              .status(StatusCode::METHOD_NOT_ALLOWED)
+              .body(Body::empty())
+              .unwrap(),
+          );
         }
-        return Box::pin(ok(
-          Response::builder()
-            .header(header::ALLOW, allow)
-            .status(StatusCode::METHOD_NOT_ALLOWED)
-            .body(T::Body::empty())
-            .unwrap(),
-        ));
-      }
-    };
+      };
 
-    match &self.not_found {
-      Some(handler) => handler.handle(req),
-      None => Box::pin(ok(
-        Response::builder()
-          .status(404)
-          .body(T::Body::empty())
-          .unwrap(),
-      )),
+      match &self.not_found {
+        Some(handler) => handler.handle(req).await,
+        None => Ok(Response::builder().status(404).body(Body::empty()).unwrap()),
+      }
     }
   }
 }

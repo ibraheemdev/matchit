@@ -8,6 +8,11 @@ pub mod path;
 pub mod router;
 pub(crate) mod tree;
 
+#[doc(hidden)]
+pub use router::Router;
+#[doc(hidden)]
+pub use tree::Params;
+
 // test the code examples in README.md
 #[cfg(doctest)]
 mod test_readme {

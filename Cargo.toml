@@ -8,6 +8,18 @@ description = "A high performance HTTP request router that scales well."
 repository = "https://github.com/ibraheemdev/httprouter-rs/"
 readme = "README.md"
 
+[features]
+hyper-server = ["hyper"]
+
 [dependencies]
 futures = "0.3.6"
 http = "0.2.1"
+hyper = { version = "0.13.9", optional = true }
+
+[dev-dependencies]
+hyper = "0.13.9"
+tokio = { version = "0.2.0", features = ["full"] }
+
+[[example]]
+name = "main"
+required-features = ["hyper-server"]
