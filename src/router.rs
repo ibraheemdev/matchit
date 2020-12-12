@@ -8,31 +8,27 @@
 //! It scales well even with very long paths and a large number of routes.
 //! A compressing dynamic trie (radix tree) structure is used for efficient matching.
 //!
-//! A trivial example is:
-//!  ```rust
-//!  import (
-//!      "fmt"
-//!      "github.com/julienschmidt/httprouter"
-//!      "net/http"
-//!      "log"
-//!  )
-//!
-//!  func Index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-//!      fmt.Fprint(w, "Welcome!\n")
-//!  }
-//!
-//!  func Hello(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-//!      fmt.Fprintf(w, "hello, %s!\n", ps.ByName("name"))
-//!  }
-//!
-//!  func main() {
-//!      router := httprouter.New()
-//!      router.GET("/", Index)
-//!      router.GET("/hello/:name", Hello)
-//!
-//!      log.Fatal(http.ListenAndServe(":8080", router))
-//!  }
-//!  ```
+//! Here is a simple example:
+//! ```rust
+//! use httprouter::{Router, Params};
+//! use std::convert::Infallible;
+//! use hyper::{Request, Response, Body};
+//! 
+//! async fn index(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+//!     Ok(Response::new("Hello, World!".into()))
+//! }
+//! 
+//! async fn hello(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+//!     let params = req.extensions().get::<Params>().unwrap();
+//!     Ok(Response::new(format!("Hello, {}", params.by_name("user").unwrap()).into()))
+//! }
+//! 
+//! fn main() {
+//!     let router = Router::default();
+//!     router.get("/", index);
+//!     router.get("/hello/:user", hello);
+//! }
+//! ```
 //!
 //! The router matches incoming requests by the request method and the path.
 //! If a handle is registered for this path and method, the router delegates the
