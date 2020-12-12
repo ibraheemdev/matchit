@@ -55,8 +55,6 @@ fn main() {
 
 As you can see, `:user` is a *named parameter*. The values are accessible via `req.extensions().get::<Params>()`, which is just a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `by_name(name)` method: `:user` can be retrieved by `by_name("user")`.
 
-When using a `http.Handler` (using `router.Handler` or `http.HandlerFunc`) instead of HttpRouter's handle API using a 3rd function parameter, the named parameters are stored in the `request.Context`. See more below under [Why doesn't this work with http.Handler?](#why-doesnt-this-work-with-httphandler).
-
 Named parameters only match a single path segment:
 
 ```ignore
@@ -86,7 +84,7 @@ Pattern: /src/*filepath
 
 The router relies on a tree structure which makes heavy use of *common prefixes*, it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie) (or just [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a common prefix also share a common parent. Here is a short example what the routing tree for the `GET` request method could look like:
 
-```ignore
+```ignore,none
 Priority   Path             Handle
 9          \                *<1>
 3          ├s               nil
@@ -109,7 +107,7 @@ For even better scalability, the child nodes on each tree level are ordered by p
 1. Nodes which are part of the most routing paths are evaluated first. This helps to make as much routes as possible to be reachable as fast as possible.
 2. It is some sort of cost compensation. The longest reachable path (highest cost) can always be evaluated first. The following scheme visualizes the tree structure. Nodes are evaluated from top to bottom and from left to right.
 
-```ignore
+```ignore,none
 ├------------
 ├---------
 ├-----
@@ -121,153 +119,55 @@ For even better scalability, the child nodes on each tree level are ordered by p
 
 ## Automatic OPTIONS responses and CORS
 
-One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers.
-This can be achieved using the [`Router.GlobalOPTIONS`](https://godoc.org/github.com/julienschmidt/httprouter#Router.GlobalOPTIONS) handler:
+One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router.GlobalOPTIONS`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.global_options) handler:
 
-```ignore
-router.GlobalOPTIONS = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-    if r.Header.Get("Access-Control-Request-Method") != "" {
-        // Set CORS headers
-        header := w.Header()
-        header.Set("Access-Control-Allow-Methods", header.Get("Allow"))
-        header.Set("Access-Control-Allow-Origin", "*")
-    }
-
-    // Adjust status code to 204
-    w.WriteHeader(http.StatusNoContent)
+```rust
+router.global_options = Some(|req| -> Response<Body> {
+    Response::builder()
+        .header("Access-Control-Allow-Methods", "Allow")
+	.header("Access-Control-Allow-Origin", "*")
+        .body(Body::empty())
 })
 ```
 
-## Where can I find Middleware *X*?
-
-This package just provides a very efficient request router with a few extra features. The router is just a [`http.Handler`](https://golang.org/pkg/net/http/#Handler), you can chain any http.Handler compatible middleware before the router, for example the [Gorilla handlers](http://www.gorillatoolkit.org/pkg/handlers). Or you could [just write your own](https://justinas.org/writing-http-middleware-in-go/), it's very easy!
-
-Alternatively, you could try [a web framework based on HttpRouter](#web-frameworks-based-on-httprouter).
-
 ### Multi-domain / Sub-domains
 
-Here is a quick example: Does your server serve multiple domains / hosts?
-You want to use sub-domains?
-Define a router per host!
+Here is a quick example: Does your server serve multiple domains / hosts? You want to use sub-domains? Define a router per host!
 
-```ignore
-// We need an object that implements the http.Handler interface.
-// Therefore we need a type for which we implement the ServeHTTP method.
-// We just use a map here, in which we map host names (with port) to http.Handlers
-type HostSwitch map[string]http.Handler
-
-// Implement the ServeHTTP method on our new type
-func (hs HostSwitch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Check if a http.Handler is registered for the given host.
-	// If yes, use it to handle the request.
-	if handler := hs[r.Host]; handler != nil {
-		handler.ServeHTTP(w, r)
-	} else {
-		// Handle host names for which no handler is registered
-		http.Error(w, "Forbidden", 403) // Or Redirect?
-	}
-}
-
-func main() {
-	// Initialize a router as usual
-	router := httprouter.New()
-	router.GET("/", Index)
-	router.GET("/hello/:name", Hello)
-
-	// Make a new HostSwitch and insert the router (our http handler)
-	// for example.com and port 12345
-	hs := make(HostSwitch)
-	hs["example.com:12345"] = router
-
-	// Use the HostSwitch to listen and serve on port 12345
-	log.Fatal(http.ListenAndServe(":12345", hs))
-}
+```rust
+// TODO
 ```
 
 ### Basic Authentication
 
 Another quick example: Basic Authentication (RFC 2617) for handles:
 
-```ignore
-package main
-
-import (
-	"fmt"
-	"log"
-	"net/http"
-
-	"github.com/julienschmidt/httprouter"
-)
-
-func BasicAuth(h httprouter.Handle, requiredUser, requiredPassword string) httprouter.Handle {
-	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		// Get the Basic Authentication credentials
-		user, password, hasAuth := r.BasicAuth()
-
-		if hasAuth && user == requiredUser && password == requiredPassword {
-			// Delegate request to the given handle
-			h(w, r, ps)
-		} else {
-			// Request Basic Authentication otherwise
-			w.Header().Set("WWW-Authenticate", "Basic realm=Restricted")
-			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-		}
-	}
-}
-
-func Index(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	fmt.Fprint(w, "Not protected!\n")
-}
-
-func Protected(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	fmt.Fprint(w, "Protected!\n")
-}
-
-func main() {
-	user := "gordon"
-	pass := "secret!"
-
-	router := httprouter.New()
-	router.GET("/", Index)
-	router.GET("/protected/", BasicAuth(Protected, user, pass))
-
-	log.Fatal(http.ListenAndServe(":8080", router))
-}
+```rust
+// TODO
 ```
 
-## Chaining with the NotFound handler
+### Not Found Handler
 
-**NOTE: It might be required to set [`Router.HandleMethodNotAllowed`](https://godoc.org/github.com/julienschmidt/httprouter#Router.HandleMethodNotAllowed) to `false` to avoid problems.**
+**NOTE: It might be required to set [`Router::method_not_allowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowed) to `None` to avoid problems.**
 
-You can use another [`http.Handler`](https://golang.org/pkg/net/http/#Handler), for example another router, to handle requests which could not be matched by this router by using the [`Router.NotFound`](https://godoc.org/github.com/julienschmidt/httprouter#Router.NotFound) handler. This allows chaining.
+You can use another handler, to handle requests which could not be matched by this router by using the [`Router::not_found`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) handler.
+
+The `not_found` handler can for example be used to return a 404 page:
+
+```rust
+router.not_found = Some(|req| -> Response<Body> {
+  Response::builder()
+    .header("Location", "/404")
+    .status(404)
+    .body(Body::empty())
+    .unwrap();
+})
+```
 
 ### Static files
 
-The `NotFound` handler can for example be used to serve static files from the root path `/` (like an `index.html` file along with other assets):
+You can use the router to serve pages from a static file directory:
 
-```ignore
-// Serve static files from the ./public directory
-router.NotFound = http.FileServer(http.Dir("public"))
+```rust
+// TODO
 ```
-
-But this approach sidesteps the strict core rules of this router to avoid routing problems. A cleaner approach is to use a distinct sub-path for serving files, like `/static/*filepath` or `/files/*filepath`.
-
-## Web Frameworks based on HttpRouter
-
-If the HttpRouter is a bit too minimalistic for you, you might try one of the following more high-level 3rd-party web frameworks building upon the HttpRouter package:
-
-* [Ace](https://github.com/plimble/ace): Blazing fast Go Web Framework
-* [api2go](https://github.com/manyminds/api2go): A JSON API Implementation for Go
-* [Gin](https://github.com/gin-gonic/gin): Features a martini-like API with much better performance
-* [Goat](https://github.com/bahlo/goat): A minimalistic REST API server in Go
-* [goMiddlewareChain](https://github.com/TobiEiss/goMiddlewareChain): An express.js-like-middleware-chain
-* [Hikaru](https://github.com/najeira/hikaru): Supports standalone and Google AppEngine
-* [Hitch](https://github.com/nbio/hitch): Hitch ties httprouter, [httpcontext](https://github.com/nbio/httpcontext), and middleware up in a bow
-* [httpway](https://github.com/corneldamian/httpway): Simple middleware extension with context for httprouter and a server with gracefully shutdown support
-* [kami](https://github.com/guregu/kami): A tiny web framework using x/net/context
-* [Medeina](https://github.com/imdario/medeina): Inspired by Ruby's Roda and Cuba
-* [Neko](https://github.com/rocwong/neko): A lightweight web application framework for Golang
-* [pbgo](https://github.com/chai2010/pbgo): pbgo is a mini RPC/REST framework based on Protobuf
-* [River](https://github.com/abiosoft/river): River is a simple and lightweight REST server
-* [siesta](https://github.com/VividCortex/siesta): Composable HTTP handlers with contexts
-* [xmux](https://github.com/rs/xmux): xmux is a httprouter fork on top of xhandler (net/context aware)
