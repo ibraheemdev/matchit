@@ -1,6 +1,6 @@
 # HttpRouter
 
-HttpRouter is a lightweight high performance HTTP request router (also called *multiplexer* or just *mux* for short). It is a Rust port of [`julienschmidt/httprouter`](https://github.com/julienschmidt/httprouter).
+HttpRouter is a lightweight high performance HTTP request router. It is a Rust port of [`julienschmidt/httprouter`](https://github.com/julienschmidt/httprouter).
 
 This router supports variables in the routing pattern and matches against the request method. It also scales better.
 
@@ -8,7 +8,7 @@ The router is optimized for high performance and a small memory footprint. It sc
 
 ## Features
 
-**Not tied to any http implementation** httprouter is not tied to any http implementation, as the `Router` is generic. It currently has a [`hyper`](https://crates.io/crates/hyper) backend that can be enabled with the `hyper-server` feature. A [`tiny-http`](https://github.com/tiny-http/tiny-http) backend is coming soon.
+**Not tied to any http implementation** httprouter is not tied to any http implementation, as the `Router` is generic. It currently has a [`hyper`](https://crates.io/crates/hyper) backend available.
 
 **Only explicit matches:** With other routers, a requested URL path could match multiple patterns. Therefore they have some awkward pattern priority rules, like *longest match* or *first registered, first matched*. By design of this router, a request can only match exactly one or no route. As a result, there are also no unintended matches, which makes it great for SEO and improves the user experience.
 
@@ -18,19 +18,17 @@ The router is optimized for high performance and a small memory footprint. It sc
 
 **Parameters in your routing pattern:** Stop parsing the requested URL path, just give the path segment a name and the router delivers the dynamic value to you. Because of the design of the router, path parameters are very cheap.
 
-**Zero Garbage:** The matching and dispatching process generates zero bytes of garbage. The only heap allocations that are made are building the slice of the key-value pairs for path parameters, and building new context and request objects (the latter only in the standard `Handler`/`HandlerFunc` API). In the 3-argument API, if the request path contains no parameters not a single heap allocation is necessary.
-
-**Best Performance:** [Benchmarks speak for themselves](https://github.com/julienschmidt/go-http-routing-benchmark). See below for technical details of the implementation.
+**High Performance:** HttpRouter relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
 
 **Perfect for APIs:** The router design encourages to build sensible, hierarchical RESTful APIs. Moreover it has built-in native support for [OPTIONS requests](http://zacstewart.com/2012/04/14/http-options-method.html) and `405 Method Not Allowed` replies.
 
-Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowedd) handlers** and [**serve static files**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#impl).
+Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowedd) handlers** and [**serve static files**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#method.serve_files).
 
 ## Usage
 
 This is just a quick introduction, view the [Docs](https://docs.rs/httprouter/0.0.0/httprouter/index.html) for details.
 
-Let's start with a trivial example with hyper:
+Let's start with a simple example with hyper:
 
 ```rust
 use httprouter::{Router, Params};
@@ -43,19 +41,19 @@ async fn index(_: Request<Body>) -> Result<Response<Body>, Infallible> {
 
 async fn hello(req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let params = req.extensions().get::<Params>().unwrap();
-    Ok(Response::new(format!("Hello, {}", params.by_name("name").unwrap()).into()))
+    Ok(Response::new(format!("Hello, {}", params.by_name("user").unwrap()).into()))
 }
 
 fn main() {
     let router = Router::default();
     router.get("/", index);
-    router.get("/hello/:name", hello);
+    router.get("/hello/:user", hello);
 }
 ```
 
 ### Named parameters
 
-As you can see, `:name` is a *named parameter*. The values are accessible via `httprouter.Params`, which is just a slice of `httprouter.Param`s. You can get the value of a parameter either by its index in the slice, or by using the `ByName(name)` method: `:name` can be retrieved by `ByName("name")`.
+As you can see, `:user` is a *named parameter*. The values are accessible via `req.extensions().get::<Params>()`, which is just a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `by_name(name)` method: `:user` can be retrieved by `by_name("user")`.
 
 When using a `http.Handler` (using `router.Handler` or `http.HandlerFunc`) instead of HttpRouter's handle API using a 3rd function parameter, the named parameters are stored in the `request.Context`. See more below under [Why doesn't this work with http.Handler?](#why-doesnt-this-work-with-httphandler).
 
@@ -102,7 +100,7 @@ Priority   Path             Handle
 1          └contact\        *<8>
 ```
 
-Every `*<num>` represents the memory address of a handler function (a pointer). If you follow a path trough the tree from the root to the leaf, you get the complete route path, e.g `\blog\:post\`, where `:post` is just a placeholder ([*parameter*](#named-parameters)) for an actual post name. Unlike hash-maps, a tree structure also allows us to use dynamic parts like the `:post` parameter, since we actually match against the routing patterns instead of just comparing hashes. [As benchmarks show](https://github.com/julienschmidt/go-http-routing-benchmark), this works very well and efficient.
+Every `*<num>` represents the memory address of a handler function (a pointer). If you follow a path trough the tree from the root to the leaf, you get the complete route path, e.g `\blog\:post\`, where `:post` is just a placeholder ([*parameter*](#named-parameters)) for an actual post name. Unlike hash-maps, a tree structure also allows us to use dynamic parts like the `:post` parameter, since we actually match against the routing patterns instead of just comparing hashes. This works very well and efficiently.
 
 Since URL paths have a hierarchical structure and make use only of a limited set of characters (byte values), it is very likely that there are a lot of common prefixes. This allows us to easily reduce the routing into ever smaller problems. Moreover the router manages a separate tree for every request method. For one thing it is more space efficient than holding a method->handle map in every single node, it also allows us to greatly reduce the routing problem before even starting the look-up in the prefix-tree.
 
@@ -120,24 +118,6 @@ For even better scalability, the child nodes on each tree level are ordered by p
 ├--
 └-
 ```
-
-## Why doesn't this work with `http.Handler`?
-
-**It does!** The router itself implements the `http.Handler` interface. Moreover the router provides convenient [adapters for `http.Handler`](https://godoc.org/github.com/julienschmidt/httprouter#Router.Handler)s and [`http.HandlerFunc`](https://godoc.org/github.com/julienschmidt/httprouter#Router.HandlerFunc)s which allows them to be used as a [`httprouter.Handle`](https://godoc.org/github.com/julienschmidt/httprouter#Router.Handle) when registering a route.
-
-Named parameters can be accessed `request.Context`:
-
-```ignore
-func Hello(w http.ResponseWriter, r *http.Request) {
-    params := httprouter.ParamsFromContext(r.Context())
-
-    fmt.Fprintf(w, "hello, %s!\n", params.ByName("name"))
-}
-```
-
-Alternatively, one can also use `params := r.Context().Value(httprouter.ParamsKey)` instead of the helper function.
-
-Just try it out for yourself, the usage of HttpRouter is very straightforward. The package is compact and minimalistic, but also probably one of the easiest routers to set up.
 
 ## Automatic OPTIONS responses and CORS
 
