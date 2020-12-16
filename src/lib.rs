@@ -2,7 +2,7 @@
 //!
 //! See [`router`](./router/index.html) for more details
 
-#![deny(clippy::all)]
+// #![deny(clippy::all)]
 #![forbid(unsafe_code)]
 
 pub mod path;
@@ -13,6 +13,10 @@ pub(crate) mod tree;
 pub use router::Router;
 #[doc(hidden)]
 pub use tree::Params;
+
+#[cfg(feature = "hyper-server")]
+#[doc(hidden)]
+pub use router::hyper::{BoxedHandler, Handler};
 
 // test the code examples in README.md
 #[cfg(doctest)]

@@ -271,16 +271,21 @@ impl<T> Default for Router<T> {
 }
 
 #[cfg(feature = "hyper-server")]
-pub mod hyper_server {
+pub mod hyper {
   use crate::path::clean_path;
   use crate::Router;
   use futures::future::{ok, Future};
   use hyper::service::Service;
   use hyper::{header, Body, Method, Request, Response, StatusCode};
   use std::pin::Pin;
+  use std::sync::Arc;
   use std::task::{Context, Poll};
 
   pub trait Handler {
+    fn new(handler: Self) -> Box<Self>
+    where
+      Self: Sized;
+
     fn handle(
       &self,
       req: Request<Body>,
@@ -294,6 +299,13 @@ pub mod hyper_server {
     F: Fn(Request<Body>) -> R,
     R: Future<Output = Result<Response<Body>, hyper::Error>> + Send + Sync + 'static,
   {
+    fn new(handler: Self) -> Box<Self>
+    where
+      Self: Sized,
+    {
+      Box::new(handler)
+    }
+
     fn handle(
       &self,
       req: Request<Body>,
@@ -304,16 +316,25 @@ pub mod hyper_server {
 
   pub type BoxedHandler = Box<dyn Handler + Send + Sync>;
 
-  #[derive(Clone)]
-  pub struct RouterService(pub std::sync::Arc<Router<BoxedHandler>>);
+  pub struct MakeRouterService(pub RouterService);
+  impl<T> Service<T> for MakeRouterService {
+    type Response = RouterService;
+    type Error = hyper::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
-  impl std::ops::Deref for RouterService {
-    type Target = std::sync::Arc<Router<BoxedHandler>>;
+    fn poll_ready(&mut self, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+      Poll::Ready(Ok(()))
+    }
 
-    fn deref(&self) -> &Self::Target {
-      &self.0
+    fn call(&mut self, _: T) -> Self::Future {
+      let service = self.0.clone();
+      let fut = async move { Ok(service) };
+      Box::pin(fut)
     }
   }
+
+  #[derive(Clone)]
+  pub struct RouterService(pub Arc<Router<BoxedHandler>>);
 
   impl Service<Request<Body>> for RouterService {
     type Response = Response<Body>;
@@ -324,8 +345,40 @@ pub mod hyper_server {
       Poll::Ready(Ok(()))
     }
 
-    /// Serve the router on a hyper server
-    fn call(&mut self, mut req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request<Body>) -> Self::Future {
+      self.0.serve(req)
+    }
+  }
+
+  impl Router<BoxedHandler> {
+    /// Converts the `Router` into a hyper `Service`
+    /// ```rust
+    /// use httprouter::Router;
+    ///
+    /// // Our router...
+    /// let router = Router::default();
+    ///
+    /// // Convert it into a service...
+    /// let service = router.into_service();
+    ///
+    /// // Typical hyper setup...
+    /// let make_svc = hyper::service::make_service_fn(move |_| async move {
+    ///     Ok::<_, Infallible>(service)
+    /// });
+    ///
+    /// // Serve with hyper
+    /// hyper::Server::bind(&([127, 0, 0, 1], 3030).into())
+    ///     .serve(make_svc)
+    ///     .await?;
+    /// ```
+    pub fn into_service(self) -> MakeRouterService {
+      MakeRouterService(RouterService(Arc::new(self)))
+    }
+
+    fn serve(
+      &self,
+      mut req: Request<Body>,
+    ) -> Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>> {
       let root = self.trees.get(req.method());
       let path = req.uri().path();
       if let Some(root) = root {
