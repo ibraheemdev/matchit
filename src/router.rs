@@ -13,16 +13,16 @@
 //! use httprouter::{Router, Params};
 //! use std::convert::Infallible;
 //! use hyper::{Request, Response, Body};
-//! 
+//!
 //! async fn index(_: Request<Body>) -> Result<Response<Body>, Infallible> {
 //!     Ok(Response::new("Hello, World!".into()))
 //! }
-//! 
+//!
 //! async fn hello(req: Request<Body>) -> Result<Response<Body>, Infallible> {
 //!     let params = req.extensions().get::<Params>().unwrap();
 //!     Ok(Response::new(format!("Hello, {}", params.by_name("user").unwrap()).into()))
 //! }
-//! 
+//!
 //! fn main() {
 //!     let router = Router::default();
 //!     router.get("/", index);
@@ -83,9 +83,8 @@
 //!  thirdKey   := params[2].key   // the name of the 3rd parameter
 //!  thirdValue := params[2].value // the value of the 3rd parameter
 //! ```
-use crate::path::clean_path;
 use crate::tree::{Node, RouteLookup};
-use futures::future::{BoxFuture, Future};
+use futures::future::Future;
 use http::Method;
 use std::collections::HashMap;
 use std::str;
@@ -199,14 +198,14 @@ impl<T> Router<T> {
     self.handle(Method::DELETE, path, handle);
   }
 
-  // Handle registers a new request handle with the given path and method.
-  //
-  // For GET, POST, PUT, PATCH and DELETE requests the respective shortcut
-  // functions can be used.
-  //
-  // This function is intended for bulk loading and to allow the usage of less
-  // frequently used, non-standardized or custom methods (e.g. for internal
-  // communication with a proxy).
+  /// Handle registers a new request handle with the given path and method.
+  ///
+  /// For GET, POST, PUT, PATCH and DELETE requests the respective shortcut
+  /// functions can be used.
+  ///
+  /// This function is intended for bulk loading and to allow the usage of less
+  /// frequently used, non-standardized or custom methods (e.g. for internal
+  /// communication with a proxy).
   pub fn handle(&mut self, method: Method, path: &str, handle: T) {
     if !path.starts_with('/') {
       panic!("path must begin with '/' in path '{}'", path);
@@ -237,8 +236,8 @@ impl<T> Router<T> {
     unimplemented!()
   }
 
-  // returns a list of the allowed methods for a specific path
-  // eg: 'GET, PATCH, OPTIONS'
+  /// returns a list of the allowed methods for a specific path
+  /// eg: 'GET, PATCH, OPTIONS'
   pub fn allowed(&self, path: &str, req_method: &Method) -> String {
     let mut allowed: Vec<String> = Vec::new();
     match path {
@@ -294,64 +293,29 @@ impl<T> Default for Router<T> {
 #[cfg(feature = "hyper-server")]
 pub mod hyper_server {
   use super::*;
+  use crate::path::clean_path;
+  use futures::future::BoxFuture;
   use hyper::{header, Body, Request, Response, StatusCode};
-  use std::convert::Infallible;
-  use std::marker::PhantomData;
 
-  pub struct HandlerS<F, O>
-  where
-    F: Fn(Request<Body>) -> O,
-    O: Future<Output = Result<Response<Body>, Infallible>> + Send,
-  {
-    handler: F,
-    _t: PhantomData<O>,
+  pub trait Handler {
+    fn handle(&self, req: Request<Body>) -> BoxFuture<Result<Response<Body>, hyper::Error>>;
   }
 
-  impl<F, O> HandlerS<F, O>
+  impl<F, R> Handler for F
   where
-    F: Fn(Request<Body>) -> O,
-    O: Future<Output = Result<Response<Body>, Infallible>> + Send,
+    F: Fn(Request<Body>) -> R,
+    R: Future<Output = Result<Response<Body>, hyper::Error>> + Send + Sync + 'static,
   {
-    /// Create a `Handler` from an asynchronous user-defined handler function (`Factory`)
-    pub fn new(handler: F) -> Self {
-      HandlerS {
-        handler,
-        _t: PhantomData,
-      }
+    fn handle(&self, req: Request<Body>) -> BoxFuture<Result<Response<Body>, hyper::Error>> {
+      Box::pin(self(req))
     }
   }
 
-  impl<F, O> Handler for HandlerS<F, O>
-  where
-    F: Fn(Request<Body>) -> O,
-    O: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
-  {
-    type Request = Request<Body>;
-    type Response = Response<Body>;
-    type Error = Infallible;
-    type Future = BoxFuture<'static, Result<Response<Body>, Infallible>>;
-
-    fn handle(
-      &self,
-      req: Self::Request,
-    ) -> BoxFuture<'static, Result<Self::Response, Self::Error>> {
-      Box::pin((self.handler)(req))
-    }
-  }
-
-  pub type BoxedHandler = Box<
-    dyn Handler<
-        Request = Request<Body>,
-        Response = Response<Body>,
-        Error = Infallible,
-        Future = BoxFuture<'static, Result<Response<Body>, Infallible>>,
-      > + Send
-      + Sync,
-  >;
+  pub type BoxedHandler = Box<dyn Handler + Send + Sync>;
 
   impl Router<BoxedHandler> {
     /// Serve the router on a hyper server
-    pub async fn serve(&self, mut req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    pub async fn serve(&self, mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
       let root = self.trees.get(req.method());
       let path = req.uri().path();
       if let Some(root) = root {
