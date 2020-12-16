@@ -1,4 +1,4 @@
-use std::cmp::min;
+use std::cmp::{min, Ordering};
 use std::mem;
 use std::ops::Index;
 use std::str;
@@ -18,8 +18,8 @@ pub struct Param {
 }
 
 impl Param {
-  pub fn new(key: &str, value: &str) -> Self {
-    Self {
+  pub fn new(key: &str, value: &str) -> Param {
+    Param {
       key: key.to_string(),
       value: value.to_string(),
     }
@@ -34,7 +34,7 @@ pub struct Params(pub Vec<Param>);
 
 impl Default for Params {
   fn default() -> Self {
-    Self(Vec::new())
+    Params(Vec::new())
   }
 }
 
@@ -104,7 +104,7 @@ pub struct Node<V> {
 
 impl<V> Default for Node<V> {
   fn default() -> Self {
-    Self {
+    Node {
       path: Vec::new(),
       wild_child: false,
       node_type: NodeType::Static,
@@ -135,7 +135,7 @@ impl<V> Node<V> {
     if new_pos != pos {
       self.indices = [
         &self.indices[..new_pos],    // unchanged prefix, might be empty
-        &self.indices[pos..=pos],    // the index char we move
+        &self.indices[pos..=pos], // the index char we move
         &self.indices[new_pos..pos], // rest without char at 'pos'
         &self.indices[pos + 1..],
       ]
@@ -172,13 +172,13 @@ impl<V> Node<V> {
 
     // Split edge
     if i < self.path.len() {
-      let mut child = Self {
+      let mut child = Node {
         path: self.path[i..].to_vec(),
         wild_child: self.wild_child,
         indices: self.indices.clone(),
         value: self.value.take(),
         priority: self.priority - 1,
-        ..Self::default()
+        ..Node::default()
       };
 
       mem::swap(&mut self.children, &mut child.children);
@@ -218,7 +218,7 @@ impl<V> Node<V> {
       if idxc != b':' && idxc != b'*' {
         self.indices.push(idxc);
 
-        self.children.push(Box::new(Self::default()));
+        self.children.push(Box::new(Node::default()));
 
         let child = self.increment_child_prio(self.indices.len() - 1);
         return self.children[child].insert_child(path, full_path, value);
@@ -333,7 +333,7 @@ impl<V> Node<V> {
 
       if wildcard.len() < path.len() {
         path = &path[wildcard.len()..];
-        let child = Self {
+        let child = Node {
           priority: 1,
           ..Self::default()
         };
@@ -368,10 +368,10 @@ impl<V> Node<V> {
     }
 
     // first node: CatchAll Node with empty path
-    let child = Self {
+    let child = Node {
       wild_child: true,
       node_type: NodeType::CatchAll,
-      ..Self::default()
+      ..Node::default()
     };
 
     self.path = path[..wildcard_index].to_vec();
@@ -380,12 +380,12 @@ impl<V> Node<V> {
     self.children[0].priority += 1;
 
     // Second node: node holding the variable
-    let child = Self {
+    let child = Node {
       path: path[wildcard_index..].to_vec(),
       node_type: NodeType::CatchAll,
       value: Some(value),
       priority: 1,
-      ..Self::default()
+      ..Node::default()
     };
 
     self.children[0].children = vec![Box::new(child)];

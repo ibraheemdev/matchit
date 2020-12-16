@@ -1,4 +1,4 @@
-//! HttpRouter is a lightweight high performance HTTP request router.
+//! `Router` is a lightweight high performance HTTP request router.
 //! It is a Rust port of [`julienschmidt/httprouter`](https://github.com/julienschmidt/httprouter).
 //!
 //! This router supports variables in the routing pattern and matches against
@@ -227,8 +227,7 @@ impl<T> Router<T> {
     self
       .trees
       .get_mut(method)
-      .map(|n| n.get_value(path))
-      .unwrap_or(Err(false))
+      .map_or(Err(false), |n| n.get_value(path))
   }
 
   /// [TODO]
@@ -276,7 +275,7 @@ impl<T> Router<T> {
 /// The default httprouter configuration
 impl<T> Default for Router<T> {
   fn default() -> Self {
-    Router {
+    Self {
       trees: HashMap::new(),
       redirect_trailing_slash: true,
       redirect_fixed_path: true,
@@ -292,10 +291,10 @@ impl<T> Default for Router<T> {
 
 #[cfg(feature = "hyper-server")]
 pub mod hyper_server {
-  use super::*;
+  use crate::Router; 
   use crate::path::clean_path;
-  use futures::future::BoxFuture;
-  use hyper::{header, Body, Request, Response, StatusCode};
+  use futures::future::{Future, BoxFuture};
+  use hyper::{header, Body, Request, Response, Method, StatusCode};
 
   pub trait Handler {
     fn handle(&self, req: Request<Body>) -> BoxFuture<Result<Response<Body>, hyper::Error>>;
