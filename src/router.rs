@@ -129,9 +129,6 @@ pub struct Router<T> {
   /// The `Allowed` header is set before calling the handler.
   pub global_options: Option<T>,
 
-  /// Cached value of global `(*)` allowed methods
-  pub global_allowed: String,
-
   /// Configurable handler which is called when no matching route is
   /// found.
   pub not_found: Option<T>,
@@ -262,7 +259,6 @@ impl<T> Default for Router<T> {
       redirect_fixed_path: true,
       handle_method_not_allowed: true,
       handle_options: true,
-      global_allowed: String::new(),
       global_options: None,
       method_not_allowed: None,
       not_found: None,
