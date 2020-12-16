@@ -84,28 +84,9 @@
 //!  thirdValue := params[2].value // the value of the 3rd parameter
 //! ```
 use crate::tree::{Node, RouteLookup};
-use futures::future::Future;
 use http::Method;
 use std::collections::HashMap;
 use std::str;
-
-/// An asynchronous http handler
-pub trait Handler {
-  /// Errors produced by the handler.
-  type Error: Sync + Send;
-
-  /// Responses given by the handler.
-  type Response: Sync + Send + Default;
-
-  /// Requests recieved by the handler.
-  type Request: Sync + Send + Default;
-
-  /// The future response value.
-  type Future: Future<Output = Result<Self::Response, Self::Error>> + Send;
-
-  /// Handle the request and return the response asynchronously.
-  fn handle(&self, req: Self::Request) -> Self::Future;
-}
 
 /// Router is container which can be used to dispatch requests to different
 /// handler functions via configurable routes
@@ -291,37 +272,67 @@ impl<T> Default for Router<T> {
 
 #[cfg(feature = "hyper-server")]
 pub mod hyper_server {
-  use crate::Router; 
   use crate::path::clean_path;
-  use futures::future::{Future, BoxFuture};
-  use hyper::{header, Body, Request, Response, Method, StatusCode};
+  use crate::Router;
+  use futures::future::{ok, Future};
+  use hyper::service::Service;
+  use hyper::{header, Body, Method, Request, Response, StatusCode};
+  use std::pin::Pin;
+  use std::task::{Context, Poll};
 
   pub trait Handler {
-    fn handle(&self, req: Request<Body>) -> BoxFuture<Result<Response<Body>, hyper::Error>>;
+    fn handle(
+      &self,
+      req: Request<Body>,
+    ) -> Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>>;
   }
+
+  type HandlerResult = Result<Response<Body>, hyper::Error>;
 
   impl<F, R> Handler for F
   where
     F: Fn(Request<Body>) -> R,
     R: Future<Output = Result<Response<Body>, hyper::Error>> + Send + Sync + 'static,
   {
-    fn handle(&self, req: Request<Body>) -> BoxFuture<Result<Response<Body>, hyper::Error>> {
+    fn handle(
+      &self,
+      req: Request<Body>,
+    ) -> Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>> {
       Box::pin(self(req))
     }
   }
 
   pub type BoxedHandler = Box<dyn Handler + Send + Sync>;
 
-  impl Router<BoxedHandler> {
+  #[derive(Clone)]
+  pub struct RouterService(pub std::sync::Arc<Router<BoxedHandler>>);
+
+  impl std::ops::Deref for RouterService {
+    type Target = std::sync::Arc<Router<BoxedHandler>>;
+
+    fn deref(&self) -> &Self::Target {
+      &self.0
+    }
+  }
+
+  impl Service<Request<Body>> for RouterService {
+    type Response = Response<Body>;
+    type Error = hyper::Error;
+    type Future = Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+      Poll::Ready(Ok(()))
+    }
+
     /// Serve the router on a hyper server
-    pub async fn serve(&self, mut req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    fn call(&mut self, mut req: Request<Body>) -> Self::Future {
       let root = self.trees.get(req.method());
       let path = req.uri().path();
       if let Some(root) = root {
         match root.get_value(path) {
           Ok(lookup) => {
             req.extensions_mut().insert(lookup.params);
-            return lookup.value.handle(req).await;
+            return lookup.value.handle(req);
           }
           Err(tsr) => {
             if req.method() != Method::CONNECT && path != "/" {
@@ -339,26 +350,26 @@ pub mod hyper_server {
                   path.to_string() + "/"
                 };
 
-                return Ok(
+                return Box::pin(ok(
                   Response::builder()
                     .header(header::LOCATION, path.as_str())
                     .status(code)
                     .body(Body::empty())
                     .unwrap(),
-                );
+                ));
               };
 
               if self.redirect_fixed_path {
                 if let Some(fixed_path) =
                   root.find_case_insensitive_path(&clean_path(path), self.redirect_trailing_slash)
                 {
-                  return Ok(
+                  return Box::pin(ok(
                     Response::builder()
                       .header(header::LOCATION, fixed_path.as_str())
                       .status(code)
                       .body(Body::empty())
                       .unwrap(),
-                  );
+                  ));
                 }
               };
             };
@@ -370,14 +381,14 @@ pub mod hyper_server {
         let allow = self.allowed(path, &Method::OPTIONS);
         if allow != "" {
           match &self.global_options {
-            Some(handler) => return handler.handle(req).await,
+            Some(handler) => return handler.handle(req),
             None => {
-              return Ok(
+              return Box::pin(ok(
                 Response::builder()
                   .header(header::ALLOW, allow)
                   .body(Body::empty())
                   .unwrap(),
-              );
+              ));
             }
           };
         }
@@ -386,21 +397,23 @@ pub mod hyper_server {
 
         if !allow.is_empty() {
           if let Some(ref handler) = self.method_not_allowed {
-            return handler.handle(req).await;
+            return handler.handle(req);
           }
-          return Ok(
+          return Box::pin(ok(
             Response::builder()
               .header(header::ALLOW, allow)
               .status(StatusCode::METHOD_NOT_ALLOWED)
               .body(Body::empty())
               .unwrap(),
-          );
+          ));
         }
       };
 
       match &self.not_found {
-        Some(handler) => handler.handle(req).await,
-        None => Ok(Response::builder().status(404).body(Body::empty()).unwrap()),
+        Some(handler) => handler.handle(req),
+        None => Box::pin(ok(
+          Response::builder().status(404).body(Body::empty()).unwrap(),
+        )),
       }
     }
   }

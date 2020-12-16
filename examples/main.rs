@@ -1,5 +1,8 @@
-use httprouter::{router::hyper_server::BoxedHandler, Params, Router};
-use hyper::service::{make_service_fn, service_fn};
+use httprouter::{
+  router::hyper_server::{BoxedHandler, RouterService},
+  Params, Router,
+};
+use hyper::service::make_service_fn;
 use hyper::{Body, Request, Response};
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -27,13 +30,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 pub async fn serve(
   router: Router<BoxedHandler>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-  let service = Arc::new(router);
-  let make_svc = make_service_fn(move |_| {
-    let service = service.clone();
-    futures::future::ok::<_, Infallible>(service_fn(move |req| {
-      service.serve(req)
-    }))
-  });
+  let service = RouterService(Arc::new(router));
+  let make_svc = make_service_fn(move |_| futures::future::ok::<_, Infallible>(service.clone()));
   hyper::Server::bind(&([127, 0, 0, 1], 3000).into())
     .serve(make_svc)
     .await?;
