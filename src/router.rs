@@ -91,7 +91,7 @@ use std::str;
 /// Router is container which can be used to dispatch requests to different
 /// handler functions via configurable routes
 pub struct Router<T> {
-  pub trees: HashMap<Method, Node<T>>,
+  trees: HashMap<Method, Node<T>>,
 
   /// Enables automatic redirection if the current route can't be matched but a
   /// handler for the path with (without) the trailing slash exists.
