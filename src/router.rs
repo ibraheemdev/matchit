@@ -13,7 +13,7 @@
 //! use httprouter::{Router, Params, Handler, BoxedHandler};
 //! use std::convert::Infallible;
 //! use hyper::{Request, Response, Body, Error};
-//! 
+//!
 //! async fn index(_: Request<Body>) -> Result<Response<Body>, Error> {
 //!     Ok(Response::new("Hello, World!".into()))
 //! }
@@ -90,13 +90,15 @@
 //! ```
 use crate::tree::{Node, RouteLookup};
 use http::Method;
+use std::cmp::Eq;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::str;
 
 /// Router is container which can be used to dispatch requests to different
 /// handler functions via configurable routes
-pub struct Router<T> {
-  trees: HashMap<Method, Node<T>>,
+pub struct Router<K: Eq + Hash, V> {
+  trees: HashMap<K, Node<V>>,
 
   /// Enables automatic redirection if the current route can't be matched but a
   /// handler for the path with (without) the trailing slash exists.
@@ -132,76 +134,39 @@ pub struct Router<T> {
   /// The handler is only called if `handle_options` is true and no `OPTIONS`
   /// handler for the specific path was set.
   /// The `Allowed` header is set before calling the handler.
-  pub global_options: Option<T>,
+  pub global_options: Option<V>,
 
   /// Configurable handler which is called when no matching route is
   /// found.
-  pub not_found: Option<T>,
+  pub not_found: Option<V>,
 
   /// Configurable handler which is called when a request
   /// cannot be routed and `handle_method_not_allowed` is true.
   /// The `Allow` header with allowed request methods is set before the handler
   /// is called.
-  pub method_not_allowed: Option<T>,
+  pub method_not_allowed: Option<V>,
 }
 
-impl<T> Router<T> {
-  /// Register a handler for GET requests
-  pub fn get(&mut self, path: &str, handle: T) {
-    self.handle(Method::GET, path, handle);
-  }
-
-  /// Register a handler for HEAD requests
-  pub fn head(&mut self, path: &str, handle: T) {
-    self.handle(Method::HEAD, path, handle);
-  }
-
-  /// Register a handler for OPTIONS requests
-  pub fn options(&mut self, path: &str, handle: T) {
-    self.handle(Method::OPTIONS, path, handle);
-  }
-
-  /// Register a handler for POST requests
-  pub fn post(&mut self, path: &str, handle: T) {
-    self.handle(Method::POST, path, handle);
-  }
-
-  /// Register a handler for PUT requests
-  pub fn put(&mut self, path: &str, handle: T) {
-    self.handle(Method::PUT, path, handle);
-  }
-
-  /// Register a handler for PATCH requests
-  pub fn patch(&mut self, path: &str, handle: T) {
-    self.handle(Method::PATCH, path, handle);
-  }
-
-  /// Register a handler for DELETE requests
-  pub fn delete(&mut self, path: &str, handle: T) {
-    self.handle(Method::DELETE, path, handle);
-  }
-
-  /// Register a new handler for a specific method.
-  ///
-  /// For GET, POST, PUT, PATCH and DELETE requests the respective shortcut
-  /// methods can be used.
+impl<K: Eq + Hash, V> Router<K, V> {
+  /// Insert a value into the tree. Values are indexed by keys. For example, the httprouter uses
+  /// http methods as keys for improved performance.
   /// ```rust
   /// use httprouter::Router;
   /// use http::Method;
   ///
   /// let mut router = Router::default();
-  /// router.handle(Method::from_bytes(b"TEAPOT").unwrap(), "/teapot", "I am a teapot");
+  /// router.handle(, "/teapot", "I am a teapot");
   /// ```
-  pub fn handle(&mut self, method: Method, path: &str, handle: T) {
+  pub fn handle(&mut self, path: &str, key: K, value: V) {
     if !path.starts_with('/') {
       panic!("path must begin with '/' in path '{}'", path);
     }
 
     self
       .trees
-      .entry(method)
+      .entry(key)
       .or_insert_with(Node::default)
-      .add_route(path, handle);
+      .add_route(path, value);
   }
 
   /// Lookup allows the manual lookup of handler for a specific method and path.
@@ -212,21 +177,58 @@ impl<T> Router<T> {
   ///
   /// let mut router = Router::default();
   /// router.get("/home", "Welcome!");
-  /// 
+  ///
   /// let res = router.lookup(&Method::GET, "/home").unwrap();
   /// assert_eq!(res.value, &"Welcome!");
   /// assert!(res.params.is_empty());
   /// ```
-  pub fn lookup(&mut self, method: &Method, path: &str) -> Result<RouteLookup<T>, bool> {
+  pub fn lookup(&mut self, key: &K, path: &str) -> Result<RouteLookup<V>, bool> {
     self
       .trees
-      .get_mut(method)
+      .get_mut(key)
       .map_or(Err(false), |n| n.get_value(path))
   }
 
   /// [TODO]
   pub fn serve_files() {
     unimplemented!()
+  }
+}
+
+impl<V> Router<Method, V> {
+  /// Register a handler for GET requests
+  pub fn get(&mut self, path: &str, handle: V) {
+    self.handle(path, Method::GET, handle);
+  }
+
+  /// Register a handler for HEAD requests
+  pub fn head(&mut self, path: &str, handle: V) {
+    self.handle(path, Method::HEAD, handle);
+  }
+
+  /// Register a handler for OPTIONS requests
+  pub fn options(&mut self, path: &str, handle: V) {
+    self.handle(path, Method::OPTIONS, handle);
+  }
+
+  /// Register a handler for POST requests
+  pub fn post(&mut self, path: &str, handle: V) {
+    self.handle(path, Method::POST, handle);
+  }
+
+  /// Register a handler for PUT requests
+  pub fn put(&mut self, path: &str, handle: V) {
+    self.handle(path, Method::PUT, handle);
+  }
+
+  /// Register a handler for PATCH requests
+  pub fn patch(&mut self, path: &str, handle: V) {
+    self.handle(path, Method::PATCH, handle);
+  }
+
+  /// Register a handler for DELETE requests
+  pub fn delete(&mut self, path: &str, handle: V) {
+    self.handle(path, Method::DELETE, handle);
   }
 
   /// Returns a list of the allowed methods for a specific path
@@ -278,7 +280,7 @@ impl<T> Router<T> {
 }
 
 /// The default httprouter configuration
-impl<T> Default for Router<T> {
+impl<K: Eq + Hash, V> Default for Router<K, V> {
   fn default() -> Self {
     Self {
       trees: HashMap::new(),
@@ -340,6 +342,7 @@ pub mod hyper {
   pub type BoxedHandler = Box<dyn Handler + Send + Sync>;
 
   pub struct MakeRouterService(pub RouterService);
+
   impl<T> Service<T> for MakeRouterService {
     type Response = RouterService;
     type Error = hyper::Error;
@@ -357,7 +360,7 @@ pub mod hyper {
   }
 
   #[derive(Clone)]
-  pub struct RouterService(pub Arc<Router<BoxedHandler>>);
+  pub struct RouterService(pub Arc<Router<Method, BoxedHandler>>);
 
   impl Service<Request<Body>> for RouterService {
     type Response = Response<Body>;
@@ -373,7 +376,7 @@ pub mod hyper {
     }
   }
 
-  impl Router<BoxedHandler> {
+  impl Router<Method, BoxedHandler> {
     /// Converts the `Router` into a hyper `Service`
     /// ```rust
     /// # use httprouter::Router;
