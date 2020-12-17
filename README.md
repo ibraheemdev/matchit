@@ -30,8 +30,8 @@ This is just a quick introduction, view the [Docs](https://docs.rs/httprouter/0.
 
 Let's start with a simple example with hyper:
 
-```ignore,no_run
-use httprouter::{Router, Params, Handler, BoxedHandler};
+```rust,no_run
+use httprouter::{Router, Params, Handler};
 use std::convert::Infallible;
 use hyper::{Request, Response, Body, Error};
 
@@ -46,7 +46,7 @@ async fn hello(req: Request<Body>) -> Result<Response<Body>, Error> {
 
 #[tokio::main]
 async fn main() {
-    let mut router: Router<BoxedHandler> = Router::default();
+    let mut router = Router::default();
     router.get("/", Handler::new(index));
     router.get("/hello/:user", Handler::new(hello));
 
@@ -127,8 +127,8 @@ For even better scalability, the child nodes on each tree level are ordered by p
 One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router.GlobalOPTIONS`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.global_options) handler:
 
 ```rust
-# use httprouter::{Router, BoxedHandler, Handler};
-# use hyper::{Request, Response, Body, Error};
+use httprouter::{Router, BoxedHandler, Handler};
+use hyper::{Request, Response, Body, Error};
 
 async fn global_options(_: Request<Body>) -> Result<Response<Body>, Error> {
     Ok(Response::builder()
@@ -138,10 +138,10 @@ async fn global_options(_: Request<Body>) -> Result<Response<Body>, Error> {
         .unwrap())
 }
 
-# fn main() {
-# let mut router = Router::default();
-router.global_options = Some(Handler::new(global_options));
-# }
+fn main() {
+  let mut router = Router::default();
+  router.global_options = Some(Handler::new(global_options));
+}
 ```
 
 ### Multi-domain / Sub-domains
@@ -169,8 +169,8 @@ You can use another handler, to handle requests which could not be matched by th
 The `not_found` handler can for example be used to return a 404 page:
 
 ```rust
-# use httprouter::{Router, BoxedHandler, Handler};
-# use hyper::{Request, Response, Body};
+use httprouter::{Router, BoxedHandler, Handler};
+use hyper::{Request, Response, Body};
 
 async fn not_found(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
   Ok(Response::builder()
@@ -180,10 +180,10 @@ async fn not_found(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
     .unwrap())
 };
 
-# fn main() {
-# let mut router = Router::default();
-router.not_found = Some(Handler::new(not_found));
-# }
+fn main() {
+  let mut router = Router::default();
+  router.not_found = Some(Handler::new(not_found));
+}
 ```
 
 ### Static files
