@@ -2,17 +2,13 @@
 
 HttpRouter is a lightweight high performance HTTP request router.
 
-This router supports variables in the routing pattern and matches against the request method. It also scales better.
+This router supports variables in the routing pattern and matches against the request method. It also scales very well.
 
 The router is optimized for high performance and a small memory footprint. It scales well even with very long paths and a large number of routes. A compressing dynamic trie (radix tree) structure is used for efficient matching.
 
 ## Features
 
-**Not tied to any http implementation** HttpRouter is not tied to any http implementation, as the `Router` is generic. It currently has a [`hyper`](https://crates.io/crates/hyper) backend available.
-
 **Only explicit matches:** With other routers, a requested URL path could match multiple patterns. Therefore they have some awkward pattern priority rules, like *longest match* or *first registered, first matched*. By design of this router, a request can only match exactly one or no route. As a result, there are also no unintended matches, which makes it great for SEO and improves the user experience.
-
-**Stop caring about trailing slashes:** Choose the URL style you like, the router automatically redirects the client if a trailing slash is missing or if there is one extra. Of course it only does so, if the new path has a handler. If you don't like it, you can [turn off this behavior](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.redirect_trailing_slash).
 
 **Path auto-correction:** Besides detecting the missing or additional trailing slash at no extra cost, the router can also fix wrong cases and remove superfluous path elements (like `../` or `//`). Is [CAPTAIN CAPS LOCK](http://www.urbandictionary.com/define.php?term=Captain+Caps+Lock) one of your users? HttpRouter can help him by making a case-insensitive look-up and redirecting him to the correct URL.
 
@@ -20,9 +16,7 @@ The router is optimized for high performance and a small memory footprint. It sc
 
 **High Performance:** HttpRouter relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
 
-**Perfect for APIs:** The router design encourages to build sensible, hierarchical RESTful APIs. Moreover it has built-in native support for [OPTIONS requests](http://zacstewart.com/2012/04/14/http-options-method.html) and `405 Method Not Allowed` replies.
-
-Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowedd) handlers** and [**serve static files**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#method.serve_files).
+Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowed) handlers** , [**serve static files**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#method.serve_files), and [**automatically respond to OPTIONS requests**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.global_options)
 
 ## Usage
 
@@ -54,7 +48,7 @@ async fn main() {
 }
 ```
 
-Because the `Router` is generic, it can be used to store arbitrary values. This makes it flexible enough to be used as a building block for larger framework:
+Because the `Router` is generic, it can be used to store arbitrary values. This makes it flexible enough to be used as a building block for larger frameworks:
 
 ```rust
 use httprouter::Router;
@@ -64,14 +58,15 @@ fn main() {
     router.handle("/users/:id", 1, "Welcome!".to_string());
 
     let res = router.lookup(&1, "/users/200").unwrap();
+    
     assert_eq!(res.params.by_name("id"), Some("200"));
-    assert_eq!(res.value, &"Welcome!".to_string());
+    assert_eq!(res.value, &"Welcome!".into());
 }
 ```
 
 ### Named parameters
 
-As you can see, `:user` is a *named parameter*. The values are accessible via `req.extensions().get::<Params>()`, which is just a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `by_name(name)` method: `:user` can be retrieved by `by_name("user")`.
+As you can see, `:user` is a *named parameter*. The values are accessible via [`Params`](), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::by_name(name)` method. For example, `:user` can be retrieved by `params.by_name("user")`. With the `hyper` server, you can access the params in a handler function by calling `req.extensions().get::<Params>()`.
 
 Named parameters only match a single path segment:
 
@@ -215,14 +210,6 @@ async fn main() {
         .serve(make_svc)
         .await;
 }
-```
-
-### Basic Authentication
-
-Another quick example: Basic Authentication (RFC 2617) for handles:
-
-```rust
-// TODO
 ```
 
 ### Not Found Handler
