@@ -60,7 +60,7 @@ fn main() {
     let res = router.lookup(&1, "/users/200").unwrap();
     
     assert_eq!(res.params.by_name("id"), Some("200"));
-    assert_eq!(res.value, &"Welcome!".into());
+    assert_eq!(res.value, &"Welcome!".to_string());
 }
 ```
 
