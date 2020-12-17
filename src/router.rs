@@ -9,24 +9,29 @@
 //! A compressing dynamic trie (radix tree) structure is used for efficient matching.
 //!
 //! Here is a simple example:
-//! ```rust
-//! use httprouter::{Router, Params};
+//! ```rust,no_run
+//! use httprouter::{Router, Params, Handler, BoxedHandler};
 //! use std::convert::Infallible;
-//! use hyper::{Request, Response, Body};
-//!
-//! async fn index(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+//! use hyper::{Request, Response, Body, Error};
+//! 
+//! async fn index(_: Request<Body>) -> Result<Response<Body>, Error> {
 //!     Ok(Response::new("Hello, World!".into()))
 //! }
 //!
-//! async fn hello(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+//! async fn hello(req: Request<Body>) -> Result<Response<Body>, Error> {
 //!     let params = req.extensions().get::<Params>().unwrap();
 //!     Ok(Response::new(format!("Hello, {}", params.by_name("user").unwrap()).into()))
 //! }
 //!
-//! fn main() {
-//!     let router = Router::default();
-//!     router.get("/", index);
-//!     router.get("/hello/:user", hello);
+//! #[tokio::main]
+//! async fn main() {
+//!     let mut router: Router<BoxedHandler> = Router::default();
+//!     router.get("/", Handler::new(index));
+//!     router.get("/hello/:user", Handler::new(hello));
+//!
+//!     hyper::Server::bind(&([127, 0, 0, 1], 3000).into())
+//!        .serve(router.into_service())
+//!        .await;
 //! }
 //! ```
 //!
@@ -141,49 +146,52 @@ pub struct Router<T> {
 }
 
 impl<T> Router<T> {
-  /// get is a shortcut for `router.handle(Method::GET, path, handle)`
+  /// Register a handler for GET requests
   pub fn get(&mut self, path: &str, handle: T) {
     self.handle(Method::GET, path, handle);
   }
 
-  /// head is a shortcut for `router.handle(Method::HEAD, path, handle)`
+  /// Register a handler for HEAD requests
   pub fn head(&mut self, path: &str, handle: T) {
     self.handle(Method::HEAD, path, handle);
   }
 
-  /// options is a shortcut for `router.handle(Method::OPTIONS, path, handle)`
+  /// Register a handler for OPTIONS requests
   pub fn options(&mut self, path: &str, handle: T) {
     self.handle(Method::OPTIONS, path, handle);
   }
 
-  /// post is a shortcut for `router.handle(Method::POST, path, handle)`
+  /// Register a handler for POST requests
   pub fn post(&mut self, path: &str, handle: T) {
     self.handle(Method::POST, path, handle);
   }
 
-  /// put is a shortcut for `router.handle(Method::POST, path, handle)`
+  /// Register a handler for PUT requests
   pub fn put(&mut self, path: &str, handle: T) {
     self.handle(Method::PUT, path, handle);
   }
 
-  /// patch is a shortcut for `router.handle(Method::PATCH, path, handle)`
+  /// Register a handler for PATCH requests
   pub fn patch(&mut self, path: &str, handle: T) {
     self.handle(Method::PATCH, path, handle);
   }
 
-  /// delete is a shortcut for `router.handle(Method::DELETE, path, handle)`
+  /// Register a handler for DELETE requests
   pub fn delete(&mut self, path: &str, handle: T) {
     self.handle(Method::DELETE, path, handle);
   }
 
-  /// Handle registers a new request handle with the given path and method.
+  /// Register a new handler for a specific method.
   ///
   /// For GET, POST, PUT, PATCH and DELETE requests the respective shortcut
-  /// functions can be used.
+  /// methods can be used.
+  /// ```rust
+  /// use httprouter::Router;
+  /// use http::Method;
   ///
-  /// This function is intended for bulk loading and to allow the usage of less
-  /// frequently used, non-standardized or custom methods (e.g. for internal
-  /// communication with a proxy).
+  /// let mut router = Router::default();
+  /// router.handle(Method::from_bytes(b"TEAPOT").unwrap(), "/teapot", "I am a teapot");
+  /// ```
   pub fn handle(&mut self, method: Method, path: &str, handle: T) {
     if !path.starts_with('/') {
       panic!("path must begin with '/' in path '{}'", path);
@@ -196,11 +204,19 @@ impl<T> Router<T> {
       .add_route(path, handle);
   }
 
-  /// Lookup allows the manual lookup of a method + path combo.
-  /// This is e.g. useful to build a framework around this router.
-  /// If the path was found, it returns the handle function and the path parameter
-  /// values. Otherwise the third return value indicates whether a redirection to
-  /// the same path with an extra / without the trailing slash should be performed.
+  /// Lookup allows the manual lookup of handler for a specific method and path.
+  /// If the handler is not found, it returns a `Err(bool)` indicating whethre a redirection should be performed to the same path with a trailing slash
+  /// ```rust
+  /// use httprouter::Router;
+  /// use http::Method;
+  ///
+  /// let mut router = Router::default();
+  /// router.get("/home", "Welcome!");
+  /// 
+  /// let res = router.lookup(&Method::GET, "/home").unwrap();
+  /// assert_eq!(res.value, &"Welcome!");
+  /// assert!(res.params.is_empty());
+  /// ```
   pub fn lookup(&mut self, method: &Method, path: &str) -> Result<RouteLookup<T>, bool> {
     self
       .trees
@@ -213,9 +229,20 @@ impl<T> Router<T> {
     unimplemented!()
   }
 
-  /// returns a list of the allowed methods for a specific path
-  /// eg: 'GET, PATCH, OPTIONS'
-  pub fn allowed(&self, path: &str, req_method: &Method) -> String {
+  /// Returns a list of the allowed methods for a specific path
+  /// ```rust
+  /// use httprouter::Router;
+  /// use http::Method;
+  ///
+  /// let mut router = Router::default();
+  /// router.get("/products", "all products");
+  /// router.post("/products", "product created");
+  ///
+  /// let allowed = router.allowed("/products");
+  /// assert!(allowed.contains(&"GET".to_string()));
+  /// assert!(allowed.contains(&"POST".to_string()));
+  /// ```
+  pub fn allowed(&self, path: &str) -> Vec<String> {
     let mut allowed: Vec<String> = Vec::new();
     match path {
       "*" => {
@@ -227,7 +254,7 @@ impl<T> Router<T> {
       }
       _ => {
         for method in self.trees.keys() {
-          if method == req_method || method == Method::OPTIONS {
+          if method == Method::OPTIONS {
             continue;
           }
 
@@ -246,7 +273,7 @@ impl<T> Router<T> {
       allowed.push(Method::OPTIONS.to_string())
     }
 
-    allowed.join(", ")
+    allowed
   }
 }
 
@@ -349,23 +376,21 @@ pub mod hyper {
   impl Router<BoxedHandler> {
     /// Converts the `Router` into a hyper `Service`
     /// ```rust
-    /// use httprouter::Router;
-    ///
+    /// # use httprouter::Router;
+    /// # use std::convert::Infallible;
+    /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
     /// // Our router...
     /// let router = Router::default();
     ///
     /// // Convert it into a service...
     /// let service = router.into_service();
     ///
-    /// // Typical hyper setup...
-    /// let make_svc = hyper::service::make_service_fn(move |_| async move {
-    ///     Ok::<_, Infallible>(service)
-    /// });
-    ///
     /// // Serve with hyper
     /// hyper::Server::bind(&([127, 0, 0, 1], 3030).into())
-    ///     .serve(make_svc)
+    ///     .serve(service)
     ///     .await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn into_service(self) -> MakeRouterService {
       MakeRouterService(RouterService(Arc::new(self)))
@@ -427,7 +452,7 @@ pub mod hyper {
       };
 
       if req.method() == Method::OPTIONS && self.handle_options {
-        let allow = self.allowed(path, &Method::OPTIONS);
+        let allow = self.allowed(path).join(", ");
         if allow != "" {
           match &self.global_options {
             Some(handler) => return handler.handle(req),
@@ -442,7 +467,7 @@ pub mod hyper {
           };
         }
       } else if self.handle_method_not_allowed {
-        let allow = self.allowed(path, req.method());
+        let allow = self.allowed(path).join(", ");
 
         if !allow.is_empty() {
           if let Some(ref handler) = self.method_not_allowed {

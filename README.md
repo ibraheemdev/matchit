@@ -30,24 +30,29 @@ This is just a quick introduction, view the [Docs](https://docs.rs/httprouter/0.
 
 Let's start with a simple example with hyper:
 
-```rust
-use httprouter::{Router, Params};
+```ignore,no_run
+use httprouter::{Router, Params, Handler, BoxedHandler};
 use std::convert::Infallible;
-use hyper::{Request, Response, Body};
+use hyper::{Request, Response, Body, Error};
 
-async fn index(_: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn index(_: Request<Body>) -> Result<Response<Body>, Error> {
     Ok(Response::new("Hello, World!".into()))
 }
 
-async fn hello(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn hello(req: Request<Body>) -> Result<Response<Body>, Error> {
     let params = req.extensions().get::<Params>().unwrap();
     Ok(Response::new(format!("Hello, {}", params.by_name("user").unwrap()).into()))
 }
 
-fn main() {
-    let router = Router::default();
-    router.get("/", index);
-    router.get("/hello/:user", hello);
+#[tokio::main]
+async fn main() {
+    let mut router: Router<BoxedHandler> = Router::default();
+    router.get("/", Handler::new(index));
+    router.get("/hello/:user", Handler::new(hello));
+
+    hyper::Server::bind(&([127, 0, 0, 1], 3000).into())
+        .serve(router.into_service())
+        .await;
 }
 ```
 
@@ -122,12 +127,21 @@ For even better scalability, the child nodes on each tree level are ordered by p
 One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router.GlobalOPTIONS`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.global_options) handler:
 
 ```rust
-router.global_options = Some(|req| -> Response<Body> {
-    Response::builder()
+# use httprouter::{Router, BoxedHandler, Handler};
+# use hyper::{Request, Response, Body, Error};
+
+async fn global_options(_: Request<Body>) -> Result<Response<Body>, Error> {
+    Ok(Response::builder()
         .header("Access-Control-Allow-Methods", "Allow")
 	.header("Access-Control-Allow-Origin", "*")
         .body(Body::empty())
-})
+        .unwrap())
+}
+
+# fn main() {
+# let mut router = Router::default();
+router.global_options = Some(Handler::new(global_options));
+# }
 ```
 
 ### Multi-domain / Sub-domains
@@ -155,13 +169,21 @@ You can use another handler, to handle requests which could not be matched by th
 The `not_found` handler can for example be used to return a 404 page:
 
 ```rust
-router.not_found = Some(|req| -> Response<Body> {
-  Response::builder()
+# use httprouter::{Router, BoxedHandler, Handler};
+# use hyper::{Request, Response, Body};
+
+async fn not_found(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+  Ok(Response::builder()
     .header("Location", "/404")
     .status(404)
     .body(Body::empty())
-    .unwrap();
-})
+    .unwrap())
+};
+
+# fn main() {
+# let mut router = Router::default();
+router.not_found = Some(Handler::new(not_found));
+# }
 ```
 
 ### Static files

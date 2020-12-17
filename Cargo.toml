@@ -9,6 +9,7 @@ repository = "https://github.com/ibraheemdev/httprouter-rs/"
 readme = "README.md"
 
 [features]
+default = ["hyper-server"]
 hyper-server = ["hyper"]
 
 [dependencies]
@@ -19,7 +20,3 @@ hyper = { version = "0.13.9", optional = true }
 [dev-dependencies]
 hyper = "0.13.9"
 tokio = { version = "0.2.0", features = ["full"] }
-
-[[example]]
-name = "main"
-required-features = ["hyper-server"]

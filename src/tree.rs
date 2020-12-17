@@ -38,10 +38,6 @@ impl Default for Params {
   }
 }
 
-// MATCHED_ROUTE_PATH_PARAM is the Param name under which the path of the matched
-// route is stored, if Router.SaveMatchedRoutePath is set.
-const MATCHED_ROUTE_PATH_PARAM: &str = "$matchedRoutePath";
-
 impl Params {
   /// Returns the value of the first `Param` whose key matches the given name.
   pub fn by_name(&self, name: &str) -> Option<&str> {
@@ -58,13 +54,6 @@ impl Params {
   /// Add a URL paramter to the list (`Param`)
   pub fn push(&mut self, p: Param) {
     self.0.push(p);
-  }
-
-  // MatchedRoutePath retrieves the path of the matched route.
-  // Router.SaveMatchedRoutePath must have been enabled when the respective
-  // handler was added, otherwise this function always returns `None`.
-  pub fn matched_route_path(&self) -> Option<&str> {
-    self.by_name(MATCHED_ROUTE_PATH_PARAM)
   }
 }
 
