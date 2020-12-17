@@ -10,7 +10,7 @@
 //!
 //! Here is a simple example:
 //! ```rust,no_run
-//! use httprouter::{Router, Params, Handler, BoxedHandler};
+//! use httprouter::{Router, HyperRouter, Params, Handler};
 //! use std::convert::Infallible;
 //! use hyper::{Request, Response, Body, Error};
 //!
@@ -25,7 +25,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     let mut router: Router<BoxedHandler> = Router::default();
+//!     let mut router: HyperRouter = Router::default();
 //!     router.get("/", Handler::new(index));
 //!     router.get("/hello/:user", Handler::new(hello));
 //!
@@ -152,10 +152,9 @@ impl<K: Eq + Hash, V> Router<K, V> {
   /// http methods as keys for improved performance.
   /// ```rust
   /// use httprouter::Router;
-  /// use http::Method;
   ///
-  /// let mut router = Router::default();
-  /// router.handle(, "/teapot", "I am a teapot");
+  /// let mut router: Router<u8, String> = Router::default();
+  /// router.handle("/teapot", 1, "I am a teapot".to_string());
   /// ```
   pub fn handle(&mut self, path: &str, key: K, value: V) {
     if !path.starts_with('/') {
@@ -339,7 +338,7 @@ pub mod hyper {
     }
   }
 
-  pub type BoxedHandler = Box<dyn Handler + Send + Sync>;
+  pub type HyperRouter = Router<Method, Box<dyn Handler + Send + Sync>>;
 
   pub struct MakeRouterService(pub RouterService);
 
@@ -360,7 +359,7 @@ pub mod hyper {
   }
 
   #[derive(Clone)]
-  pub struct RouterService(pub Arc<Router<Method, BoxedHandler>>);
+  pub struct RouterService(pub Arc<HyperRouter>);
 
   impl Service<Request<Body>> for RouterService {
     type Response = Response<Body>;
@@ -376,7 +375,7 @@ pub mod hyper {
     }
   }
 
-  impl Router<Method, BoxedHandler> {
+  impl Router<Method, Box<dyn Handler + Send + Sync>> {
     /// Converts the `Router` into a hyper `Service`
     /// ```rust
     /// # use httprouter::Router;

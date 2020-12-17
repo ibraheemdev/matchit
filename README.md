@@ -31,7 +31,7 @@ This is just a quick introduction, view the [Docs](https://docs.rs/httprouter/0.
 Let's start with a simple example with hyper:
 
 ```rust,no_run
-use httprouter::{Router, Params, Handler};
+use httprouter::{Router, HyperRouter, Params, Handler};
 use std::convert::Infallible;
 use hyper::{Request, Response, Body, Error};
 
@@ -46,7 +46,7 @@ async fn hello(req: Request<Body>) -> Result<Response<Body>, Error> {
 
 #[tokio::main]
 async fn main() {
-    let mut router = Router::default();
+    let mut router: HyperRouter = Router::default();
     router.get("/", Handler::new(index));
     router.get("/hello/:user", Handler::new(hello));
 
@@ -127,7 +127,7 @@ For even better scalability, the child nodes on each tree level are ordered by p
 One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router.GlobalOPTIONS`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.global_options) handler:
 
 ```rust
-use httprouter::{Router, BoxedHandler, Handler};
+use httprouter::{Router, HyperRouter, Handler};
 use hyper::{Request, Response, Body, Error};
 
 async fn global_options(_: Request<Body>) -> Result<Response<Body>, Error> {
@@ -139,7 +139,7 @@ async fn global_options(_: Request<Body>) -> Result<Response<Body>, Error> {
 }
 
 fn main() {
-  let mut router = Router::default();
+  let mut router: HyperRouter = Router::default();
   router.global_options = Some(Handler::new(global_options));
 }
 ```
@@ -169,7 +169,7 @@ You can use another handler, to handle requests which could not be matched by th
 The `not_found` handler can for example be used to return a 404 page:
 
 ```rust
-use httprouter::{Router, BoxedHandler, Handler};
+use httprouter::{Router, HyperRouter, Handler};
 use hyper::{Request, Response, Body};
 
 async fn not_found(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
@@ -181,7 +181,7 @@ async fn not_found(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
 };
 
 fn main() {
-  let mut router = Router::default();
+  let mut router: HyperRouter = Router::default();
   router.not_found = Some(Handler::new(not_found));
 }
 ```

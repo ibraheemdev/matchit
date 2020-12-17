@@ -16,7 +16,7 @@ pub use tree::Params;
 
 #[cfg(feature = "hyper-server")]
 #[doc(hidden)]
-pub use router::hyper::{BoxedHandler, Handler};
+pub use router::hyper::{Handler, HyperRouter};
 
 // test the code examples in README.md
 #[cfg(doctest)]
