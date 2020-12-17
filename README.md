@@ -158,10 +158,9 @@ fn main() {
 Here is a quick example: Does your server serve multiple domains / hosts? You want to use sub-domains? Define a router per host!
 
 ```rust,no_run
-use futures::future::{ok, BoxFuture};
 use httprouter::{Handler, HyperRouter, Router};
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Result, Server, StatusCode};
+use hyper::{Body, Request, Response, Server, StatusCode};
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -169,22 +168,22 @@ use std::sync::Arc;
 pub struct HostSwitch(HashMap<String, HyperRouter>);
 
 impl HostSwitch {
-    fn serve(&self, req: Request<Body>) -> BoxFuture<'static, Result<Response<Body>>> {
+    async fn serve(&self, req: Request<Body>) -> hyper::Result<Response<Body>> {
         let forbidden = Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(Body::empty())
             .unwrap();
         match req.headers().get("host") {
             Some(host) => match self.0.get(host.to_str().unwrap()) {
-                Some(router) => router.serve(req),
-                None => Box::pin(ok(forbidden)),
+                Some(router) => router.serve(req).await,
+                None => Ok(forbidden),
             },
-            None => Box::pin(ok(forbidden)),
+            None => Ok(forbidden),
         }
     }
 }
 
-async fn hello(_: Request<Body>) -> Result<Response<Body>> {
+async fn hello(_: Request<Body>) -> hyper::Result<Response<Body>> {
     Ok(Response::new(Body::default()))
 }
 
@@ -197,12 +196,13 @@ async fn main() {
     host_switch.0.insert("example.com:12345".into(), router);
 
     let host_switch = Arc::new(host_switch);
+    
     let make_svc = make_service_fn(move |_| {
         let host_switch = host_switch.clone();
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                let fut = host_switch.serve(req);
-                async move { fut.await }
+                let host_switch = host_switch.clone();
+                async move { host_switch.serve(req).await }
             }))
         }
     });
