@@ -13,7 +13,7 @@
 //! use httprouter::{Router, Params, Handler, BoxedHandler};
 //! use std::convert::Infallible;
 //! use hyper::{Request, Response, Body, Error};
-//! 
+//!
 //! async fn index(_: Request<Body>) -> Result<Response<Body>, Error> {
 //!     Ok(Response::new("Hello, World!".into()))
 //! }
@@ -212,7 +212,7 @@ impl<T> Router<T> {
   ///
   /// let mut router = Router::default();
   /// router.get("/home", "Welcome!");
-  /// 
+  ///
   /// let res = router.lookup(&Method::GET, "/home").unwrap();
   /// assert_eq!(res.value, &"Welcome!");
   /// assert!(res.params.is_empty());
