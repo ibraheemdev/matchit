@@ -188,7 +188,7 @@ impl<K: Eq + Hash, V> Router<K, V> {
       .map_or(Err(false), |n| n.get_value(path))
   }
 
-  /// [TODO]
+  /// TODO
   pub fn serve_files() {
     unimplemented!()
   }
@@ -398,7 +398,7 @@ pub mod hyper {
       MakeRouterService(RouterService(Arc::new(self)))
     }
 
-    fn serve(
+    pub fn serve(
       &self,
       mut req: Request<Body>,
     ) -> Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>> {

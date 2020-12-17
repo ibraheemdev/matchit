@@ -1,6 +1,6 @@
 # HttpRouter
 
-HttpRouter is a lightweight high performance HTTP request router. It is a Rust port of [`julienschmidt/httprouter`](https://github.com/julienschmidt/httprouter).
+HttpRouter is a lightweight high performance HTTP request router.
 
 This router supports variables in the routing pattern and matches against the request method. It also scales better.
 
@@ -26,9 +26,7 @@ Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/0.0.
 
 ## Usage
 
-This is just a quick introduction, view the [Docs](https://docs.rs/httprouter/0.0.0/httprouter/index.html) for details.
-
-Let's start with a simple example with hyper:
+With the `hyper-server` feature enabled, the `Router` can be used as a router for a hyper server:
 
 ```rust,no_run
 use httprouter::{Router, HyperRouter, Params, Handler};
@@ -53,6 +51,21 @@ async fn main() {
     hyper::Server::bind(&([127, 0, 0, 1], 3000).into())
         .serve(router.into_service())
         .await;
+}
+```
+
+Because the `Router` is generic, it can be used to store arbitrary values. This makes it flexible enough to be used as a building block for larger framework:
+
+```rust
+use httprouter::Router;
+
+fn main() {
+    let mut router: Router<usize, String> = Router::default();
+    router.handle("/users/:id", 1, "Welcome!".to_string());
+
+    let res = router.lookup(&1, "/users/200").unwrap();
+    assert_eq!(res.params.by_name("id"), Some("200"));
+    assert_eq!(res.value, &"Welcome!".to_string());
 }
 ```
 
@@ -148,8 +161,60 @@ fn main() {
 
 Here is a quick example: Does your server serve multiple domains / hosts? You want to use sub-domains? Define a router per host!
 
-```rust
-// TODO
+```rust,no_run
+use futures::future::{ok, BoxFuture};
+use httprouter::{Handler, HyperRouter, Router};
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Request, Response, Result, Server, StatusCode};
+use std::collections::HashMap;
+use std::convert::Infallible;
+use std::sync::Arc;
+
+pub struct HostSwitch(HashMap<String, HyperRouter>);
+
+impl HostSwitch {
+    fn serve(&self, req: Request<Body>) -> BoxFuture<'static, Result<Response<Body>>> {
+        let forbidden = Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(Body::empty())
+            .unwrap();
+        match req.headers().get("host") {
+            Some(host) => match self.0.get(host.to_str().unwrap()) {
+                Some(router) => router.serve(req),
+                None => Box::pin(ok(forbidden)),
+            },
+            None => Box::pin(ok(forbidden)),
+        }
+    }
+}
+
+async fn hello(_: Request<Body>) -> Result<Response<Body>> {
+    Ok(Response::new(Body::default()))
+}
+
+#[tokio::main]
+async fn main() {
+    let mut router: HyperRouter = Router::default();
+    router.get("/", Handler::new(hello));
+
+    let mut host_switch: HostSwitch = HostSwitch(HashMap::new());
+    host_switch.0.insert("example.com:12345".into(), router);
+
+    let host_switch = Arc::new(host_switch);
+    let make_svc = make_service_fn(move |_| {
+        let host_switch = host_switch.clone();
+        async move {
+            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
+                let fut = host_switch.serve(req);
+                async move { fut.await }
+            }))
+        }
+    });
+
+    let server = Server::bind(&([127, 0, 0, 1], 3000).into())
+        .serve(make_svc)
+        .await;
+}
 ```
 
 ### Basic Authentication
