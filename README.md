@@ -52,12 +52,13 @@ Because the `Router` is generic, it can be used to store arbitrary values. This 
 
 ```rust
 use httprouter::Router;
+use hyper::Method;
 
 fn main() {
-    let mut router: Router<usize, String> = Router::default();
-    router.handle("/users/:id", 1, "Welcome!".to_string());
+    let mut router: Router<Method, String> = Router::default();
+    router.handle("/users/:id", Method::GET, "Welcome!".to_string());
 
-    let res = router.lookup(&1, "/users/200").unwrap();
+    let res = router.lookup(&Method::GET, "/users/200").unwrap();
     
     assert_eq!(res.params.by_name("id"), Some("200"));
     assert_eq!(res.value, &"Welcome!".to_string());
