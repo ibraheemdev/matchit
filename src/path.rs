@@ -1,8 +1,5 @@
 //! Utility methods for URL paths
 
-/// CleanPath is the URL version of path.Clean, it returns a canonical URL path
-/// for p, eliminating . and .. elements.
-///
 /// The following rules are applied iteratively until no further processing can
 /// be done:
 /// 1. Replace multiple slashes with a single slash.
@@ -13,7 +10,7 @@
 ///    that is, replace "/.." by "/" at the beginning of a path.
 ///
 /// If the result of this process is an empty string, "/" is returned
-pub fn clean_path(p: &str) -> String {
+pub fn clean(p: &str) -> String {
   // Turn empty string into "/"
   if p == "" {
     return "/".to_string();
@@ -184,10 +181,10 @@ mod tests {
   fn test_path_clean() {
     let tests = clean_tests();
     for test in tests {
-      let s = clean_path(test.0);
+      let s = clean(test.0);
       assert_eq!(test.1, s);
 
-      let s = clean_path(test.1);
+      let s = clean(test.1);
       assert_eq!(test.1, s);
     }
   }
@@ -206,10 +203,10 @@ mod tests {
     }
 
     for test in test_paths {
-      let s = clean_path(&test.0);
+      let s = clean(&test.0);
       assert_eq!(test.1, s);
 
-      let s = clean_path(&test.1);
+      let s = clean(&test.1);
       assert_eq!(test.1, s);
     }
   }

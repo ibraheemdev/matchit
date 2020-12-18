@@ -296,7 +296,7 @@ impl<K: Eq + Hash, V> Default for Router<K, V> {
 
 #[cfg(feature = "hyper-server")]
 pub mod hyper {
-  use crate::path::clean_path;
+  use crate::path::clean;
   use crate::Router;
   use futures::future::{ok, Future};
   use hyper::service::Service;
@@ -481,7 +481,7 @@ pub mod hyper {
 
               if self.redirect_fixed_path {
                 if let Some(fixed_path) =
-                  root.find_case_insensitive_path(&clean_path(path), self.redirect_trailing_slash)
+                  root.find_case_insensitive_path(&clean(path), self.redirect_trailing_slash)
                 {
                   return Box::pin(ok(
                     Response::builder()
