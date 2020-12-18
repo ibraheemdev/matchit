@@ -1,5 +1,9 @@
 # HttpRouter
 
+[![Version](https://img.shields.io/crates/v/httprouter)](https://crates.io/crates/httprouter)
+[![License](https://img.shields.io/crates/l/httprouter)](https://crates.io/crates/httprouter)
+[![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/httprouter-rs/Rust/master)](https://github.com/ibraheemdev/httprouter-rs/actions)
+
 HttpRouter is a lightweight high performance HTTP request router.
 
 This router supports variables in the routing pattern and matches against the request method. It also scales very well.

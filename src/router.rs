@@ -91,7 +91,7 @@
 //!
 //! There are two ways to retrieve the value of a parameter:
 //!  1) by the name of the parameter
-//! ```ignore 
+//! ```ignore
 //!  # use httprouter::tree::Params;
 //!  # let params = Params::default();
 
@@ -106,7 +106,7 @@
 //! ```
 #[cfg(feature = "hyper-server")]
 #[doc(inline)]
-pub use self::hyper::{RouterService, MakeRouterService, Handler, HyperRouter};
+pub use self::hyper::{Handler, HyperRouter, MakeRouterService, RouterService};
 
 use crate::tree::{Node, RouteLookup};
 use http::Method;
