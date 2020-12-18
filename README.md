@@ -1,5 +1,6 @@
 # HttpRouter
 
+[![Documentation](https://docs.rs/httprouter/badge.svg)](https://docs.rs/httprouter/0.1.0)
 [![Version](https://img.shields.io/crates/v/httprouter)](https://crates.io/crates/httprouter)
 [![License](https://img.shields.io/crates/l/httprouter)](https://crates.io/crates/httprouter)
 [![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/httprouter-rs/Rust/master)](https://github.com/ibraheemdev/httprouter-rs/actions)
