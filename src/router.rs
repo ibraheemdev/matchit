@@ -98,17 +98,20 @@
 //!  let user = params.by_name("user") // defined by :user or *user
 //! ```
 //!  2) by the index of the parameter. This way you can also get the name (key)
-//! ```rust
+//! ```rust,no_run
 //!  # use httprouter::tree::Params;
 //!  # let params = Params::default();
-//!  let third_key = params[2].key;   // the name of the 3rd parameter
-//!  let third_value = params[2].value; // the value of the 3rd parameter
+//!  let third_key = &params[2].key;   // the name of the 3rd parameter
+//!  let third_value = &params[2].value; // the value of the 3rd parameter
 //! ```
 #[cfg(feature = "hyper-server")]
 #[doc(inline)]
 pub use self::hyper::{Handler, HyperRouter, MakeRouterService, RouterService};
 
-use crate::tree::{Node, RouteLookup};
+#[doc(inline)]
+pub use crate::tree::{Param, Params, RouteLookup};
+
+use crate::tree::Node;
 use http::Method;
 use std::cmp::Eq;
 use std::collections::HashMap;

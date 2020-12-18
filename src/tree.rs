@@ -29,14 +29,42 @@ impl Param {
 }
 
 /// A `Vec` of `Param` returned by a route lookup.
-/// The slice is ordered, the first URL parameter is also the first slice value.
-/// It is therefore safe to read values by the index.
+/// There are two ways to retrieve the value of a parameter:
+///  1) by the name of the parameter
+/// ```rust
+///  # use httprouter::tree::Params;
+///  # let params = Params::default();
+
+///  let user = params.by_name("user"); // defined by :user or *user
+/// ```
+///  2) by the index of the parameter. This way you can also get the name (key)
+/// ```rust,no_run
+///  # use httprouter::tree::Params;
+///  # let params = Params::default();
+///  let third_key = &params[2].key;   // the name of the 3rd parameter
+///  let third_value = &params[2].value; // the value of the 3rd parameter
+/// ```
 #[derive(Debug, PartialEq)]
 pub struct Params(pub Vec<Param>);
 
 impl Default for Params {
   fn default() -> Self {
     Self(Vec::new())
+  }
+}
+
+impl Index<usize> for Params {
+  type Output = Param;
+
+  #[inline]
+  fn index(&self, i: usize) -> &Param {
+    &self.0[i]
+  }
+}
+
+impl std::ops::IndexMut<usize> for Params {
+  fn index_mut(&mut self, i: usize) -> &mut Param {
+    &mut self.0[i]
   }
 }
 
@@ -56,14 +84,6 @@ impl Params {
   /// Add a URL paramter to the list (`Param`)
   pub fn push(&mut self, p: Param) {
     self.0.push(p);
-  }
-}
-
-impl Index<usize> for Params {
-  type Output = str;
-
-  fn index(&self, i: usize) -> &Self::Output {
-    &(self.0)[i].value
   }
 }
 
