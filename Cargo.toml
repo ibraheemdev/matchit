@@ -1,10 +1,12 @@
 [package]
 name = "httprouter"
-version = "0.0.0"
+version = "0.1.0"
 license = "MIT"
 authors = ["ibraheem <ibrah1440@gmail.com>"]
 edition = "2018"
 description = "A high performance HTTP request router that scales well."
+categories = ["web-programming::http-client", "network-programming", "algorithms"]
+keywords = ["hyper", "path", "tree", "radix", "router"]
 repository = "https://github.com/ibraheemdev/httprouter-rs/"
 readme = "README.md"
 
