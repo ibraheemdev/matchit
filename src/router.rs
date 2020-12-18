@@ -305,6 +305,18 @@ pub mod hyper {
   use std::sync::Arc;
   use std::task::{Context, Poll};
 
+  /// Represents a http handler function
+  /// This trait is implemented for asynchronous functions that take a `Request` and return a
+  /// `Result<Response<Body>, hyper::Error>`
+  /// ```rust
+  /// # use httprouter::Handler;
+  /// # use hyper::{Request, Response, Body};
+  /// async fn hello(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+  ///     Ok(Response::new(Body::empty()))
+  /// }
+  ///
+  /// let handler: Box<dyn Handler> = Handler::new(hello);
+  /// ```
   pub trait Handler {
     fn new(handler: Self) -> Box<Self>
     where
@@ -313,10 +325,8 @@ pub mod hyper {
     fn handle(
       &self,
       req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>>;
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send + Sync>>;
   }
-
-  type HandlerResult = Result<Response<Body>, hyper::Error>;
 
   impl<F, R> Handler for F
   where
@@ -333,14 +343,17 @@ pub mod hyper {
     fn handle(
       &self,
       req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>> {
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send + Sync>> {
       Box::pin(self(req))
     }
   }
 
+  /// A `Router` indexed by http methods, storing `Handler` functions.
+  /// This is the router that should be used with `Hyper`
   pub type HyperRouter = Router<Method, Box<dyn Handler + Send + Sync>>;
 
-  pub struct MakeRouterService(pub RouterService);
+  /// Wraps a `Router` to provide better ergonomics. See [`Router::into_service`](crate::Router::into_service) for usage details.
+  pub struct MakeRouterService(RouterService);
 
   impl<T> Service<T> for MakeRouterService {
     type Response = RouterService;
@@ -358,13 +371,14 @@ pub mod hyper {
     }
   }
 
+  /// A thread-safe `Router` that implements `hyper::Service`. You can create a `RouterService` by calling [`Router::into_service`](crate::Router::into_service)
   #[derive(Clone)]
-  pub struct RouterService(pub Arc<HyperRouter>);
+  pub struct RouterService(Arc<HyperRouter>);
 
   impl Service<Request<Body>> for RouterService {
     type Response = Response<Body>;
     type Error = hyper::Error;
-    type Future = Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>>;
+    type Future = Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send + Sync>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
       Poll::Ready(Ok(()))
@@ -377,7 +391,7 @@ pub mod hyper {
 
   impl Router<Method, Box<dyn Handler + Send + Sync>> {
     /// Converts the `Router` into a hyper `Service`
-    /// ```rust
+    /// ```rust,no_run
     /// # use httprouter::Router;
     /// # use std::convert::Infallible;
     /// # async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -398,10 +412,40 @@ pub mod hyper {
       MakeRouterService(RouterService(Arc::new(self)))
     }
 
+    /// An asynchronous function from a `Request` to a `Response`. For most use cases, you will not
+    /// have to use this functin directly, and instead use
+    /// [`into_service`](crate::Router::into_service)
+    /// ```rust,no_run
+    /// # use httprouter::{Router, HyperRouter};
+    /// # use hyper::service::{make_service_fn, service_fn};
+    /// # use hyper::{Request, Body, Server};
+    /// # use std::convert::Infallible;
+    /// # use std::sync::Arc;
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() {
+    ///    let mut router: HyperRouter = Router::default();
+    ///
+    ///    let router = Arc::new(router);
+    ///    
+    ///    let make_svc = make_service_fn(move |_| {
+    ///        let router = router.clone();
+    ///        async move {
+    ///            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
+    ///                let router = router.clone();
+    ///                async move { router.serve(req).await }
+    ///            }))
+    ///        }
+    ///    });
+    ///
+    ///    let server = Server::bind(&([127, 0, 0, 1], 3000).into())
+    ///        .serve(make_svc)
+    ///        .await;
+    /// # }
     pub fn serve(
       &self,
       mut req: Request<Body>,
-    ) -> Pin<Box<dyn Future<Output = HandlerResult> + Send + Sync>> {
+    ) -> Pin<Box<dyn Future<Output = hyper::Result<Response<Body>>> + Send + Sync>> {
       let root = self.trees.get(req.method());
       let path = req.uri().path();
       if let Some(root) = root {
