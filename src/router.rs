@@ -1,5 +1,4 @@
-//! `Router` is a lightweight high performance HTTP request router.
-//! It is a Rust port of [`julienschmidt/httprouter`](https://github.com/julienschmidt/httprouter).
+//! [`Router`](crate::Router) is a lightweight high performance HTTP request router.
 //!
 //! This router supports variables in the routing pattern and matches against
 //! the request method. It also scales better.
@@ -8,7 +7,8 @@
 //! It scales well even with very long paths and a large number of routes.
 //! A compressing dynamic trie (radix tree) structure is used for efficient matching.
 //!
-//! Here is a simple example:
+//! With the `hyper-server` feature enabled, the `Router` can be used as a router for a hyper server:
+//!
 //! ```rust,no_run
 //! use httprouter::{Router, HyperRouter, Params, Handler};
 //! use std::convert::Infallible;
@@ -30,16 +30,27 @@
 //!     router.get("/hello/:user", Handler::new(hello));
 //!
 //!     hyper::Server::bind(&([127, 0, 0, 1], 3000).into())
-//!        .serve(router.into_service())
-//!        .await;
+//!         .serve(router.into_service())
+//!         .await;
 //! }
-//! ```
+//!```
 //!
-//! The router matches incoming requests by the request method and the path.
-//! If a handle is registered for this path and method, the router delegates the
-//! request to that function.
-//! For the methods GET, POST, PUT, PATCH, DELETE and OPTIONS shortcut functions exist to
-//! register handles, for all other methods router.Handle can be used.
+//! Because the `Router` is generic, it can be used to store arbitrary values. This makes it flexible enough to be used as a building block for larger frameworks:
+//!
+//!```rust
+//! use httprouter::Router;
+//! use hyper::Method;
+//!
+//! fn main() {
+//!     let mut router: Router<Method, String> = Router::default();
+//!     router.handle("/users/:id", Method::GET, "Welcome!".to_string());
+//!
+//!     let res = router.lookup(&Method::GET, "/users/200").unwrap();
+//!    
+//!     assert_eq!(res.params.by_name("id"), Some("200"));
+//!     assert_eq!(res.value, &"Welcome!".to_string());
+//! }
+//!```
 //!
 //! The registered path, against which the router matches incoming requests, can
 //! contain two types of parameters:
@@ -75,19 +86,28 @@
 //!   /files/templates/article.html       match: filepath="/templates/article.html"
 //!   /files                              no match, but the router would redirect
 //! ```
-//! The value of parameters is saved as a slice of the Param struct, consisting
-//! each of a key and a value. The slice is passed to the Handle func as a third
-//! parameter.
+//! The value of parameters is saved as a `Vec` of the `Param` struct, consisting
+//! each of a key and a value.
+//!
 //! There are two ways to retrieve the value of a parameter:
 //!  1) by the name of the parameter
-//! ```ignore
+//! ```ignore 
+//!  # use httprouter::tree::Params;
+//!  # let params = Params::default();
+
 //!  let user = params.by_name("user") // defined by :user or *user
 //! ```
 //!  2) by the index of the parameter. This way you can also get the name (key)
-//! ```ignore
-//!  thirdKey   := params[2].key   // the name of the 3rd parameter
-//!  thirdValue := params[2].value // the value of the 3rd parameter
+//! ```rust
+//!  # use httprouter::tree::Params;
+//!  # let params = Params::default();
+//!  let third_key = params[2].key;   // the name of the 3rd parameter
+//!  let third_value = params[2].value; // the value of the 3rd parameter
 //! ```
+#[cfg(feature = "hyper-server")]
+#[doc(inline)]
+pub use self::hyper::{RouterService, MakeRouterService, Handler, HyperRouter};
+
 use crate::tree::{Node, RouteLookup};
 use http::Method;
 use std::cmp::Eq;
@@ -96,14 +116,18 @@ use std::hash::Hash;
 use std::str;
 
 /// Router is container which can be used to dispatch requests to different
-/// handler functions via configurable routes
+/// handlers via configurable routes.
+///
+/// Handlers (the value stored by the router) are indexed by keys. For example,
+/// the [`HyperRouter`](crate::HyperRouter) uses HTTP methods as keys. This leads to increased
+/// lookup performance.
 pub struct Router<K: Eq + Hash, V> {
   trees: HashMap<K, Node<V>>,
 
   /// Enables automatic redirection if the current route can't be matched but a
   /// handler for the path with (without) the trailing slash exists.
   /// For example if `/foo/` is requested but a route only exists for `/foo`, the
-  /// client is redirected to /foo with http status code 301 for `GET` requests
+  /// client is redirected to `/foo` with HTTP status code 301 for `GET` requests
   /// and 307 for all other request methods.
   pub redirect_trailing_slash: bool,
 
@@ -126,7 +150,7 @@ pub struct Router<K: Eq + Hash, V> {
   /// handler.
   pub handle_method_not_allowed: bool,
 
-  /// If enabled, the router automatically replies to OPTIONS requests.
+  /// If enabled, the router automatically replies to `OPTIONS` requests.
   /// Custom `OPTIONS` handlers take priority over automatic replies.
   pub handle_options: bool,
 
@@ -140,7 +164,7 @@ pub struct Router<K: Eq + Hash, V> {
   /// found.
   pub not_found: Option<V>,
 
-  /// Configurable handler which is called when a request
+  /// A configurable handler which is called when a request
   /// cannot be routed and `handle_method_not_allowed` is true.
   /// The `Allow` header with allowed request methods is set before the handler
   /// is called.
@@ -148,13 +172,13 @@ pub struct Router<K: Eq + Hash, V> {
 }
 
 impl<K: Eq + Hash, V> Router<K, V> {
-  /// Insert a value into the tree. Values are indexed by keys. For example, the httprouter uses
-  /// http methods as keys for improved performance.
+  /// Insert a value into the router for a specific path indexed by a key.
   /// ```rust
   /// use httprouter::Router;
+  /// use hyper::Method;
   ///
-  /// let mut router: Router<u8, String> = Router::default();
-  /// router.handle("/teapot", 1, "I am a teapot".to_string());
+  /// let mut router: Router<Method, String> = Router::default();
+  /// router.handle("/teapot", Method::GET, "I am a teapot".to_string());
   /// ```
   pub fn handle(&mut self, path: &str, key: K, value: V) {
     if !path.starts_with('/') {
@@ -169,7 +193,7 @@ impl<K: Eq + Hash, V> Router<K, V> {
   }
 
   /// Lookup allows the manual lookup of handler for a specific method and path.
-  /// If the handler is not found, it returns a `Err(bool)` indicating whethre a redirection should be performed to the same path with a trailing slash
+  /// If the handler is not found, it returns a `Err(bool)` indicating whether a redirection should be performed to the same path with a trailing slash
   /// ```rust
   /// use httprouter::Router;
   /// use http::Method;
@@ -195,37 +219,37 @@ impl<K: Eq + Hash, V> Router<K, V> {
 }
 
 impl<V> Router<Method, V> {
-  /// Register a handler for GET requests
+  /// Register a handler for `GET` requests
   pub fn get(&mut self, path: &str, handle: V) {
     self.handle(path, Method::GET, handle);
   }
 
-  /// Register a handler for HEAD requests
+  /// Register a handler for `HEAD` requests
   pub fn head(&mut self, path: &str, handle: V) {
     self.handle(path, Method::HEAD, handle);
   }
 
-  /// Register a handler for OPTIONS requests
+  /// Register a handler for `OPTIONS` requests
   pub fn options(&mut self, path: &str, handle: V) {
     self.handle(path, Method::OPTIONS, handle);
   }
 
-  /// Register a handler for POST requests
+  /// Register a handler for `POST` requests
   pub fn post(&mut self, path: &str, handle: V) {
     self.handle(path, Method::POST, handle);
   }
 
-  /// Register a handler for PUT requests
+  /// Register a handler for `PUT` requests
   pub fn put(&mut self, path: &str, handle: V) {
     self.handle(path, Method::PUT, handle);
   }
 
-  /// Register a handler for PATCH requests
+  /// Register a handler for `PATCH` requests
   pub fn patch(&mut self, path: &str, handle: V) {
     self.handle(path, Method::PATCH, handle);
   }
 
-  /// Register a handler for DELETE requests
+  /// Register a handler for `DELETE` requests
   pub fn delete(&mut self, path: &str, handle: V) {
     self.handle(path, Method::DELETE, handle);
   }
@@ -295,6 +319,7 @@ impl<K: Eq + Hash, V> Default for Router<K, V> {
 }
 
 #[cfg(feature = "hyper-server")]
+#[doc(hidden)]
 pub mod hyper {
   use crate::path::clean;
   use crate::Router;
@@ -305,7 +330,7 @@ pub mod hyper {
   use std::sync::Arc;
   use std::task::{Context, Poll};
 
-  /// Represents a http handler function
+  /// Represents a HTTP handler function.
   /// This trait is implemented for asynchronous functions that take a `Request` and return a
   /// `Result<Response<Body>, hyper::Error>`
   /// ```rust
@@ -348,11 +373,11 @@ pub mod hyper {
     }
   }
 
-  /// A `Router` indexed by http methods, storing `Handler` functions.
+  /// A `Router` indexed by HTTP methods storing `Handler` functions.
   /// This is the router that should be used with `Hyper`
   pub type HyperRouter = Router<Method, Box<dyn Handler + Send + Sync>>;
 
-  /// Wraps a `Router` to provide better ergonomics. See [`Router::into_service`](crate::Router::into_service) for usage details.
+  /// Wraps a `Router` to provide better ergonomics. You can create a `MakeRouterService` with [`Router::into_service`](crate::Router::into_service).
   pub struct MakeRouterService(RouterService);
 
   impl<T> Service<T> for MakeRouterService {
@@ -371,9 +396,48 @@ pub mod hyper {
     }
   }
 
-  /// A thread-safe `Router` that implements `hyper::Service`. You can create a `RouterService` by calling [`Router::into_service`](crate::Router::into_service)
+  /// A thread-safe `Router` that implements `hyper::Service`. This is useful when incorporating a
+  /// `Router` into a larger `Service`. `RouterService` wraps the `Router` in an `Arc` for
+  /// multithreading. If this is not useful, you might want to use [`Router::serve`](crate::Router::serve) directly instead.
+  /// ```rust,no_run
+  /// # use httprouter::{Router, HyperRouter};
+  /// use httprouter::router::RouterService;
+  /// use hyper::service::Service;
+  /// # use hyper::service::{make_service_fn, service_fn};
+  /// # use hyper::{Request, Body, Server};
+  /// # use std::convert::Infallible;
+  /// # use std::sync::Arc;
+  ///
+  /// # #[tokio::main]
+  /// # async fn main() {
+  /// let mut router: HyperRouter = Router::default();
+  ///
+  /// let service: RouterService = RouterService::new(router);
+  ///    
+  /// let make_svc = make_service_fn(move |_| {
+  ///     let service = service.clone();
+  ///     async move {
+  ///         Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
+  ///             let mut service = service.clone();
+  ///             // do other things...
+  ///             async move { service.call(req).await }
+  ///         }))
+  ///     }
+  /// });
+  ///
+  /// let server = Server::bind(&([127, 0, 0, 1], 3000).into())
+  ///     .serve(make_svc)
+  ///     .await;
+  /// # }
   #[derive(Clone)]
   pub struct RouterService(Arc<HyperRouter>);
+
+  impl RouterService {
+    /// Create a new `RouterService` from a [`Router`](crate::Router)
+    pub fn new(router: HyperRouter) -> Self {
+      RouterService(Arc::new(router))
+    }
+  }
 
   impl Service<Request<Body>> for RouterService {
     type Response = Response<Body>;
@@ -390,7 +454,9 @@ pub mod hyper {
   }
 
   impl Router<Method, Box<dyn Handler + Send + Sync>> {
-    /// Converts the `Router` into a hyper `Service`
+    /// Converts the `Router` into a `MakeRouterService` which you can serve directly with `Hyper`.
+    /// If you have an existing `Service` that you want to incorporate a `Router` into, see
+    /// [`RouterService`](crate::router::RouterService).
     /// ```rust,no_run
     /// # use httprouter::Router;
     /// # use std::convert::Infallible;
@@ -409,39 +475,53 @@ pub mod hyper {
     /// # }
     /// ```
     pub fn into_service(self) -> MakeRouterService {
-      MakeRouterService(RouterService(Arc::new(self)))
+      MakeRouterService(RouterService::new(self))
     }
 
-    /// An asynchronous function from a `Request` to a `Response`. For most use cases, you will not
-    /// have to use this functin directly, and instead use
-    /// [`into_service`](crate::Router::into_service)
+    /// An asynchronous function from a `Request` to a `Response`.
+    /// You will generally not need to use this function directly, and instead use [`MakeRouterService`](crate::router::MakeRouterService) or [`RouterService`](crate::router::RouterService).
+    /// However, this may be useful in certain cases. For example, `RouterService` wraps the `Router` in an `Arc` which may introduce unneccesary overhead when using a single threaded runtime.
     /// ```rust,no_run
     /// # use httprouter::{Router, HyperRouter};
+    /// # use httprouter::router::RouterService;
     /// # use hyper::service::{make_service_fn, service_fn};
     /// # use hyper::{Request, Body, Server};
     /// # use std::convert::Infallible;
-    /// # use std::sync::Arc;
+    /// # use std::rc::Rc;
     ///
-    /// # #[tokio::main]
-    /// # async fn main() {
-    ///    let mut router: HyperRouter = Router::default();
+    /// # async fn run() {
+    /// let mut router: HyperRouter = Router::default();
     ///
-    ///    let router = Arc::new(router);
+    /// let router = Rc::new(router);
     ///    
-    ///    let make_svc = make_service_fn(move |_| {
-    ///        let router = router.clone();
-    ///        async move {
-    ///            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-    ///                let router = router.clone();
-    ///                async move { router.serve(req).await }
-    ///            }))
-    ///        }
-    ///    });
+    /// let make_svc = make_service_fn(move |_| {
+    ///     let router = router.clone();
+    ///     async move {
+    ///         Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
+    ///             let router = router.clone();
+    ///             async move { router.serve(req).await }
+    ///         }))
+    ///     }
+    /// });
     ///
-    ///    let server = Server::bind(&([127, 0, 0, 1], 3000).into())
-    ///        .serve(make_svc)
-    ///        .await;
+    /// let server = Server::bind(&([127, 0, 0, 1], 3000).into())
+    ///     .executor(SingleThreadedExecutor)
+    ///     .serve(make_svc)
+    ///     .await;
     /// # }
+    ///
+    /// # #[derive(Clone, Copy, Debug)]
+    /// # struct SingleThreadedExecutor;
+    ///
+    /// # impl<F> hyper::rt::Executor<F> for SingleThreadedExecutor
+    /// # where
+    /// #    F: std::future::Future + 'static, // not requiring `Send`
+    /// # {
+    /// #    fn execute(&self, fut: F) {
+    /// #       tokio::task::spawn_local(fut);
+    /// #    }
+    /// # }
+    /// ```
     pub fn serve(
       &self,
       mut req: Request<Body>,

@@ -1,10 +1,12 @@
+//! The radix tree implementation used internally by [`Router`](crate::Router)
+
 use std::cmp::min;
 use std::mem;
 use std::ops::Index;
 use std::str;
 
-/// The response returned when getting the value for
-/// a specific path with `lookup`
+/// The response returned when getting the value for a specific path with
+/// [`Router::lookup`](crate::Router::lookup)
 pub struct RouteLookup<'a, V> {
   pub value: &'a V,
   pub params: Params,
@@ -26,7 +28,7 @@ impl Param {
   }
 }
 
-/// Params is a Param-slice, as returned by the router.
+/// A `Vec` of `Param` returned by a route lookup.
 /// The slice is ordered, the first URL parameter is also the first slice value.
 /// It is therefore safe to read values by the index.
 #[derive(Debug, PartialEq)]
@@ -134,7 +136,7 @@ impl<V> Node<V> {
     new_pos
   }
 
-  /// adds a node with the given value to the path.
+  /// Add a `Node` with the given value to the path.
   pub fn add_route(&mut self, path: &str, value: V) {
     let full_path = <&str>::clone(&path);
     self.priority += 1;
@@ -380,11 +382,9 @@ impl<V> Node<V> {
     self.children[0].children = vec![Box::new(child)];
   }
 
-  /// Returns the value registered with the given path (key). The values of
-  /// wildcards are saved to a map.
-  /// If no value can be found, a TSR (trailing slash redirect) recommendation is
-  /// made if a value exists with an extra (without the) trailing slash for the
-  /// given path.
+  /// Returns the value registered with the given path.
+  /// If no value can be found, an `Err(bool)` is returned which represents a TSR (trailing slash
+  /// redirect) recommendation.
   pub fn get_value(&self, path: &str) -> Result<RouteLookup<V>, bool> {
     self.get_value_helper(path.as_ref(), Params::default())
   }

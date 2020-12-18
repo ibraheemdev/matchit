@@ -16,7 +16,7 @@ The router is optimized for high performance and a small memory footprint. It sc
 
 **High Performance:** HttpRouter relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
 
-Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowed) handlers** , [**serve static files**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#method.serve_files), and [**automatically respond to OPTIONS requests**](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.global_options)
+Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.method_not_allowed) handlers** , [**serve static files**](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#method.serve_files), and [**automatically respond to OPTIONS requests**](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.global_options)
 
 ## Usage
 
@@ -133,7 +133,7 @@ For even better scalability, the child nodes on each tree level are ordered by p
 
 ## Automatic OPTIONS responses and CORS
 
-One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router.GlobalOPTIONS`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.global_options) handler:
+One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router.GlobalOPTIONS`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.global_options) handler:
 
 ```rust
 use httprouter::{Router, HyperRouter, Handler};
@@ -159,6 +159,7 @@ Here is a quick example: Does your server serve multiple domains / hosts? You wa
 
 ```rust,no_run
 use httprouter::{Handler, HyperRouter, Router};
+use httprouter::router::RouterService;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server, StatusCode};
 use std::collections::HashMap;
@@ -215,9 +216,9 @@ async fn main() {
 
 ### Not Found Handler
 
-**NOTE: It might be required to set [`Router::method_not_allowed`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.method_not_allowed) to `None` to avoid problems.**
+**NOTE: It might be required to set [`Router::method_not_allowed`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.method_not_allowed) to `None` to avoid problems.**
 
-You can use another handler, to handle requests which could not be matched by this router by using the [`Router::not_found`](https://docs.rs/httprouter/0.0.0/httprouter/router/struct.Router.html#structfield.not_found) handler.
+You can use another handler, to handle requests which could not be matched by this router by using the [`Router::not_found`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.not_found) handler.
 
 The `not_found` handler can for example be used to return a 404 page:
 
