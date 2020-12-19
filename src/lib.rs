@@ -1,6 +1,7 @@
-//! [![Version](https://img.shields.io/crates/v/httprouter)](https://crates.io/crates/httprouter)
-//! [![License](https://img.shields.io/crates/l/httprouter)](https://crates.io/crates/httprouter)
-//! [![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/httprouter-rs/Rust/master)](https://github.com/ibraheemdev/httprouter-rs/actions)
+//! [![Documentation](https://img.shields.io/badge/docs-0.1.0-4d76ae?style=for-the-badge)](https://docs.rs/httprouter/0.1.0)
+//! [![Version](https://img.shields.io/crates/v/httprouter?style=for-the-badge)](https://crates.io/crates/httprouter)
+//! [![License](https://img.shields.io/crates/l/httprouter?style=for-the-badge)](https://crates.io/crates/httprouter)
+//! [![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/httprouter-rs/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/httprouter-rs/actions)
 //!
 //! HttpRouter is a lightweight high performance HTTP request router.
 //!
