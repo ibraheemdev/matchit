@@ -104,11 +104,11 @@
 //! ```ignore,none
 //! Priority   Path             Handle
 //! 9          \                *<1>
-//! 3          ├s               nil
+//! 3          ├s               None
 //! 2          |├earch\         *<2>
 //! 1          |└upport\        *<3>
 //! 2          ├blog\           *<4>
-//! 1          |    └:post      nil
+//! 1          |    └:post      None
 //! 1          |         └\     *<5>
 //! 2          ├about-us\       *<6>
 //! 1          |        └team\  *<7>
@@ -136,7 +136,7 @@
 //!
 //! ## Automatic OPTIONS responses and CORS
 //!
-//! One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router.GlobalOPTIONS`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.global_options) handler:
+//! One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router::global_options`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.global_options) handler:
 //!
 //! ```rust
 //! use httprouter::{Router, HyperRouter, Handler};
