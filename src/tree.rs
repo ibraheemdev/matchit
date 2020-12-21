@@ -7,20 +7,10 @@ use std::str;
 /// The response returned when getting the value for a specific path with
 /// [`Node::match_path`](crate::Node::match_path)
 pub struct Match<'a, V> {
-  value: &'a V,
-  params: Params,
-}
-
-impl<V> Match<'_, V> {
   /// The route parameters. See [parameters](/index.html#parameters) for more details.
-  pub fn params(&self) -> &Params {
-    &self.params
-  }
-
+  pub value: &'a V,
   /// The value stored under the matched node.
-  pub fn value(&self) -> &'_ V {
-    self.value
-  }
+  pub params: Params,
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
