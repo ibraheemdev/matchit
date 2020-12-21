@@ -7,8 +7,18 @@ use std::str;
 /// The response returned when getting the value for a specific path with
 /// [`Node::match`](crate::Node::match)
 pub struct Match<'a, V> {
-  pub value: &'a V,
-  pub params: Params,
+  value: &'a V,
+  params: Params,
+}
+
+impl<V> Match<'_, V> {
+    pub fn params(&self) -> &Params {
+       &self.params
+    }
+
+    pub fn value(&self) -> &'_ V {
+        self.value
+    }
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
@@ -31,14 +41,14 @@ impl Param {
 /// There are two ways to retrieve the value of a parameter:
 ///  1) by the name of the parameter
 /// ```rust
-///  # use httprouter::tree::Params;
+///  # use matchit::Params;
 ///  # let params = Params::default();
 
 ///  let user = params.by_name("user"); // defined by :user or *user
 /// ```
 ///  2) by the index of the parameter. This way you can also get the name (key)
 /// ```rust,no_run
-///  # use httprouter::tree::Params;
+///  # use matchit::Params;
 ///  # let params = Params::default();
 ///  let third_key = &params[2].key;   // the name of the 3rd parameter
 ///  let third_value = &params[2].value; // the value of the 3rd parameter

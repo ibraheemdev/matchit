@@ -1,19 +1,32 @@
-# Match It
+# MatchIt
 
 [![Documentation](https://img.shields.io/badge/docs-0.1.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit/0.1.0)
 [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
-[![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/matchit-rs/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/matchit-rs/actions)
+[![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/matchit/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/matchit/actions)
 
-Recognizes URL patterns with support for dynamic and wildcard segments. 
+Matches URL patterns with support for dynamic and wildcard segments. 
 
-HttpRouter relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
+```rust
+use matchit::Node;
+
+fn main() {
+    let mut tree = Node::default();
+    tree.insert("/home", "Welcome!");
+    tree.insert("/users/:id", "A User");
+
+    let matched = tree.match_path("/users/1").unwrap();
+    assert_eq!(matched.params().by_name("id"), Some("1"));
+}
+```
+
+MatchIt relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
 
 The tree is optimized for high performance and a small memory footprint. It scales well even with very long paths and a large number of routes. A compressing dynamic trie (radix tree) structure is used for efficient matching.
 
 ### Parameters
 
-As you can see, `:user` is a *named parameter*. The values are accessible via [`Params`](), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::by_name(name)` method. For example, `:user` can be retrieved by `params.by_name("user")`. With the `hyper` server, you can access the params in a handler function by calling `req.extensions().get::<Params>()`.
+As you can see, `:user` is a *named parameter*. The values are accessible via [`Params`](), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::by_name(name)` method. For example, `:user` can be retrieved by `params.by_name("user")`.
 
 Named parameters only match a single path segment:
 
