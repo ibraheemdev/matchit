@@ -1,76 +1,17 @@
-# HttpRouter
+# Match It
 
-[![Documentation](https://img.shields.io/badge/docs-0.1.0-4d76ae?style=for-the-badge)](https://docs.rs/httprouter/0.1.0)
-[![Version](https://img.shields.io/crates/v/httprouter?style=for-the-badge)](https://crates.io/crates/httprouter)
-[![License](https://img.shields.io/crates/l/httprouter?style=for-the-badge)](https://crates.io/crates/httprouter)
-[![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/httprouter-rs/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/httprouter-rs/actions)
+[![Documentation](https://img.shields.io/badge/docs-0.1.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit/0.1.0)
+[![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
+[![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
+[![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/matchit-rs/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/matchit-rs/actions)
 
-HttpRouter is a lightweight high performance HTTP request router.
+Recognizes URL patterns with support for dynamic and wildcard segments. 
 
-This router supports variables in the routing pattern and matches against the request method. It also scales very well.
+HttpRouter relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
 
-The router is optimized for high performance and a small memory footprint. It scales well even with very long paths and a large number of routes. A compressing dynamic trie (radix tree) structure is used for efficient matching.
+The tree is optimized for high performance and a small memory footprint. It scales well even with very long paths and a large number of routes. A compressing dynamic trie (radix tree) structure is used for efficient matching.
 
-## Features
-
-**Only explicit matches:** With other routers, a requested URL path could match multiple patterns. Therefore they have some awkward pattern priority rules, like *longest match* or *first registered, first matched*. By design of this router, a request can only match exactly one or no route. As a result, there are also no unintended matches, which makes it great for SEO and improves the user experience.
-
-**Path auto-correction:** Besides detecting the missing or additional trailing slash at no extra cost, the router can also fix wrong cases and remove superfluous path elements (like `../` or `//`). Is [CAPTAIN CAPS LOCK](http://www.urbandictionary.com/define.php?term=Captain+Caps+Lock) one of your users? HttpRouter can help him by making a case-insensitive look-up and redirecting him to the correct URL.
-
-**Parameters in your routing pattern:** Stop parsing the requested URL path, just give the path segment a name and the router delivers the dynamic value to you. Because of the design of the router, path parameters are very cheap.
-
-**High Performance:** HttpRouter relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
-
-Of course you can also set **custom [`NotFound`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.not_found) and  [`MethodNotAllowed`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.method_not_allowed) handlers** , [**serve static files**](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#method.serve_files), and [**automatically respond to OPTIONS requests**](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.global_options)
-
-## Usage
-
-With the `hyper-server` feature enabled, the `Router` can be used as a router for a hyper server:
-
-```rust,no_run
-use httprouter::{Router, HyperRouter, Params, Handler};
-use std::convert::Infallible;
-use hyper::{Request, Response, Body, Error};
-
-async fn index(_: Request<Body>) -> Result<Response<Body>, Error> {
-    Ok(Response::new("Hello, World!".into()))
-}
-
-async fn hello(req: Request<Body>) -> Result<Response<Body>, Error> {
-    let params = req.extensions().get::<Params>().unwrap();
-    Ok(Response::new(format!("Hello, {}", params.by_name("user").unwrap()).into()))
-}
-
-#[tokio::main]
-async fn main() {
-    let mut router: HyperRouter = Router::default();
-    router.get("/", Handler::new(index));
-    router.get("/hello/:user", Handler::new(hello));
-
-    hyper::Server::bind(&([127, 0, 0, 1], 3000).into())
-        .serve(router.into_service())
-        .await;
-}
-```
-
-Because the `Router` is generic, it can be used to store arbitrary values. This makes it flexible enough to be used as a building block for larger frameworks:
-
-```rust
-use httprouter::Router;
-use hyper::Method;
-
-fn main() {
-    let mut router: Router<Method, String> = Router::default();
-    router.handle("/users/:id", Method::GET, "Welcome!".to_string());
-
-    let res = router.lookup(&Method::GET, "/users/200").unwrap();
-    
-    assert_eq!(res.params.by_name("id"), Some("200"));
-    assert_eq!(res.value, &"Welcome!".to_string());
-}
-```
-
-### Named parameters
+### Parameters
 
 As you can see, `:user` is a *named parameter*. The values are accessible via [`Params`](), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::by_name(name)` method. For example, `:user` can be retrieved by `params.by_name("user")`. With the `hyper` server, you can access the params in a handler function by calling `req.extensions().get::<Params>()`.
 
@@ -134,121 +75,4 @@ For even better scalability, the child nodes on each tree level are ordered by p
 ├--
 ├--
 └-
-```
-
-## Automatic OPTIONS responses and CORS
-
-One might wish to modify automatic responses to OPTIONS requests, e.g. to support [CORS preflight requests](https://developer.mozilla.org/en-US/docs/Glossary/preflight_request) or to set other headers. This can be achieved using the [`Router::global_options`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.global_options) handler:
-
-```rust
-use httprouter::{Router, HyperRouter, Handler};
-use hyper::{Request, Response, Body, Error};
-
-async fn global_options(_: Request<Body>) -> Result<Response<Body>, Error> {
-    Ok(Response::builder()
-        .header("Access-Control-Allow-Methods", "Allow")
-	.header("Access-Control-Allow-Origin", "*")
-        .body(Body::empty())
-        .unwrap())
-}
-
-fn main() {
-  let mut router: HyperRouter = Router::default();
-  router.global_options = Some(Handler::new(global_options));
-}
-```
-
-### Multi-domain / Sub-domains
-
-Here is a quick example: Does your server serve multiple domains / hosts? You want to use sub-domains? Define a router per host!
-
-```rust,no_run
-use httprouter::{Handler, HyperRouter, Router};
-use httprouter::router::RouterService;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server, StatusCode};
-use std::collections::HashMap;
-use std::convert::Infallible;
-use std::sync::Arc;
-
-pub struct HostSwitch(HashMap<String, HyperRouter>);
-
-impl HostSwitch {
-    async fn serve(&self, req: Request<Body>) -> hyper::Result<Response<Body>> {
-        let forbidden = Response::builder()
-            .status(StatusCode::FORBIDDEN)
-            .body(Body::empty())
-            .unwrap();
-        match req.headers().get("host") {
-            Some(host) => match self.0.get(host.to_str().unwrap()) {
-                Some(router) => router.serve(req).await,
-                None => Ok(forbidden),
-            },
-            None => Ok(forbidden),
-        }
-    }
-}
-
-async fn hello(_: Request<Body>) -> hyper::Result<Response<Body>> {
-    Ok(Response::new(Body::default()))
-}
-
-#[tokio::main]
-async fn main() {
-    let mut router: HyperRouter = Router::default();
-    router.get("/", Handler::new(hello));
-
-    let mut host_switch: HostSwitch = HostSwitch(HashMap::new());
-    host_switch.0.insert("example.com:12345".into(), router);
-
-    let host_switch = Arc::new(host_switch);
-    
-    let make_svc = make_service_fn(move |_| {
-        let host_switch = host_switch.clone();
-        async move {
-            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                let host_switch = host_switch.clone();
-                async move { host_switch.serve(req).await }
-            }))
-        }
-    });
-
-    let server = Server::bind(&([127, 0, 0, 1], 3000).into())
-        .serve(make_svc)
-        .await;
-}
-```
-
-### Not Found Handler
-
-**NOTE: It might be required to set [`Router::method_not_allowed`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.method_not_allowed) to `None` to avoid problems.**
-
-You can use another handler, to handle requests which could not be matched by this router by using the [`Router::not_found`](https://docs.rs/httprouter/newest/httprouter/router/struct.Router.html#structfield.not_found) handler.
-
-The `not_found` handler can for example be used to return a 404 page:
-
-```rust
-use httprouter::{Router, HyperRouter, Handler};
-use hyper::{Request, Response, Body};
-
-async fn not_found(_: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-  Ok(Response::builder()
-    .header("Location", "/404")
-    .status(404)
-    .body(Body::empty())
-    .unwrap())
-};
-
-fn main() {
-  let mut router: HyperRouter = Router::default();
-  router.not_found = Some(Handler::new(not_found));
-}
-```
-
-### Static files
-
-You can use the router to serve pages from a static file directory:
-
-```rust
-// TODO
 ```

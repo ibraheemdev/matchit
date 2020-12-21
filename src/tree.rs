@@ -1,13 +1,12 @@
-//! The radix tree implementation used internally by [`Router`](crate::Router)
-
+//! The radix tree implementation
 use std::cmp::min;
 use std::mem;
 use std::ops::Index;
 use std::str;
 
 /// The response returned when getting the value for a specific path with
-/// [`Router::lookup`](crate::Router::lookup)
-pub struct RouteLookup<'a, V> {
+/// [`Node::match`](crate::Node::match)
+pub struct Match<'a, V> {
   pub value: &'a V,
   pub params: Params,
 }
@@ -28,7 +27,7 @@ impl Param {
   }
 }
 
-/// A `Vec` of `Param` returned by a route lookup.
+/// A `Vec` of `Param` returned by a route match.
 /// There are two ways to retrieve the value of a parameter:
 ///  1) by the name of the parameter
 /// ```rust
@@ -156,8 +155,8 @@ impl<V> Node<V> {
     new_pos
   }
 
-  /// Add a `Node` with the given value to the path.
-  pub fn add_route(&mut self, path: &str, value: V) {
+  /// Insert a `Node` with the given value to the path.
+  pub fn insert(&mut self, path: &str, value: V) {
     let full_path = <&str>::clone(&path);
     self.priority += 1;
 
@@ -167,10 +166,10 @@ impl<V> Node<V> {
       self.node_type = NodeType::Root;
       return;
     }
-    self.add_route_helper(path.as_ref(), full_path, value);
+    self.insert_helper(path.as_ref(), full_path, value);
   }
 
-  fn add_route_helper(&mut self, mut path: &[u8], full_path: &str, value: V) {
+  fn insert_helper(&mut self, mut path: &[u8], full_path: &str, value: V) {
     // Find the longest common prefix.
     // This also implies that the common prefix contains no ':' or '*'
     // since the existing key can't contain those chars.
@@ -214,14 +213,14 @@ impl<V> Node<V> {
       // `/` after param
       if self.node_type == NodeType::Param && idxc == b'/' && self.children.len() == 1 {
         self.children[0].priority += 1;
-        return self.children[0].add_route_helper(path, full_path, value);
+        return self.children[0].insert_helper(path, full_path, value);
       }
 
       // Check if a child with the next path byte exists
       for mut i in 0..self.indices.len() {
         if idxc == self.indices[i] {
           i = self.increment_child_prio(i);
-          return self.children[i].add_route_helper(path, full_path, value);
+          return self.children[i].insert_helper(path, full_path, value);
         }
       }
 
@@ -258,7 +257,7 @@ impl<V> Node<V> {
       // Check for longer wildcard, e.g. :name and :names
       && (self.path.len() >= path.len() || path[self.path.len()] == b'/')
     {
-      self.add_route_helper(path, full_path, value);
+      self.insert_helper(path, full_path, value);
     } else {
       // Wildcard conflict
       let path_seg = if self.node_type == NodeType::CatchAll {
@@ -405,17 +404,13 @@ impl<V> Node<V> {
   /// Returns the value registered with the given path.
   /// If no value can be found, an `Err(bool)` is returned which represents a TSR (trailing slash
   /// redirect) recommendation.
-  pub fn get_value(&self, path: &str) -> Result<RouteLookup<V>, bool> {
-    self.get_value_helper(path.as_ref(), Params::default())
+  pub fn match_path(&self, path: &str) -> Result<Match<V>, bool> {
+    self.match_helper(path.as_ref(), Params::default())
   }
 
   // outer loop for walking the tree to get a path's value
   #[inline]
-  fn get_value_helper<'a>(
-    &'a self,
-    mut path: &[u8],
-    params: Params,
-  ) -> Result<RouteLookup<V>, bool> {
+  fn match_helper<'a>(&'a self, mut path: &[u8], params: Params) -> Result<Match<V>, bool> {
     let prefix = self.path.clone();
     if path.len() > prefix.len() {
       if prefix == &path[..prefix.len()] {
@@ -428,7 +423,7 @@ impl<V> Node<V> {
           let idxc = path[0];
           for i in 0..self.indices.len() {
             if idxc == self.indices[i] {
-              return self.children[i].get_value_helper(path, params);
+              return self.children[i].match_helper(path, params);
             }
           }
           // Nothing found.
@@ -444,7 +439,7 @@ impl<V> Node<V> {
       // We should have reached the node containing the value.
       // Check if this node has a value registered.
       if let Some(value) = self.value.as_ref() {
-        return Ok(RouteLookup { value, params });
+        return Ok(Match { value, params });
       }
 
       // If there is no value for this route, but this route has a
@@ -479,13 +474,13 @@ impl<V> Node<V> {
     Err(tsr)
   }
 
-  // helper function for handling a wildcard child used by `get_value`
+  // helper function for handling a wildcard child used by `match`
   #[inline]
   fn handle_wild_child<'a>(
     &'a self,
     mut path: &[u8],
     mut params: Params,
-  ) -> Result<RouteLookup<V>, bool> {
+  ) -> Result<Match<V>, bool> {
     match self.node_type {
       NodeType::Param => {
         // find param end (either '/' or path end)
@@ -504,7 +499,7 @@ impl<V> Node<V> {
           if !self.children.is_empty() {
             path = &path[end..];
 
-            return self.children[0].get_value_helper(path, params);
+            return self.children[0].match_helper(path, params);
           }
 
           // ... but we can't
@@ -513,7 +508,7 @@ impl<V> Node<V> {
         }
 
         if let Some(value) = self.value.as_ref() {
-          return Ok(RouteLookup { value, params });
+          return Ok(Match { value, params });
         } else if self.children.len() == 1 {
           // No value found. Check if a value for this path + a
           // trailing slash exists for TSR recommendation
@@ -530,7 +525,7 @@ impl<V> Node<V> {
         });
 
         match self.value.as_ref() {
-          Some(value) => Ok(RouteLookup { value, params }),
+          Some(value) => Ok(Match { value, params }),
           None => Err(false),
         }
       }
@@ -538,9 +533,9 @@ impl<V> Node<V> {
     }
   }
 
-  /// Makes a case-insensitive lookup of the given path and tries to find a handler.
+  /// Makes a case-insensitive match of the given path and tries to find a handler.
   /// It can optionally also fix trailing slashes.
-  /// It returns the case-corrected path and a bool indicating whether the lookup
+  /// It returns the case-corrected path and a bool indicating whether the match
   /// was successful.
   pub fn find_case_insensitive_path(&self, path: &str, fix_trailing_slash: bool) -> Option<String> {
     let mut insensitive_path = Vec::with_capacity(path.len() + 1);
@@ -557,7 +552,7 @@ impl<V> Node<V> {
     }
   }
 
-  // recursive case-insensitive lookup function used by n.find_case_insensitive_path
+  // recursive case-insensitive match function used by n.find_case_insensitive_path
   fn find_case_insensitive_path_helper(
     &self,
     mut path: &[u8],
@@ -724,7 +719,7 @@ impl<V> Node<V> {
     false
   }
 
-  // recursive case-insensitive lookup function used by n.findCaseInsensitivePath
+  // recursive case-insensitive match function used by n.findCaseInsensitivePath
   fn find_case_insensitive_path_match_helper(
     &self,
     mut path: &[u8],
@@ -862,7 +857,7 @@ mod tests {
 
   fn check_requests<T: Fn() -> String>(tree: &mut Node<T>, requests: TestRequests) {
     for request in requests {
-      let res = tree.get_value(request.path);
+      let res = tree.match_path(request.path);
 
       match res {
         Err(_) => {
@@ -953,7 +948,7 @@ mod tests {
     ];
 
     for route in routes {
-      tree.add_route(route, fake_value(route));
+      tree.insert(route, fake_value(route));
     }
 
     check_requests(
@@ -998,7 +993,7 @@ mod tests {
     ];
 
     for route in routes {
-      tree.add_route(route, fake_value(route));
+      tree.insert(route, fake_value(route));
     }
 
     check_requests(
@@ -1101,7 +1096,7 @@ mod tests {
           Ok(guard) => guard,
           Err(poisoned) => poisoned.into_inner(),
         };
-        guard.add_route(route.0, ());
+        guard.insert(route.0, ());
       });
 
       if route.1 {
@@ -1172,7 +1167,7 @@ mod tests {
           Ok(guard) => guard,
           Err(poisoned) => poisoned.into_inner(),
         };
-        guard.add_route(route, fake_value(route));
+        guard.insert(route, fake_value(route));
       });
 
       if recv.is_err() {
@@ -1184,7 +1179,7 @@ mod tests {
           Ok(guard) => guard,
           Err(poisoned) => poisoned.into_inner(),
         };
-        guard.add_route(route, fake_value(route));
+        guard.insert(route, fake_value(route));
       });
 
       if recv.is_ok() {
@@ -1230,7 +1225,7 @@ mod tests {
           Ok(guard) => guard,
           Err(poisoned) => poisoned.into_inner(),
         };
-        guard.add_route(route, fake_value(route));
+        guard.insert(route, fake_value(route));
       });
 
       if recv.is_ok() {
@@ -1272,7 +1267,7 @@ mod tests {
           Ok(guard) => guard,
           Err(poisoned) => poisoned.into_inner(),
         };
-        guard.add_route(route, fake_value(route));
+        guard.insert(route, fake_value(route));
       });
 
       if recv.is_ok() {
@@ -1317,7 +1312,7 @@ mod tests {
           Ok(guard) => guard,
           Err(poisoned) => poisoned.into_inner(),
         };
-        guard.add_route(route, fake_value(route));
+        guard.insert(route, fake_value(route));
       });
 
       if recv.is_err() {
@@ -1347,7 +1342,7 @@ mod tests {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
       };
-      let res = guard.get_value(route);
+      let res = guard.match_path(route);
 
       match res {
         Ok(_) => {
@@ -1368,7 +1363,7 @@ mod tests {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
       };
-      let res = guard.get_value(route);
+      let res = guard.match_path(route);
 
       match res {
         Ok(_) => {
@@ -1387,9 +1382,9 @@ mod tests {
   fn test_tree_root_trailing_slash_redirect() {
     let mut tree = Node::default();
 
-    tree.add_route("/:test", fake_value("/:test"));
+    tree.insert("/:test", fake_value("/:test"));
 
-    let res = tree.get_value("/");
+    let res = tree.match_path("/");
 
     match res {
       Ok(_) => {
@@ -1444,7 +1439,7 @@ mod tests {
     ];
 
     for route in &routes {
-      tree.add_route(route, fake_value(route));
+      tree.insert(route, fake_value(route));
     }
 
     // Check out == in for all registered routes
@@ -1604,9 +1599,9 @@ mod tests {
       let routes = vec!["/con:tact", "/who/are/*you", "/who/foo/hello"];
 
       for route in routes {
-        tree.add_route(route, fake_value(route));
+        tree.insert(route, fake_value(route));
       }
-      tree.add_route(conflict, fake_value(conflict));
+      tree.insert(conflict, fake_value(conflict));
     }
   }
 }
