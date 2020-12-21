@@ -11,16 +11,16 @@ Matches URL patterns with support for dynamic and wildcard segments.
 use matchit::Node;
 
 fn main() {
-    let mut tree = Node::default();
-    tree.insert("/home", "Welcome!");
-    tree.insert("/users/:id", "A User");
+    let mut matcher = Node::default();
+    matcher.insert("/home", "Welcome!");
+    matcher.insert("/users/:id", "A User");
 
-    let matched = tree.match_path("/users/1").unwrap();
+    let matched = matcher.match_path("/users/1").unwrap();
     assert_eq!(matched.params().by_name("id"), Some("1"));
 }
 ```
 
-MatchIt relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
+It relies on a tree structure which makes heavy use of *common prefixes*, it is basically a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
 
 The tree is optimized for high performance and a small memory footprint. It scales well even with very long paths and a large number of routes. A compressing dynamic trie (radix tree) structure is used for efficient matching.
 
@@ -28,7 +28,7 @@ The tree is optimized for high performance and a small memory footprint. It scal
 
 As you can see, `:user` is a *parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/0.1.0/matchit/tree/struct.Params.html), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::by_name(name)` method. For example, `:user` can be retrieved by `params.by_name("user")`.
 
-The registered path, against which the router matches incoming requests, can contain two types of parameters:
+The registered path can contain two types of parameters:
 ```ignore
 Syntax    Type
 :name     named parameter
@@ -48,7 +48,7 @@ Pattern: /user/:user
  /user/                    no match
 ```
 
-**Note:** Since this router has only explicit matches, you can not register static routes and parameters for the same path segment. For example you can not register the patterns `/user/new` and `/user/:user` for the same request method at the same time. The routing of different request methods is independent from each other.
+**Note:** Since the matcher only supports explicit matches, you can not register static routes and parameters for the same path segment. For example you can not register the patterns `/user/new` and `/user/:user` for the same request method at the same time. The routing of different request methods is independent from each other.
 
 ### Catch-All parameters
 
@@ -64,7 +64,7 @@ Pattern: /src/*filepath
 
 ## How does it work?
 
-The router relies on a tree structure which makes heavy use of *common prefixes*, it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie) (or just [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a common prefix also share a common parent. Here is a short example what the routing tree for the `GET` request method could look like:
+The matcher relies on a tree structure which makes heavy use of *common prefixes*, it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie) (or just [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a common prefix also share a common parent. Here is a short example what the routing tree for the `GET` request method could look like:
 
 ```ignore,none
 Priority   Path             Handle
@@ -82,7 +82,7 @@ Priority   Path             Handle
 
 Every `*<num>` represents the memory address of a handler function (a pointer). If you follow a path trough the tree from the root to the leaf, you get the complete route path, e.g `/blog/:post`, where `:post` is just a placeholder ([*parameter*](#named-parameters)) for an actual post name. Unlike hash-maps, a tree structure also allows us to use dynamic parts like the `:post` parameter, since we actually match against the routing patterns instead of just comparing hashes. This works very well and efficiently.
 
-Since URL paths have a hierarchical structure and make use only of a limited set of characters (byte values), it is very likely that there are a lot of common prefixes. This allows us to easily reduce the routing into ever smaller problems. Moreover the router manages a separate tree for every request method. For one thing it is more space efficient than holding a method->handle map in every single node, it also allows us to greatly reduce the routing problem before even starting the look-up in the prefix-tree.
+Since URL paths have a hierarchical structure and make use only of a limited set of characters (byte values), it is very likely that there are a lot of common prefixes. This allows us to easily reduce the routing into ever smaller problems. Moreover the matcher manages a separate tree for every request method. For one thing it is more space efficient than holding a method->handle map in every single node, it also allows us to greatly reduce the routing problem before even starting the look-up in the prefix-tree.
 
 For even better scalability, the child nodes on each tree level are ordered by priority, where the priority is just the number of handles registered in sub nodes (children, grandchildren, and so on..). This helps in two ways:
 

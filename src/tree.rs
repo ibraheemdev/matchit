@@ -5,20 +5,22 @@ use std::ops::Index;
 use std::str;
 
 /// The response returned when getting the value for a specific path with
-/// [`Node::match`](crate::Node::match)
+/// [`Node::match_path`](crate::Node::match_path)
 pub struct Match<'a, V> {
   value: &'a V,
   params: Params,
 }
 
 impl<V> Match<'_, V> {
-    pub fn params(&self) -> &Params {
-       &self.params
-    }
+  /// The route parameters. See [parameters](/index.html#parameters) for more details.
+  pub fn params(&self) -> &Params {
+    &self.params
+  }
 
-    pub fn value(&self) -> &'_ V {
-        self.value
-    }
+  /// The value stored under the matched node.
+  pub fn value(&self) -> &'_ V {
+    self.value
+  }
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
@@ -90,7 +92,7 @@ impl Params {
     self.0.is_empty()
   }
 
-  /// Add a URL paramter to the list (`Param`)
+  /// Inserts a URL parameter into the vector
   pub fn push(&mut self, p: Param) {
     self.0.push(p);
   }
@@ -109,8 +111,9 @@ pub enum NodeType {
   Static,
 }
 
-/// A node in radix tree ordered by priority
-/// priority is just the number of values registered in sub nodes
+/// A node in radix tree ordered by priority.
+///
+/// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
 pub struct Node<V> {
   path: Vec<u8>,
@@ -137,8 +140,8 @@ impl<V> Default for Node<V> {
 }
 
 impl<V> Node<V> {
-  /// increments priority of the given child and reorders if necessary
-  /// returns the new position (index) of the child
+  // Increments priority of the given child and reorders if necessary
+  // returns the new position (index) of the child
   fn increment_child_prio(&mut self, pos: usize) -> usize {
     self.children[pos].priority += 1;
     let prio = self.children[pos].priority;
@@ -414,6 +417,15 @@ impl<V> Node<V> {
   /// Returns the value registered with the given path.
   /// If no value can be found, an `Err(bool)` is returned which represents a TSR (trailing slash
   /// redirect) recommendation.
+  /// ```rust
+  /// # use matchit::Node;
+  ///
+  /// let mut matcher = Node::default();
+  /// matcher.insert("/home", "Welcome!");
+  ///
+  /// if let Err(matched) = matcher.match_path("/home/") {
+  ///     assert_eq!(matched, true);
+  /// }
   pub fn match_path(&self, path: &str) -> Result<Match<V>, bool> {
     self.match_helper(path.as_ref(), Params::default())
   }
@@ -547,6 +559,15 @@ impl<V> Node<V> {
   /// It can optionally also fix trailing slashes.
   /// It returns the case-corrected path and a bool indicating whether the match
   /// was successful.
+  /// ```rust
+  /// # use matchit::Node;
+  ///
+  /// let mut matcher = Node::default();
+  /// matcher.insert("/home", "Welcome!");
+  ///
+  /// let path = matcher.find_case_insensitive_path("/HoMe/", true).unwrap();
+  /// assert_eq!(path, "/home");
+  /// ````
   pub fn find_case_insensitive_path(&self, path: &str, fix_trailing_slash: bool) -> Option<String> {
     let mut insensitive_path = Vec::with_capacity(path.len() + 1);
     let found = self.find_case_insensitive_path_helper(
