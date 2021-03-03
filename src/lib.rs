@@ -105,12 +105,12 @@ mod tree;
 pub use tree::{Match, Node, NodeType, Param, Params};
 
 mod test_readme {
-  macro_rules! doc_comment {
+    macro_rules! doc_comment {
         ($x:expr) => {
             #[doc = $x]
             extern {}
         }
     }
 
-  doc_comment!(include_str!("../README.md"));
+    doc_comment!(include_str!("../README.md"));
 }
