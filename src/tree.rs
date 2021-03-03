@@ -147,7 +147,7 @@ pub struct Node<'path, V> {
     wild_child: bool,
     node_type: NodeType,
     indices: Cow<'path, [u8]>,
-    children: Vec<Box<Node<'path, V>>>,
+    children: Vec<Node<'path, V>>,
     value: Option<V>,
     priority: u32,
 }
@@ -241,7 +241,7 @@ impl<'path, V> Node<'path, V> {
 
             mem::swap(&mut self.children, &mut child.children);
 
-            self.children = vec![Box::new(child)];
+            self.children = vec![child];
             self.indices = self.path[i..i + 1].to_owned().into();
             self.path = path[..i].into();
             self.wild_child = false;
@@ -275,7 +275,7 @@ impl<'path, V> Node<'path, V> {
             if idxc != b':' && idxc != b'*' {
                 self.indices.to_mut().push(idxc);
 
-                self.children.push(Box::new(Self::default()));
+                self.children.push(Self::default());
 
                 let child = self.incr_child_priority(self.indices.len() - 1);
                 return self.children[child].insert_child(path, full_path, value);
@@ -382,7 +382,7 @@ impl<'path, V> Node<'path, V> {
             };
 
             self.wild_child = true;
-            self.children = vec![Box::new(child)];
+            self.children = vec![child];
             self.children[0].priority += 1;
 
             // If the path doesn't end with the wildcard, then there
@@ -395,7 +395,7 @@ impl<'path, V> Node<'path, V> {
                     ..Self::default()
                 };
 
-                self.children[0].children = vec![Box::new(child)];
+                self.children[0].children = vec![child];
                 return self.children[0].children[0].insert_child(path, full_path, value);
             }
             // Otherwise we're done. Insert the value in the new leaf
@@ -432,7 +432,7 @@ impl<'path, V> Node<'path, V> {
         };
 
         self.path = path[..wildcard_index].into();
-        self.children = vec![Box::new(child)];
+        self.children = vec![child];
         self.indices = slice::from_ref(&b'/').into();
         self.children[0].priority += 1;
 
@@ -445,7 +445,7 @@ impl<'path, V> Node<'path, V> {
             ..Self::default()
         };
 
-        self.children[0].children = vec![Box::new(child)];
+        self.children[0].children = vec![child];
     }
 
     /// Returns the value registered at the given path.
@@ -955,7 +955,7 @@ mod tests {
     fn check_priorities<F: Fn() -> String>(n: &mut Node<'_, F>) -> u32 {
         let mut prio: u32 = 0;
         for i in 0..n.children.len() {
-            prio += check_priorities(&mut *n.children[i]);
+            prio += check_priorities(&mut n.children[i]);
         }
 
         if n.value.is_some() {
