@@ -1,6 +1,6 @@
 # MatchIt
 
-[![Documentation](https://img.shields.io/badge/docs-0.2.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit/0.2.0)
+[![Documentation](https://img.shields.io/badge/docs-0.3.1-4d76ae?style=for-the-badge)](https://docs.rs/matchit/0.3.1)
 [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/matchit/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/matchit/actions)
