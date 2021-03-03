@@ -16,7 +16,7 @@
 //!     matcher.insert("/users/:id", "A User");
 //!
 //!     let matched = matcher.match_path("/users/1").unwrap();
-//!     assert_eq!(matched.params.by_name("id"), Some("1"));
+//!     assert_eq!(matched.params.get("id"), Some("1"));
 //!     assert_eq!(matched.value, &"A User");
 //! }
 //! ```
@@ -27,7 +27,7 @@
 //!
 //! ### Parameters
 //!
-//! As you can see, `:user` is a *parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/0.2.0/matchit/tree/struct.Params.html), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::by_name(name)` method. For example, `:user` can be retrieved by `params.by_name("user")`.
+//! As you can see, `:user` is a *parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/0.2.0/matchit/tree/struct.Params.html), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::get(name)` method. For example, `:user` can be retrieved by `params.get("user")`.
 //!
 //! The registered path can contain two types of parameters:
 //! ```ignore

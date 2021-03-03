@@ -38,7 +38,7 @@ impl Param {
 ///  # use matchit::Params;
 ///  # let params = Params::default();
 
-///  let user = params.by_name("user"); // defined by :user or *user
+///  let user = params.get("user"); // defined by :user or *user
 /// ```
 ///  2) by the index of the parameter. This way you can also get the name (key)
 /// ```rust,no_run
@@ -47,14 +47,8 @@ impl Param {
 ///  let third_key = &params[2].key;   // the name of the 3rd parameter
 ///  let third_value = &params[2].value; // the value of the 3rd parameter
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq)]
 pub struct Params(pub Vec<Param>);
-
-impl Default for Params {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
 
 impl Index<usize> for Params {
     type Output = Param;
@@ -82,8 +76,8 @@ impl IntoIterator for Params {
 
 impl Params {
     /// Returns the value of the first `Param` whose key matches the given name.
-    pub fn by_name(&self, name: &str) -> Option<&str> {
-        match self.0.iter().find(|param| param.key == name) {
+    pub fn get(&self, name: impl AsRef<str>) -> Option<&str> {
+        match self.0.iter().find(|param| param.key == name.as_ref()) {
             Some(param) => Some(&param.value),
             None => None,
         }
@@ -958,8 +952,8 @@ mod tests {
             },
         ]);
 
-        assert_eq!(params.by_name("hello"), Some("world"));
-        assert_eq!(params.by_name("rust-is"), Some("awesome"));
+        assert_eq!(params.get("hello"), Some("world"));
+        assert_eq!(params.get("rust-is"), Some("awesome"));
     }
 
     #[test]
