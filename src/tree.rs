@@ -2,16 +2,16 @@
 use std::borrow::Cow;
 use std::cmp::min;
 use std::mem;
-use std::ops::Index;
+use std::ops::{Index, IndexMut};
 use std::slice;
 use std::str;
 
 /// The response returned when getting the value for a specific path with
 /// [`Node::match_path`](crate::Node::match_path)
-pub struct Match<'a, V> {
-    /// The route parameters. See [parameters](/index.html#parameters) for more details.
-    pub value: &'a V,
+pub struct Match<'node, V> {
     /// The value stored under the matched node.
+    pub value: &'node V,
+    /// The route parameters. See [parameters](/index.html#parameters) for more details.
     pub params: Params,
 }
 
@@ -65,9 +65,18 @@ impl Index<usize> for Params {
     }
 }
 
-impl std::ops::IndexMut<usize> for Params {
+impl IndexMut<usize> for Params {
     fn index_mut(&mut self, i: usize) -> &mut Param {
         &mut self.0[i]
+    }
+}
+
+impl IntoIterator for Params {
+    type IntoIter = std::vec::IntoIter<Param>;
+    type Item = Param;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -521,7 +530,7 @@ impl<'a, V> Node<'a, V> {
                 } else if self.children.len() == 1 {
                     // No value found. Check if a value for this path + a
                     // trailing slash exists for TSR recommendation
-                    let tsr = self.children[0].path.as_ref() == [b'/']
+                    let tsr = self.children[0].path.as_ref()[0] == b'/'
                         && self.children[0].value.is_some();
                     return Err(tsr);
                 }
@@ -728,7 +737,7 @@ impl<'a, V> Node<'a, V> {
         // Nothing found.
         // Try to fix the path by adding / removing a trailing slash
         if fix_trailing_slash {
-            if path == [b'/'] {
+            if path[0] == b'/' {
                 return true;
             }
             if lower_path.len() + 1 == self.path.len()
@@ -785,7 +794,7 @@ impl<'a, V> Node<'a, V> {
                     return true;
                 } else if fix_trailing_slash
                     && self.children.len() == 1
-                    && self.children[0].path.as_ref() == [b'/']
+                    && self.children[0].path.as_ref()[0] == b'/'
                     && self.children[0].value.is_some()
                 {
                     // No value found. Check if a value for this path + a
