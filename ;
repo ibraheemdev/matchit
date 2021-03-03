@@ -293,7 +293,7 @@ impl<V> Node<'_, V> {
 
     if wildcard_index.is_none() {
       self.value = Some(value);
-      self.path = path.to_owned().into();
+      self.path = path.into();
       return;
     };
 

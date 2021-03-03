@@ -189,7 +189,7 @@ impl<V> Node<'_, V> {
     // Split edge
     if i < self.path.len() {
       let mut child = Self {
-        path: self.path[i..].to_owned().into(),
+        path: self.path[i..].into(),
         wild_child: self.wild_child,
         indices: self.indices.clone(),
         value: self.value.take(),
@@ -200,8 +200,8 @@ impl<V> Node<'_, V> {
       mem::swap(&mut self.children, &mut child.children);
 
       self.children = vec![Box::new(child)];
-      self.indices = self.path[i..i + 1].to_owned().into();
-      self.path = path[..i].to_owned().into();
+      self.indices = self.path[i..i + 1].into();
+      self.path = path[..i].into();
       self.wild_child = false;
       self.value = None;
     }
@@ -293,7 +293,7 @@ impl<V> Node<'_, V> {
 
     if wildcard_index.is_none() {
       self.value = Some(value);
-      self.path = path.to_owned().into();
+      self.path = path.into();
       return;
     };
 
@@ -330,13 +330,13 @@ impl<V> Node<'_, V> {
     if wildcard[0] == b':' {
       // Insert prefix before the current wildcard
       if wildcard_index > 0 {
-        self.path = path[..wildcard_index].to_owned().into();
+        self.path = path[..wildcard_index].into();
         path = &path[wildcard_index..];
       }
 
       let child = Self {
         node_type: NodeType::Param,
-        path: wildcard.to_owned().into(),
+        path: wildcard.into(),
         ..Self::default()
       };
 
@@ -390,14 +390,14 @@ impl<V> Node<'_, V> {
       ..Self::default()
     };
 
-    self.path = path[..wildcard_index].to_owned().into();
+    self.path = path[..wildcard_index].into();
     self.children = vec![Box::new(child)];
-    self.indices = slice::from_ref(&b'/').into();
+    self.indices = slice::from_ref(b'/').into();
     self.children[0].priority += 1;
 
     // Second node: node holding the variable
     let child = Self {
-      path: path[wildcard_index..].to_owned().into(),
+      path: path[wildcard_index..].into(),
       node_type: NodeType::CatchAll,
       value: Some(value),
       priority: 1,
@@ -444,13 +444,13 @@ impl<V> Node<'_, V> {
           // Nothing found.
           // We can recommend to redirect to the same URL without a
           // trailing slash if a leaf exists for that path.
-          let tsr = path[0] == b'/' && self.value.is_some();
+          let tsr = path == [b'/'] && self.value.is_some();
           return Err(tsr);
         }
 
         return self.children[0].handle_wild_child(path, params);
       }
-    } else if path.as_ref() == prefix.as_ref() {
+    } else if path == prefix {
       // We should have reached the node containing the value.
       // Check if this node has a value registered.
       if let Some(value) = self.value.as_ref() {
@@ -460,7 +460,7 @@ impl<V> Node<'_, V> {
       // If there is no value for this route, but this route has a
       // wildcard child, there must be a value for this path with an
       // additional trailing slash
-      if path[0] == b'/' && self.wild_child && self.node_type != NodeType::Root {
+      if path == [b'/'] && self.wild_child && self.node_type != NodeType::Root {
         return Err(true);
       }
 
@@ -480,7 +480,7 @@ impl<V> Node<'_, V> {
 
     // Nothing found. We can recommend to redirect to the same URL with an
     // extra trailing slash if a leaf exists for that path
-    let tsr = (path[0] == b'/')
+    let tsr = (path == [b'/'])
       || (prefix.len() == path.len() + 1
         && prefix[path.len()] == b'/'
         && path == &prefix[..prefix.len() - 1]
@@ -523,7 +523,7 @@ impl<V> Node<'_, V> {
         } else if self.children.len() == 1 {
           // No value found. Check if a value for this path + a
           // trailing slash exists for TSR recommendation
-          let tsr = self.children[0].path.as_ref() == [b'/'] && self.children[0].value.is_some();
+          let tsr = self.children[0].path == [b'/'] && self.children[0].value.is_some();
           return Err(tsr);
         }
 
@@ -731,7 +731,7 @@ impl<V> Node<'_, V> {
         && lower_path[1..].eq_ignore_ascii_case(&self.path[1..lower_path.len()])
         && self.value.is_some()
       {
-        insensitive_path.extend_from_slice(self.path.as_ref());
+        insensitive_path.push(self.path);
         return true;
       }
     }
