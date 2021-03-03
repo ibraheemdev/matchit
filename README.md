@@ -15,7 +15,7 @@ fn main() {
     matcher.insert("/home", "Welcome!");
     matcher.insert("/users/:id", "A User");
 
-    let matched = matcher.match_path("/users/1").unwrap();
+    let matched = matcher.at("/users/1").unwrap();
     assert_eq!(matched.params.get("id"), Some("1"));
     assert_eq!(matched.value, &"A User");
 }

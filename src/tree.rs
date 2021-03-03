@@ -7,12 +7,44 @@ use std::slice;
 use std::str;
 
 /// The response returned when getting the value for a specific path with
-/// [`Node::match_path`](crate::Node::match_path)
+/// [`Node::at`](crate::Node::at)
+#[derive(Debug)]
 pub struct Match<'node, V> {
     /// The value stored under the matched node.
     pub value: &'node V,
     /// The route parameters. See [parameters](/index.html#parameters) for more details.
     pub params: Params,
+}
+
+/// Indicates whether a route exists at the same path with/without a trailing slash.
+/// ```rust
+/// # use matchit::{Node, Tsr};
+///
+/// let mut matcher = Node::default();
+/// matcher.insert("/home", "Welcome!");
+/// matcher.insert("/blog/", "Our blog.");
+///
+/// if let Err(tsr) = matcher.at("/home/") {
+///     assert_eq!(tsr, Tsr::Yes);
+/// }
+///
+/// if let Err(tsr) = matcher.at("/blog") {
+///     assert_eq!(tsr, Tsr::Yes);
+/// }
+/// ```
+#[derive(PartialEq, Eq, Debug)]
+pub enum Tsr {
+    Yes,
+    No,
+}
+
+impl From<bool> for Tsr {
+    fn from(from: bool) -> Self {
+        match from {
+            true => Tsr::Yes,
+            false => Tsr::No,
+        }
+    }
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
@@ -110,12 +142,12 @@ pub enum NodeType {
 ///
 /// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
-pub struct Node<'a, V> {
-    path: Cow<'a, [u8]>,
+pub struct Node<'path, V> {
+    path: Cow<'path, [u8]>,
     wild_child: bool,
     node_type: NodeType,
-    indices: Cow<'a, [u8]>,
-    children: Vec<Box<Node<'a, V>>>,
+    indices: Cow<'path, [u8]>,
+    children: Vec<Box<Node<'path, V>>>,
     value: Option<V>,
     priority: u32,
 }
@@ -134,10 +166,10 @@ impl<V> Default for Node<'_, V> {
     }
 }
 
-impl<'a, V> Node<'a, V> {
+impl<'path, V> Node<'path, V> {
     // Increments priority of the given child and reorders if necessary
     // returns the new position (index) of the child
-    fn increment_child_prio(&mut self, pos: usize) -> usize {
+    fn incr_child_priority(&mut self, pos: usize) -> usize {
         self.children[pos].priority += 1;
         let prio = self.children[pos].priority;
         // adjust position (move to front)
@@ -165,7 +197,14 @@ impl<'a, V> Node<'a, V> {
     }
 
     /// Insert a `Node` with the given value to the path.
-    pub fn insert(&mut self, path: &'a str, value: V) {
+    /// ```rust
+    /// # use matchit::Node;
+    ///
+    /// let mut matcher = Node::default();
+    /// matcher.insert("/home", "Welcome!");
+    /// matcher.insert("/users/:id", "A User");
+    /// ```
+    pub fn insert(&mut self, path: &'path str, value: V) {
         self.priority += 1;
 
         // Empty tree
@@ -177,7 +216,8 @@ impl<'a, V> Node<'a, V> {
         self.insert_helper(path.as_ref(), path, value);
     }
 
-    fn insert_helper(&mut self, mut path: &'a [u8], full_path: &str, value: V) {
+    #[inline]
+    fn insert_helper(&mut self, mut path: &'path [u8], full_path: &str, value: V) {
         // Find the longest common prefix.
         // This also implies that the common prefix contains no ':' or '*'
         // since the existing key can't contain those chars.
@@ -226,7 +266,7 @@ impl<'a, V> Node<'a, V> {
             // Check if a child with the next path byte exists
             for mut i in 0..self.indices.len() {
                 if idxc == self.indices[i] {
-                    i = self.increment_child_prio(i);
+                    i = self.incr_child_priority(i);
                     return self.children[i].insert_helper(path, full_path, value);
                 }
             }
@@ -237,7 +277,7 @@ impl<'a, V> Node<'a, V> {
 
                 self.children.push(Box::new(Self::default()));
 
-                let child = self.increment_child_prio(self.indices.len() - 1);
+                let child = self.incr_child_priority(self.indices.len() - 1);
                 return self.children[child].insert_child(path, full_path, value);
             }
 
@@ -253,7 +293,7 @@ impl<'a, V> Node<'a, V> {
     }
 
     #[inline]
-    fn wild_child_conflict(&mut self, path: &'a [u8], full_path: &str, value: V) {
+    fn wild_child_conflict(&mut self, path: &'path [u8], full_path: &str, value: V) {
         self.priority += 1;
 
         // Check if the wildcard matches
@@ -289,7 +329,7 @@ impl<'a, V> Node<'a, V> {
         }
     }
 
-    fn insert_child(&mut self, mut path: &'a [u8], full_path: &str, value: V) {
+    fn insert_child(&mut self, mut path: &'path [u8], full_path: &str, value: V) {
         let (wildcard, wildcard_index, valid) = find_wildcard(path);
 
         if wildcard_index.is_none() {
@@ -408,25 +448,24 @@ impl<'a, V> Node<'a, V> {
         self.children[0].children = vec![Box::new(child)];
     }
 
-    /// Returns the value registered with the given path.
-    /// If no value can be found, an `Err(bool)` is returned which represents a TSR (trailing slash
-    /// redirect) recommendation.
+    /// Returns the value registered at the given path.
+    /// If no value can be found it returns a trailing slash redirect recommendation.
     /// ```rust
     /// # use matchit::Node;
     ///
     /// let mut matcher = Node::default();
     /// matcher.insert("/home", "Welcome!");
     ///
-    /// if let Err(matched) = matcher.match_path("/home/") {
-    ///     assert_eq!(matched, true);
-    /// }
-    pub fn match_path(&self, path: &str) -> Result<Match<'_, V>, bool> {
-        self.match_helper(path.as_ref(), Params::default())
+    /// let matched = matcher.at("/home").unwrap();
+    /// assert_eq!(matched.value, &"Welcome!");
+    /// ```
+    pub fn at(&self, path: impl AsRef<str>) -> Result<Match<'_, V>, Tsr> {
+        self.match_helper(path.as_ref().as_bytes(), Params::default())
     }
 
     // outer loop for walking the tree to get a path's value
     #[inline]
-    fn match_helper(&self, mut path: &[u8], params: Params) -> Result<Match<'_, V>, bool> {
+    fn match_helper(&self, mut path: &[u8], params: Params) -> Result<Match<'_, V>, Tsr> {
         let prefix = &self.path;
         if path.len() > prefix.len() {
             if prefix.as_ref() == &path[..prefix.len()] {
@@ -446,12 +485,12 @@ impl<'a, V> Node<'a, V> {
                     // We can recommend to redirect to the same URL without a
                     // trailing slash if a leaf exists for that path.
                     let tsr = path[0] == b'/' && self.value.is_some();
-                    return Err(tsr);
+                    return Err(tsr.into());
                 }
 
                 return self.children[0].handle_wild_child(path, params);
             }
-        } else if path.as_ref() == prefix.as_ref() {
+        } else if path == prefix.as_ref() {
             // We should have reached the node containing the value.
             // Check if this node has a value registered.
             if let Some(value) = self.value.as_ref() {
@@ -462,7 +501,7 @@ impl<'a, V> Node<'a, V> {
             // wildcard child, there must be a value for this path with an
             // additional trailing slash
             if path[0] == b'/' && self.wild_child && self.node_type != NodeType::Root {
-                return Err(true);
+                return Err(Tsr::Yes);
             }
 
             // No value found. Check if a value for this path + a
@@ -472,11 +511,11 @@ impl<'a, V> Node<'a, V> {
                     let tsr = (prefix.len() == 1 && self.children[i].value.is_some())
                         || (self.children[i].node_type == NodeType::CatchAll
                             && self.children[i].children[0].value.is_some());
-                    return Err(tsr);
+                    return Err(tsr.into());
                 }
             }
 
-            return Err(false);
+            return Err(Tsr::No);
         }
 
         // Nothing found. We can recommend to redirect to the same URL with an
@@ -487,12 +526,12 @@ impl<'a, V> Node<'a, V> {
                 && path == &prefix[..prefix.len() - 1]
                 && self.value.is_some());
 
-        Err(tsr)
+        Err(tsr.into())
     }
 
     // helper function for handling a wildcard child used by `match`
     #[inline]
-    fn handle_wild_child(&self, mut path: &[u8], mut params: Params) -> Result<Match<'_, V>, bool> {
+    fn handle_wild_child(&self, mut path: &[u8], mut params: Params) -> Result<Match<'_, V>, Tsr> {
         match self.node_type {
             NodeType::Param => {
                 // find param end (either '/' or path end)
@@ -516,7 +555,7 @@ impl<'a, V> Node<'a, V> {
 
                     // ... but we can't
                     let tsr = path.len() == end + 1;
-                    return Err(tsr);
+                    return Err(tsr.into());
                 }
 
                 if let Some(value) = self.value.as_ref() {
@@ -526,10 +565,10 @@ impl<'a, V> Node<'a, V> {
                     // trailing slash exists for TSR recommendation
                     let tsr = self.children[0].path.as_ref()[0] == b'/'
                         && self.children[0].value.is_some();
-                    return Err(tsr);
+                    return Err(tsr.into());
                 }
 
-                Err(false)
+                Err(Tsr::No)
             }
             NodeType::CatchAll => {
                 params.push(Param {
@@ -539,7 +578,7 @@ impl<'a, V> Node<'a, V> {
 
                 match self.value.as_ref() {
                     Some(value) => Ok(Match { value, params }),
-                    None => Err(false),
+                    None => Err(Tsr::No),
                 }
             }
             _ => panic!("invalid node type"),
@@ -548,24 +587,24 @@ impl<'a, V> Node<'a, V> {
 
     /// Makes a case-insensitive match of the given path and tries to find a handler.
     /// It can optionally also fix trailing slashes.
-    /// It returns the case-corrected path and a bool indicating whether the match
-    /// was successful.
+    /// If the match is successful, it returns the case corrected path.
     /// ```rust
     /// # use matchit::Node;
     ///
     /// let mut matcher = Node::default();
     /// matcher.insert("/home", "Welcome!");
     ///
-    /// let path = matcher.find_case_insensitive_path("/HoMe/", true).unwrap();
+    /// let path = matcher.path_ignore_case("/HoMe/", true).unwrap();
     /// assert_eq!(path, "/home");
     /// ````
-    pub fn find_case_insensitive_path(
+    pub fn path_ignore_case(
         &self,
-        path: &str,
+        path: impl AsRef<str>,
         fix_trailing_slash: bool,
     ) -> Option<String> {
+        let path = path.as_ref();
         let mut insensitive_path = Vec::with_capacity(path.len() + 1);
-        let found = self.find_case_insensitive_path_helper(
+        let found = self.path_ignore_case_helper(
             path.as_bytes(),
             &mut insensitive_path,
             [0; 4],
@@ -579,7 +618,7 @@ impl<'a, V> Node<'a, V> {
     }
 
     // recursive case-insensitive match function used by n.find_case_insensitive_path
-    fn find_case_insensitive_path_helper(
+    fn path_ignore_case_helper(
         &self,
         mut path: &[u8],
         insensitive_path: &mut Vec<u8>,
@@ -596,7 +635,7 @@ impl<'a, V> Node<'a, V> {
             path = &path[self.path.len()..];
 
             if !path.is_empty() {
-                let cached_lower_path = lower_path.clone();
+                let cached_lower_path = <&[u8]>::clone(&lower_path);
 
                 // If this node does not have a wildcard (param or catchAll) child,
                 // we can just look up the next child node and continue to walk down
@@ -610,7 +649,7 @@ impl<'a, V> Node<'a, V> {
                         for i in 0..self.indices.len() {
                             if self.indices[i] == buf[0] {
                                 // continue with child node
-                                return self.children[i].find_case_insensitive_path_helper(
+                                return self.children[i].path_ignore_case_helper(
                                     path,
                                     insensitive_path,
                                     buf,
@@ -651,7 +690,7 @@ impl<'a, V> Node<'a, V> {
                                 // must use a recursive approach since both the
                                 // uppercase byte and the lowercase byte might exist
                                 // as an index
-                                if self.children[i].find_case_insensitive_path_helper(
+                                if self.children[i].path_ignore_case_helper(
                                     path,
                                     insensitive_path,
                                     buf,
@@ -678,7 +717,7 @@ impl<'a, V> Node<'a, V> {
 
                             for i in 0..self.indices.len() {
                                 if self.indices[i] == buf[0] {
-                                    return self.children[i].find_case_insensitive_path_helper(
+                                    return self.children[i].path_ignore_case_helper(
                                         path,
                                         insensitive_path,
                                         buf,
@@ -694,7 +733,7 @@ impl<'a, V> Node<'a, V> {
                     return fix_trailing_slash && path == [b'/'] && self.value.is_some();
                 }
 
-                return self.children[0].find_case_insensitive_path_match_helper(
+                return self.children[0].path_ignore_case_match_helper(
                     path,
                     insensitive_path,
                     buf,
@@ -748,7 +787,7 @@ impl<'a, V> Node<'a, V> {
     }
 
     // recursive case-insensitive match function used by n.findCaseInsensitivePath
-    fn find_case_insensitive_path_match_helper(
+    fn path_ignore_case_match_helper(
         &self,
         mut path: &[u8],
         insensitive_path: &mut Vec<u8>,
@@ -769,7 +808,7 @@ impl<'a, V> Node<'a, V> {
                     if !self.children.is_empty() {
                         path = &path[end..];
 
-                        return self.children[0].find_case_insensitive_path_helper(
+                        return self.children[0].path_ignore_case_helper(
                             path,
                             insensitive_path,
                             buf,
@@ -884,7 +923,7 @@ mod tests {
 
     fn check_requests<T: Fn() -> String>(tree: &mut Node<'static, T>, requests: TestRequests) {
         for request in requests {
-            let res = tree.match_path(request.path);
+            let res = tree.at(request.path);
 
             match res {
                 Err(_) => {
@@ -1369,14 +1408,14 @@ mod tests {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            let res = guard.match_path(route);
+            let res = guard.at(route);
 
             match res {
                 Ok(_) => {
                     panic!("non-nil value for TSR route '{}'", route);
                 }
                 Err(tsr) => {
-                    if !tsr {
+                    if tsr == Tsr::No {
                         panic!("expected TSR recommendation for route '{}'", route);
                     }
                 }
@@ -1390,14 +1429,14 @@ mod tests {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            let res = guard.match_path(route);
+            let res = guard.at(route);
 
             match res {
                 Ok(_) => {
                     panic!("non-nil value for TSR route '{}'", route);
                 }
                 Err(tsr) => {
-                    if tsr {
+                    if tsr == Tsr::Yes {
                         panic!("expected no TSR recommendation for route '{}'", route);
                     }
                 }
@@ -1411,14 +1450,14 @@ mod tests {
 
         tree.insert("/:test", fake_value("/:test"));
 
-        let res = tree.match_path("/");
+        let res = tree.at("/");
 
         match res {
             Ok(_) => {
                 panic!("non-nil value for route '/'");
             }
             Err(tsr) => {
-                if tsr {
+                if tsr == Tsr::Yes {
                     panic!("expected no TSR recommendation for route '/'");
                 }
             }
@@ -1472,7 +1511,7 @@ mod tests {
         // Check out == in for all registered routes
         // With fixTrailingSlash = true
         for route in &routes {
-            let out = tree.find_case_insensitive_path(route, true);
+            let out = tree.path_ignore_case(route, true);
             match out {
                 None => panic!("Route '{}' not found!", route),
                 Some(out) => {
@@ -1485,7 +1524,7 @@ mod tests {
 
         // With fixTrailingSlash = false
         for route in &routes {
-            let out = tree.find_case_insensitive_path(route, false);
+            let out = tree.path_ignore_case(route, false);
             match out {
                 None => panic!("Route '{}' not found!", route),
                 Some(out) => {
@@ -1576,7 +1615,7 @@ mod tests {
 
         // With fixTrailingSlash = true
         for test in &tests {
-            let res = tree.find_case_insensitive_path(test.inn, true);
+            let res = tree.path_ignore_case(test.inn, true);
             match res {
                 None => (),
                 Some(res) => {
@@ -1589,7 +1628,7 @@ mod tests {
 
         // With fixTrailingSlash = false
         for test in &tests {
-            let res = tree.find_case_insensitive_path(test.inn, false);
+            let res = tree.path_ignore_case(test.inn, false);
             match res {
                 None => (),
                 Some(res) => {
