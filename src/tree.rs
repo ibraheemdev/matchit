@@ -23,10 +23,10 @@ pub struct Param {
 }
 
 impl Param {
-    pub fn new(key: &str, value: &str) -> Self {
+    pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            key: key.to_string(),
-            value: value.to_string(),
+            key: key.into(),
+            value: value.into(),
         }
     }
 }
@@ -131,7 +131,7 @@ impl<V> Default for Node<'_, V> {
     }
 }
 
-impl<V> Node<'_, V> {
+impl<'a, V> Node<'a, V> {
     // Increments priority of the given child and reorders if necessary
     // returns the new position (index) of the child
     fn increment_child_prio(&mut self, pos: usize) -> usize {
@@ -162,20 +162,19 @@ impl<V> Node<'_, V> {
     }
 
     /// Insert a `Node` with the given value to the path.
-    pub fn insert(&mut self, path: &str, value: V) {
-        let full_path = <&str>::clone(&path);
+    pub fn insert(&mut self, path: &'a str, value: V) {
         self.priority += 1;
 
         // Empty tree
         if self.path.is_empty() && self.children.is_empty() {
-            self.insert_child(path.as_ref(), full_path, value);
+            self.insert_child(path.as_ref(), path.as_ref(), value);
             self.node_type = NodeType::Root;
             return;
         }
-        self.insert_helper(path.as_ref(), full_path, value);
+        self.insert_helper(path.as_ref(), path, value);
     }
 
-    fn insert_helper(&mut self, mut path: &[u8], full_path: &str, value: V) {
+    fn insert_helper(&mut self, mut path: &'a [u8], full_path: &str, value: V) {
         // Find the longest common prefix.
         // This also implies that the common prefix contains no ':' or '*'
         // since the existing key can't contain those chars.
@@ -201,9 +200,8 @@ impl<V> Node<'_, V> {
 
             self.children = vec![Box::new(child)];
             self.indices = self.path[i..i + 1].to_owned().into();
-            self.path = path[..i].to_owned().into();
+            self.path = path[..i].into();
             self.wild_child = false;
-            self.value = None;
         }
 
         // Make new node a child of this node
@@ -252,7 +250,7 @@ impl<V> Node<'_, V> {
     }
 
     #[inline]
-    fn wild_child_conflict(&mut self, path: &[u8], full_path: &str, value: V) {
+    fn wild_child_conflict(&mut self, path: &'a [u8], full_path: &str, value: V) {
         self.priority += 1;
 
         // Check if the wildcard matches
@@ -288,12 +286,12 @@ impl<V> Node<'_, V> {
         }
     }
 
-    fn insert_child(&mut self, mut path: &[u8], full_path: &str, value: V) {
+    fn insert_child(&mut self, mut path: &'a [u8], full_path: &str, value: V) {
         let (wildcard, wildcard_index, valid) = find_wildcard(path);
 
         if wildcard_index.is_none() {
             self.value = Some(value);
-            self.path = path.to_owned().into();
+            self.path = path.into();
             return;
         };
 
@@ -330,13 +328,13 @@ impl<V> Node<'_, V> {
         if wildcard[0] == b':' {
             // Insert prefix before the current wildcard
             if wildcard_index > 0 {
-                self.path = path[..wildcard_index].to_owned().into();
+                self.path = path[..wildcard_index].into();
                 path = &path[wildcard_index..];
             }
 
             let child = Self {
                 node_type: NodeType::Param,
-                path: wildcard.to_owned().into(),
+                path: wildcard.into(),
                 ..Self::default()
             };
 
@@ -390,14 +388,14 @@ impl<V> Node<'_, V> {
             ..Self::default()
         };
 
-        self.path = path[..wildcard_index].to_owned().into();
+        self.path = path[..wildcard_index].into();
         self.children = vec![Box::new(child)];
         self.indices = slice::from_ref(&b'/').into();
         self.children[0].priority += 1;
 
         // Second node: node holding the variable
         let child = Self {
-            path: path[wildcard_index..].to_owned().into(),
+            path: path[wildcard_index..].into(),
             node_type: NodeType::CatchAll,
             value: Some(value),
             priority: 1,
@@ -426,9 +424,9 @@ impl<V> Node<'_, V> {
     // outer loop for walking the tree to get a path's value
     #[inline]
     fn match_helper(&self, mut path: &[u8], params: Params) -> Result<Match<'_, V>, bool> {
-        let prefix = self.path.clone();
+        let prefix = &self.path;
         if path.len() > prefix.len() {
-            if prefix == &path[..prefix.len()] {
+            if prefix.as_ref() == &path[..prefix.len()] {
                 path = &path[prefix.len()..];
 
                 // If this node does not have a wildcard (Param or CatchAll)
@@ -501,8 +499,8 @@ impl<V> Node<'_, V> {
                 }
 
                 params.push(Param {
-                    key: String::from_utf8(self.path[1..].to_vec()).unwrap(),
-                    value: String::from_utf8(path[..end].to_vec()).unwrap(),
+                    key: str::from_utf8(&self.path[1..]).unwrap().into(),
+                    value: str::from_utf8(&path[..end]).unwrap().into(),
                 });
 
                 // we need to go deeper!
@@ -532,8 +530,8 @@ impl<V> Node<'_, V> {
             }
             NodeType::CatchAll => {
                 params.push(Param {
-                    key: String::from_utf8(self.path[2..].to_vec()).unwrap(),
-                    value: String::from_utf8(path.to_vec()).unwrap(),
+                    key: str::from_utf8(self.path[2..].as_ref()).unwrap().to_owned(),
+                    value: str::from_utf8(path).unwrap().to_owned(),
                 });
 
                 match self.value.as_ref() {
@@ -595,7 +593,7 @@ impl<V> Node<'_, V> {
             path = &path[self.path.len()..];
 
             if !path.is_empty() {
-                let cached_lower_path = <&[u8]>::clone(&lower_path);
+                let cached_lower_path = lower_path.clone();
 
                 // If this node does not have a wildcard (param or catchAll) child,
                 // we can just look up the next child node and continue to walk down
@@ -762,8 +760,7 @@ impl<V> Node<'_, V> {
                     end += 1;
                 }
 
-                let mut path_k = path[..end].to_vec();
-                insensitive_path.append(&mut path_k);
+                insensitive_path.extend_from_slice(&path[..end]);
 
                 if end < path.len() {
                     if !self.children.is_empty() {
@@ -800,7 +797,7 @@ impl<V> Node<'_, V> {
                 false
             }
             NodeType::CatchAll => {
-                insensitive_path.append(&mut path.to_vec());
+                insensitive_path.extend_from_slice(&path);
                 true
             }
             _ => panic!("invalid node type"),
