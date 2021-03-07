@@ -460,128 +460,135 @@ impl<'path, V> Node<'path, V> {
     /// assert_eq!(matched.value, &"Welcome!");
     /// ```
     pub fn at(&self, path: impl AsRef<str>) -> Result<Match<'_, V>, Tsr> {
-        self.match_helper(path.as_ref().as_bytes(), Params::default())
-    }
+        let mut current = self;
+        let mut path = path.as_ref().as_bytes();
+        let mut params = Params::default();
 
-    // outer loop for walking the tree to get a path's value
-    #[inline]
-    fn match_helper(&self, mut path: &[u8], params: Params) -> Result<Match<'_, V>, Tsr> {
-        let prefix = &self.path;
-        if path.len() > prefix.len() {
-            if prefix.as_ref() == &path[..prefix.len()] {
-                path = &path[prefix.len()..];
+        // outer loop for walking the tree to get a path's value
+        'walk: loop {
+            let prefix = &current.path;
+            if path.len() > prefix.len() {
+                if prefix.as_ref() == &path[..prefix.len()] {
+                    path = &path[prefix.len()..];
 
-                // If this node does not have a wildcard (Param or CatchAll)
-                // child, we can just look up the next child node and continue
-                // to walk down the tree
-                if !self.wild_child {
-                    let idxc = path[0];
-                    for i in 0..self.indices.len() {
-                        if idxc == self.indices[i] {
-                            return self.children[i].match_helper(path, params);
+                    // If this node does not have a wildcard (Param or CatchAll)
+                    // child, we can just look up the next child node and continue
+                    // to walk down the tree
+                    if !current.wild_child {
+                        let idxc = path[0];
+                        for (i, c) in current.indices.iter().enumerate() {
+                            if idxc == *c {
+                                current = &current.children[i];
+                                continue 'walk;
+                            }
                         }
-                    }
-                    // Nothing found.
-                    // We can recommend to redirect to the same URL without a
-                    // trailing slash if a leaf exists for that path.
-                    let tsr = path[0] == b'/' && self.value.is_some();
-                    return Err(tsr.into());
-                }
-
-                return self.children[0].handle_wild_child(path, params);
-            }
-        } else if path == prefix.as_ref() {
-            // We should have reached the node containing the value.
-            // Check if this node has a value registered.
-            if let Some(value) = self.value.as_ref() {
-                return Ok(Match { value, params });
-            }
-
-            // If there is no value for this route, but this route has a
-            // wildcard child, there must be a value for this path with an
-            // additional trailing slash
-            if path[0] == b'/' && self.wild_child && self.node_type != NodeType::Root {
-                return Err(Tsr::Yes);
-            }
-
-            // No value found. Check if a value for this path + a
-            // trailing slash exists for trailing slash recommendation
-            for i in 0..self.indices.len() {
-                if self.indices[i] == b'/' {
-                    let tsr = (prefix.len() == 1 && self.children[i].value.is_some())
-                        || (self.children[i].node_type == NodeType::CatchAll
-                            && self.children[i].children[0].value.is_some());
-                    return Err(tsr.into());
-                }
-            }
-
-            return Err(Tsr::No);
-        }
-
-        // Nothing found. We can recommend to redirect to the same URL with an
-        // extra trailing slash if a leaf exists for that path
-        let tsr = (path[0] == b'/')
-            || (prefix.len() == path.len() + 1
-                && prefix[path.len()] == b'/'
-                && path == &prefix[..prefix.len() - 1]
-                && self.value.is_some());
-
-        Err(tsr.into())
-    }
-
-    // helper function for handling a wildcard child used by `match`
-    #[inline]
-    fn handle_wild_child(&self, mut path: &[u8], mut params: Params) -> Result<Match<'_, V>, Tsr> {
-        match self.node_type {
-            NodeType::Param => {
-                // find param end (either '/' or path end)
-                let mut end = 0;
-                while end < path.len() && path[end] != b'/' {
-                    end += 1;
-                }
-
-                params.push(Param {
-                    key: str::from_utf8(&self.path[1..]).unwrap().into(),
-                    value: str::from_utf8(&path[..end]).unwrap().into(),
-                });
-
-                // we need to go deeper!
-                if end < path.len() {
-                    if !self.children.is_empty() {
-                        path = &path[end..];
-
-                        return self.children[0].match_helper(path, params);
+                        // Nothing found.
+                        // We can recommend to redirect to the same URL without a
+                        // trailing slash if a leaf exists for that path.
+                        let tsr = path == [b'/'] && current.value.is_some();
+                        return Err(tsr.into());
                     }
 
-                    // ... but we can't
-                    let tsr = path.len() == end + 1;
-                    return Err(tsr.into());
-                }
+                    current = &current.children[0];
+                    match current.node_type {
+                        NodeType::Param => {
+                            // find param end (either '/' or path end)
+                            let mut end = 0;
+                            while end < path.len() && path[end] != b'/' {
+                                end += 1;
+                            }
 
-                if let Some(value) = self.value.as_ref() {
+                            params.push(Param {
+                                key: str::from_utf8(&current.path[1..]).unwrap().into(),
+                                value: str::from_utf8(&path[..end]).unwrap().into(),
+                            });
+
+                            // we need to go deeper!
+                            if end < path.len() {
+                                if !current.children.is_empty() {
+                                    path = &path[end..];
+
+                                    current = &current.children[0];
+                                    continue 'walk;
+                                }
+
+                                // ... but we can't
+                                let tsr = path.len() == end + 1;
+                                return Err(tsr.into());
+                            }
+
+                            if let Some(value) = current.value.as_ref() {
+                                return Ok(Match { value, params });
+                            } else if current.children.len() == 1 {
+                                current = &current.children[0];
+                                // No value found. Check if a value for this path + a
+                                // trailing slash exists for TSR recommendation
+                                let tsr = (current.path.as_ref() == [b'/']
+                                    && current.value.is_some())
+                                    || (current.path.as_ref().is_empty()
+                                        && current.indices.as_ref() == [b'/']);
+                                return Err(tsr.into());
+                            }
+
+                            return Err(Tsr::No);
+                        }
+                        NodeType::CatchAll => {
+                            params.push(Param {
+                                key: str::from_utf8(current.path[2..].as_ref())
+                                    .unwrap()
+                                    .to_owned(),
+                                value: str::from_utf8(path).unwrap().to_owned(),
+                            });
+
+                            return match current.value.as_ref() {
+                                Some(value) => Ok(Match { value, params }),
+                                None => Err(Tsr::No),
+                            };
+                        }
+                        _ => panic!("invalid node type"),
+                    }
+                }
+            } else if path == prefix.as_ref() {
+                // We should have reached the node containing the value.
+                // Check if this node has a value registered.
+                if let Some(value) = current.value.as_ref() {
                     return Ok(Match { value, params });
-                } else if self.children.len() == 1 {
-                    // No value found. Check if a value for this path + a
-                    // trailing slash exists for TSR recommendation
-                    let tsr = self.children[0].path.as_ref()[0] == b'/'
-                        && self.children[0].value.is_some();
-                    return Err(tsr.into());
                 }
 
-                Err(Tsr::No)
-            }
-            NodeType::CatchAll => {
-                params.push(Param {
-                    key: str::from_utf8(self.path[2..].as_ref()).unwrap().to_owned(),
-                    value: str::from_utf8(path).unwrap().to_owned(),
-                });
-
-                match self.value.as_ref() {
-                    Some(value) => Ok(Match { value, params }),
-                    None => Err(Tsr::No),
+                // If there is no value for this route, but this route has a
+                // wildcard child, there must be a value for this path with an
+                // additional trailing slash
+                if path.as_ref() == [b'/']
+                    && current.wild_child
+                    && current.node_type != NodeType::Root
+                {
+                    return Err(Tsr::Yes);
                 }
+
+                // No value found. Check if a value for this path + a
+                // trailing slash exists for trailing slash recommendation
+                for (i, c) in current.indices.iter().enumerate() {
+                    if *c == b'/' {
+                        current = &current.children[i];
+                        let tsr = (current.path.len() == 1 && current.value.is_some())
+                            || (current.node_type == NodeType::CatchAll
+                                && current.children[0].value.is_some());
+                        return Err(tsr.into());
+                    }
+                }
+
+                return Err(Tsr::No);
             }
-            _ => panic!("invalid node type"),
+
+            // Nothing found. We can recommend to redirect to the same URL with an
+            // extra trailing slash if a leaf exists for that path
+            let tsr = (path == [b'/'])
+                || (prefix.len() == path.len() + 1
+                    && prefix[path.len()] == b'/'
+                    && path == &prefix[..prefix.len() - 1]
+                    && current.value.is_some());
+
+            return Err(tsr.into());
         }
     }
 
@@ -770,7 +777,7 @@ impl<'path, V> Node<'path, V> {
         // Nothing found.
         // Try to fix the path by adding / removing a trailing slash
         if fix_trailing_slash {
-            if path[0] == b'/' {
+            if path == [b'/'] {
                 return true;
             }
             if lower_path.len() + 1 == self.path.len()
@@ -827,7 +834,7 @@ impl<'path, V> Node<'path, V> {
                     return true;
                 } else if fix_trailing_slash
                     && self.children.len() == 1
-                    && self.children[0].path.as_ref()[0] == b'/'
+                    && self.children[0].path.as_ref() == [b'/']
                     && self.children[0].value.is_some()
                 {
                     // No value found. Check if a value for this path + a
