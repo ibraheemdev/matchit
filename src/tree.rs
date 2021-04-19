@@ -167,33 +167,9 @@ impl<V> Default for Node<'_, V> {
 }
 
 impl<'path, V> Node<'path, V> {
-    // Increments priority of the given child and reorders if necessary
-    // returns the new position (index) of the child
-    fn incr_child_priority(&mut self, pos: usize) -> usize {
-        self.children[pos].priority += 1;
-        let prio = self.children[pos].priority;
-        // adjust position (move to front)
-        let mut new_pos = pos;
-
-        while new_pos > 0 && self.children[new_pos - 1].priority < prio {
-            // swap node positions
-            self.children.swap(new_pos - 1, new_pos);
-            new_pos -= 1;
-        }
-
-        // build new index char string
-        if new_pos != pos {
-            self.indices = [
-                &self.indices[..new_pos],    // unchanged prefix, might be empty
-                &self.indices[pos..=pos],    // the index char we move
-                &self.indices[new_pos..pos], // rest without char at 'pos'
-                &self.indices[pos + 1..],
-            ]
-            .concat()
-            .into();
-        }
-
-        new_pos
+    /// Construct a new `Node`.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Insert a `Node` with the given value to the path.
@@ -290,6 +266,35 @@ impl<'path, V> Node<'path, V> {
 
             self.value = Some(value);
         }
+    }
+
+    // Increments priority of the given child and reorders if necessary
+    // returns the new position (index) of the child
+    fn incr_child_priority(&mut self, pos: usize) -> usize {
+        self.children[pos].priority += 1;
+        let prio = self.children[pos].priority;
+        // adjust position (move to front)
+        let mut new_pos = pos;
+
+        while new_pos > 0 && self.children[new_pos - 1].priority < prio {
+            // swap node positions
+            self.children.swap(new_pos - 1, new_pos);
+            new_pos -= 1;
+        }
+
+        // build new index char string
+        if new_pos != pos {
+            self.indices = [
+                &self.indices[..new_pos],    // unchanged prefix, might be empty
+                &self.indices[pos..=pos],    // the index char we move
+                &self.indices[new_pos..pos], // rest without char at 'pos'
+                &self.indices[pos + 1..],
+            ]
+            .concat()
+            .into();
+        }
+
+        new_pos
     }
 
     #[inline]
@@ -1330,7 +1335,6 @@ mod tests {
 
     #[test]
     fn test_tree_double_wildcard() {
-        let panic_msg = "only one wildcard per path segment is allowed";
         let routes = vec!["/:foo:bar", "/:foo:bar/", "/:foo*bar"];
 
         for route in routes {
@@ -1344,7 +1348,7 @@ mod tests {
             });
 
             if recv.is_ok() {
-                panic!(panic_msg);
+                panic!("only one wildcard per path segment is allowed");
             }
         }
     }
@@ -1609,7 +1613,7 @@ mod tests {
             inn: &'static str,
             out: &'static str,
             slash: bool,
-        };
+        }
 
         let tests: Vec<Test> = tests
             .into_iter()
