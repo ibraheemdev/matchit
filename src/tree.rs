@@ -520,7 +520,7 @@ impl<'path, V> Node<'path, V> {
     // It's a bit sad that we have to introduce unsafecell here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
-    pub fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&'_ UnsafeCell<V>>, Tsr> {
+    fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&'_ UnsafeCell<V>>, Tsr> {
         let mut current = self;
         let mut path = path.as_ref().as_bytes();
         let mut params = Params::default();
