@@ -10,13 +10,13 @@
 //! ```rust
 //! use matchit::Node;
 //!
-//! let mut matcher = Node::default();
+//! let mut matcher = Node::new();
 //! matcher.insert("/home", "Welcome!");
 //! matcher.insert("/users/:id", "A User");
 //!
 //! let matched = matcher.at("/users/1").unwrap();
 //! assert_eq!(matched.params.get("id"), Some("1"));
-//! assert_eq!(matched.value, &"A User");
+//! assert_eq!(*matched.value, "A User");
 //! ```
 //!
 //! `matchit` relies on a tree structure which makes heavy use of *common prefixes*, it is effectively a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
@@ -28,7 +28,7 @@
 //! As you can see, `:id` is a *parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/0.2.0/matchit/tree/struct.Params.html), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::get(name)` method. For example, `:user` can be retrieved by `params.get("user")`.
 //!
 //! The registered path can contain two types of parameters:
-//! ```ignore
+//! ```text
 //! Syntax    Type
 //! :name     named parameter
 //! *name     catch-all parameter
@@ -38,7 +38,7 @@
 //!
 //! Named parameters are dynamic path segments. They match anything until the next `/` or the path end:
 //!
-//! ```ignore
+//! ```text
 //! Pattern: /user/:user
 //!
 //!  /user/gordon              match

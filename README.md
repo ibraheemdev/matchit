@@ -11,13 +11,13 @@ Matches URL patterns with support for dynamic and wildcard segments.
 use matchit::Node;
 
 fn main() {
-    let mut matcher = Node::default();
+    let mut matcher = Node::new();
     matcher.insert("/home", "Welcome!");
     matcher.insert("/users/:id", "A User");
 
     let matched = matcher.at("/users/1").unwrap();
     assert_eq!(matched.params.get("id"), Some("1"));
-    assert_eq!(matched.value, &"A User");
+    assert_eq!(*matched.value, "A User");
 }
 ```
 
@@ -30,7 +30,7 @@ The tree is optimized for high performance and a small memory footprint. It scal
 As you can see, `:id` is a *parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/0.2.0/matchit/tree/struct.Params.html), which stores a vector of keys and values. You can get the value of a parameter either by its index in the vector, or by using the `Params::get(name)` method. For example, `:user` can be retrieved by `params.get("user")`.
 
 The registered path can contain two types of parameters:
-```ignore
+```text
 Syntax    Type
 :name     named parameter
 *name     catch-all parameter
@@ -40,7 +40,7 @@ Syntax    Type
 
 Named parameters are dynamic path segments. They match anything until the next `/` or the path end:
 
-```ignore
+```text
 Pattern: /user/:user
 
  /user/gordon              match
@@ -55,7 +55,7 @@ Pattern: /user/:user
 
 The second type are *catch-all* parameters and have the form `*name`. Like the name suggests, they match everything. Therefore they must always be at the **end** of the pattern:
 
-```ignore
+```text
 Pattern: /src/*filepath
 
  /src/                     match
@@ -67,7 +67,7 @@ Pattern: /src/*filepath
 
 The matcher relies on a tree structure which makes heavy use of *common prefixes*, it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie) (or [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a common prefix share a parent. Here is a short example what the routing tree for the `GET` request method could look like:
 
-```ignore,none
+```text
 Priority   Path             Handle
 9          \                *<1>
 3          ├s               None
@@ -90,7 +90,7 @@ For even better scalability, the child nodes on each tree level are ordered by p
 1. Nodes which are part of the most routing paths are evaluated first. This helps make more routes reachable as fast as possible.
 2. It acts as a cost compensation. The longest reachable path (highest cost) can always be evaluated first. The following scheme visualizes the tree structure. Nodes are evaluated from top to bottom and from left to right.
 
-```ignore,none
+```test
 ├------------
 ├---------
 ├-----

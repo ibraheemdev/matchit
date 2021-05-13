@@ -8,8 +8,8 @@ use std::ops::{Index, IndexMut};
 use std::slice;
 use std::str;
 
-/// The response returned when getting the value for a specific path with
-/// [`Node::at`](crate::Node::at)
+/// A successful match consisting of the registered value and the URL parameters, returned by
+/// [`Node::at`](crate::Node::at).
 #[derive(Debug, Clone)]
 pub struct Match<V> {
     /// The value stored under the matched node.
@@ -37,10 +37,10 @@ pub enum InsertError {
         /// The existing route that the insertion is conflicting with.
         with: String,
     },
-    /// Only one wildcard per path segment is allowed (The wildcard name contained a ':' or '*').
-    TooManyWildcards,
-    /// Wildcards must have a non-empty name.
-    UnnamedWildcard,
+    /// Only one parameter per path segment is allowed.
+    TooManyParams,
+    /// Parameters must be registered with a name.
+    UnnamedParam,
     /// Catch-all parameters are only allowed at the end of a path.
     InvalidCatchAll,
 }
@@ -61,7 +61,7 @@ impl InsertError {
 /// ```rust
 /// # use matchit::{Node, Tsr};
 ///
-/// let mut matcher = Node::default();
+/// let mut matcher = Node::new();
 /// matcher.insert("/home", "Welcome!");
 /// matcher.insert("/blog/", "Our blog.");
 ///
@@ -88,7 +88,7 @@ impl From<bool> for Tsr {
     }
 }
 
-/// Param is a single URL parameter, consisting of a key and a value.
+/// A single URL parameter, consisting of a key and a value.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
 pub struct Param {
     pub key: String,
@@ -96,6 +96,7 @@ pub struct Param {
 }
 
 impl Param {
+    /// Create a new route parameter with the given key/value.
     pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             key: key.into(),
@@ -104,24 +105,79 @@ impl Param {
     }
 }
 
-/// A `Vec` of `Param` returned by a route match.
-/// There are two ways to retrieve the value of a parameter:
-///  1) by the name of the parameter
+/// A list of parameters returned by a route match.
+///
 /// ```rust
-///  # use matchit::Params;
-///  # let params = Params::default();
-
-///  let user = params.get("user"); // defined by :user or *user
-/// ```
-///  2) by the index of the parameter. This way you can also get the name (key)
-/// ```rust,no_run
-///  # use matchit::Params;
-///  # let params = Params::default();
-///  let third_key = &params[2].key;   // the name of the 3rd parameter
-///  let third_value = &params[2].value; // the value of the 3rd parameter
+/// # let mut matcher = matchit::Node::new();
+/// # matcher.insert("/users/:id", true);
+/// let matched = matcher.at("/users/1").unwrap();
+///
+/// for param in &matched.params {
+///     println!("key: {}, value: {}", param.key, param.value);
+/// }
+///
+/// let id = matched.params.get("id");
+/// assert_eq!(id, Some("1"));
 /// ```
 #[derive(Default, Debug, PartialEq, Eq, Ord, PartialOrd, Clone)]
 pub struct Params(pub Vec<Param>);
+
+impl Params {
+    /// Returns the value of the first [`Param`] whose key matches the given name.
+    pub fn get(&self, name: impl AsRef<str>) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|param| param.key == name.as_ref())
+            .map(|param| param.value.as_ref())
+    }
+
+    /// Returns an iterator over the parameters in the list.
+    pub fn iter(&self) -> slice::Iter<'_, Param> {
+        self.0.iter()
+    }
+
+    /// Returns an iterator that allows modifying each value.
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, Param> {
+        self.0.iter_mut()
+    }
+
+    /// Returns `true` if there are no parameters in the list.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Inserts a URL parameter into the vector
+    pub fn push(&mut self, param: Param) {
+        self.0.push(param);
+    }
+}
+
+impl IntoIterator for Params {
+    type IntoIter = std::vec::IntoIter<Param>;
+    type Item = Param;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Params {
+    type IntoIter = std::slice::IterMut<'a, Param>;
+    type Item = &'a mut Param;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
+impl<'a> IntoIterator for &'a Params {
+    type IntoIter = std::slice::Iter<'a, Param>;
+    type Item = &'a Param;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
 
 impl Index<usize> for Params {
     type Output = Param;
@@ -135,34 +191,6 @@ impl Index<usize> for Params {
 impl IndexMut<usize> for Params {
     fn index_mut(&mut self, i: usize) -> &mut Param {
         &mut self.0[i]
-    }
-}
-
-impl IntoIterator for Params {
-    type IntoIter = std::vec::IntoIter<Param>;
-    type Item = Param;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl Params {
-    /// Returns the value of the first `Param` whose key matches the given name.
-    pub fn get(&self, name: impl AsRef<str>) -> Option<&str> {
-        self.0
-            .iter()
-            .find(|param| param.key == name.as_ref())
-            .map(|param| param.value.as_ref())
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    /// Inserts a URL parameter into the vector
-    pub fn push(&mut self, p: Param) {
-        self.0.push(p);
     }
 }
 
@@ -218,7 +246,7 @@ impl<'path, V> Node<'path, V> {
     /// ```rust
     /// # use matchit::Node;
     ///
-    /// let mut matcher = Node::default();
+    /// let mut matcher = Node::new();
     /// matcher.insert("/home", "Welcome!");
     /// matcher.insert("/users/:id", "A User");
     /// ```
@@ -389,12 +417,12 @@ impl<'path, V> Node<'path, V> {
 
         // the wildcard name must not contain ':' and '*'
         if !valid {
-            return Err(InsertError::TooManyWildcards);
+            return Err(InsertError::TooManyParams);
         };
 
         // check if the wildcard has a name
         if wildcard.len() < 2 {
-            return Err(InsertError::UnnamedWildcard);
+            return Err(InsertError::UnnamedParam);
         }
 
         // check if this Node existing children which would be
@@ -485,11 +513,11 @@ impl<'path, V> Node<'path, V> {
     /// ```rust
     /// # use matchit::Node;
     ///
-    /// let mut matcher = Node::default();
+    /// let mut matcher = Node::new();
     /// matcher.insert("/home", "Welcome!");
     ///
     /// let matched = matcher.at("/home").unwrap();
-    /// assert_eq!(matched.value, &"Welcome!");
+    /// assert_eq!(*matched.value, "Welcome!");
     /// ```
     pub fn at(&self, path: impl AsRef<str>) -> Result<Match<&V>, Tsr> {
         match self.at_inner(path) {
@@ -654,7 +682,7 @@ impl<'path, V> Node<'path, V> {
     /// ```rust
     /// # use matchit::Node;
     ///
-    /// let mut matcher = Node::default();
+    /// let mut matcher = Node::new();
     /// matcher.insert("/home", "Welcome!");
     ///
     /// let path = matcher.path_ignore_case("/HoMe/", true).unwrap();
@@ -1063,7 +1091,7 @@ mod tests {
 
     #[test]
     fn test_tree_add_and_get() {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
 
         let routes = vec![
             "/hi",
@@ -1105,7 +1133,7 @@ mod tests {
 
     #[test]
     fn test_tree_wildcard() {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
 
         let routes = vec![
             "/",
@@ -1220,7 +1248,7 @@ mod tests {
     type TestRoute = (&'static str, bool);
 
     fn test_routes(routes: Vec<TestRoute>) {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
 
         for route in routes {
             let res = tree.insert(route.0, ());
@@ -1277,7 +1305,7 @@ mod tests {
 
     #[test]
     fn test_tree_duplicate_path() {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
 
         let routes = vec![
             "/",
@@ -1322,13 +1350,13 @@ mod tests {
 
     #[test]
     fn test_empty_wildcard_name() {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
         let routes = vec!["/user:", "/user:/", "/cmd/:/", "/src/*"];
 
         for route in routes {
             assert_eq!(
                 tree.insert(route, route.to_owned()),
-                Err(InsertError::UnnamedWildcard)
+                Err(InsertError::UnnamedParam)
             );
         }
     }
@@ -1356,15 +1384,15 @@ mod tests {
         let routes = vec!["/:foo:bar", "/:foo:bar/", "/:foo*bar"];
 
         for route in routes {
-            let mut tree = Node::default();
+            let mut tree = Node::new();
             let res = tree.insert(route, route.to_owned());
-            assert_eq!(res, Err(InsertError::TooManyWildcards));
+            assert_eq!(res, Err(InsertError::TooManyParams));
         }
     }
 
     #[test]
     fn test_tree_trailing_slash_redirect() {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
         let routes = vec![
             "/hi",
             "/b/",
@@ -1452,7 +1480,7 @@ mod tests {
 
     #[test]
     fn test_tree_root_trailing_slash_redirect() {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
 
         tree.insert("/:test", "/:test".to_owned()).unwrap();
 
@@ -1472,7 +1500,7 @@ mod tests {
 
     #[test]
     fn test_tree_find_case_insensitive_path() {
-        let mut tree = Node::default();
+        let mut tree = Node::new();
 
         let routes = vec![
             "/hi",
@@ -1666,7 +1694,7 @@ mod tests {
         ];
 
         for conflict in conflicts {
-            let mut tree = Node::default();
+            let mut tree = Node::new();
 
             let routes = vec![
                 "/con:tact",
