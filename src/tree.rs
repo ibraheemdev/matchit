@@ -1,5 +1,6 @@
 //! The radix tree implementation
 use std::borrow::Cow;
+use std::cell::UnsafeCell;
 use std::cmp::min;
 use std::mem;
 use std::ops::{Index, IndexMut};
@@ -9,9 +10,9 @@ use std::str;
 /// The response returned when getting the value for a specific path with
 /// [`Node::at`](crate::Node::at)
 #[derive(Debug)]
-pub struct Match<'node, V> {
+pub struct Match<V> {
     /// The value stored under the matched node.
-    pub value: &'node V,
+    pub value: V,
     /// The route parameters. See [parameters](/index.html#parameters) for more details.
     pub params: Params,
 }
@@ -148,7 +149,8 @@ pub struct Node<'path, V> {
     node_type: NodeType,
     indices: Cow<'path, [u8]>,
     children: Vec<Node<'path, V>>,
-    value: Option<V>,
+    // See `at_inner` for why this is needed.
+    value: Option<UnsafeCell<V>>,
     priority: u32,
 }
 
@@ -264,7 +266,7 @@ impl<'path, V> Node<'path, V> {
                 panic!("a value is already registered for path '{}'", full_path);
             }
 
-            self.value = Some(value);
+            self.value = Some(UnsafeCell::new(value));
         }
     }
 
@@ -338,7 +340,7 @@ impl<'path, V> Node<'path, V> {
         let (wildcard, wildcard_index, valid) = find_wildcard(path);
 
         if wildcard_index.is_none() {
-            self.value = Some(value);
+            self.value = Some(UnsafeCell::new(value));
             self.path = path.into();
             return;
         };
@@ -404,7 +406,7 @@ impl<'path, V> Node<'path, V> {
                 return self.children[0].children[0].insert_child(path, full_path, value);
             }
             // Otherwise we're done. Insert the value in the new leaf
-            self.children[0].value = Some(value);
+            self.children[0].value = Some(UnsafeCell::new(value));
             return;
         }
 
@@ -445,7 +447,7 @@ impl<'path, V> Node<'path, V> {
         let child = Self {
             path: path[wildcard_index..].into(),
             node_type: NodeType::CatchAll,
-            value: Some(value),
+            value: Some(UnsafeCell::new(value)),
             priority: 1,
             ..Self::default()
         };
@@ -464,7 +466,36 @@ impl<'path, V> Node<'path, V> {
     /// let matched = matcher.at("/home").unwrap();
     /// assert_eq!(matched.value, &"Welcome!");
     /// ```
-    pub fn at(&self, path: impl AsRef<str>) -> Result<Match<'_, V>, Tsr> {
+    pub fn at(&self, path: impl AsRef<str>) -> Result<Match<&V>, Tsr> {
+        match self.at_inner(path) {
+            Ok(v) => Ok(Match {
+                // SAFETY: We have an immutable reference to `self`, so we can give out a immutable
+                // reference to `value` of the same lifetime
+                value: unsafe { &*v.value.get() },
+                params: v.params,
+            }),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Returns a mutable reference to the value registered at the given path.
+    /// See [Node::at](crate::Node::at) for details.
+    pub fn at_mut(&mut self, path: impl AsRef<str>) -> Result<Match<&mut V>, Tsr> {
+        match self.at_inner(path) {
+            Ok(v) => Ok(Match {
+                // SAFETY: We have a unique reference to `self`, so we can give out a unique
+                // reference to `value` of the same lifetime
+                value: unsafe { &mut *v.value.get() },
+                params: v.params,
+            }),
+            Err(e) => Err(e),
+        }
+    }
+
+    // It's a bit sad that we have to introduce unsafecell here, but rust doesn't really have a way
+    // to abstract over mutability, so it avoids having to duplicate logic between `at` and
+    // `at_mut`.
+    pub fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&'_ UnsafeCell<V>>, Tsr> {
         let mut current = self;
         let mut path = path.as_ref().as_bytes();
         let mut params = Params::default();
@@ -933,7 +964,7 @@ mod tests {
 
     type TestRequests = Vec<TestRequest>;
 
-    fn check_requests<T: Fn() -> String>(tree: &mut Node<'static, T>, requests: TestRequests) {
+    fn check_requests(tree: &mut Node<'static, String>, requests: TestRequests) {
         for request in requests {
             let res = tree.at(request.path);
 
@@ -947,7 +978,7 @@ mod tests {
                     if request.should_be_nil {
                         panic!("Expected nil value for route '{}'", request.path);
                     }
-                    let value = (result.value)();
+                    let value = result.value;
                     if value != request.route {
                         panic!(
                             "Wrong value for route '{}'. Expected '{}', found '{}')",
@@ -959,12 +990,21 @@ mod tests {
                         "Wrong params for route '{}'",
                         request.path
                     );
+
+                    let res_mut = tree.at_mut(request.path).unwrap();
+                    res_mut.value.push_str("CHECKED");
+
+                    let res = tree.at(request.path).unwrap();
+                    assert!(res.value.contains("CHECKED"));
+
+                    let res_mut = tree.at_mut(request.path).unwrap();
+                    *res_mut.value = res_mut.value.replace("CHECKED", "");
                 }
             };
         }
     }
 
-    fn check_priorities<F: Fn() -> String>(n: &mut Node<'_, F>) -> u32 {
+    fn check_priorities(n: &mut Node<'_, String>) -> u32 {
         let mut prio: u32 = 0;
         for i in 0..n.children.len() {
             prio += check_priorities(&mut n.children[i]);
@@ -986,8 +1026,8 @@ mod tests {
         prio
     }
 
-    fn fake_value(val: &'static str) -> impl Fn() -> String {
-        move || val.to_string()
+    fn fake_value(val: &'static str) -> String {
+        val.into()
     }
 
     #[test]
