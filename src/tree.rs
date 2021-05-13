@@ -18,28 +18,43 @@ pub struct Match<V> {
     pub params: Params,
 }
 
-/// Represents errors that can occur inserting new routes.
+/// Represents errors that can occur when inserting a new route.
 #[non_exhaustive]
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum InsertError {
     /// The inserted path conflicts with an existing route.
     ///
-    /// This error may unexpectedly come up when registering the following two routes:
+    /// This error may unexpectedly come up when registering routes like the following:
     ///
     /// ```text
     /// /user/:id
     /// /user/get
     /// ```
     ///
-    /// This is due to the strict requirements of the internal radix tree.
-    /// This should be fixed in the future.
-    Conflict,
-    /// Only one wildcard per path segment is allowed
+    /// This is due to the strict requirements of the internal radix tree,
+    /// and should be fixed in the future.
+    Conflict {
+        /// The existing route that the insertion is conflicting with.
+        with: String,
+    },
+    /// Only one wildcard per path segment is allowed (The wildcard name contained a ':' or '*').
     TooManyWildcards,
     /// Wildcards must have a non-empty name.
     UnnamedWildcard,
-    /// Wildcards are only allowed at the end of a path.
-    InvalidWildcardLocation,
+    /// Catch-all parameters are only allowed at the end of a path.
+    InvalidCatchAll,
+}
+
+impl InsertError {
+    fn conflict(insert: &str, prefix: &[u8], existing: &[u8]) -> Self {
+        let with = format!(
+            "{}{}",
+            &insert[..insert.rfind(str::from_utf8(prefix).unwrap()).unwrap()],
+            str::from_utf8(&existing).unwrap(),
+        );
+
+        InsertError::Conflict { with }
+    }
 }
 
 /// Indicates whether a route exists at the same path with/without a trailing slash.
@@ -294,7 +309,7 @@ impl<'path, V> Node<'path, V> {
         } else {
             // Otherwise add value to current node
             if self.value.is_some() {
-                return Err(InsertError::Conflict);
+                return Err(InsertError::conflict(full_path, path, &self.path));
             }
 
             self.value = Some(UnsafeCell::new(value));
@@ -351,8 +366,7 @@ impl<'path, V> Node<'path, V> {
         {
             self.insert_helper(path, full_path, value)
         } else {
-            // Wildcard conflict
-            Err(InsertError::Conflict)
+            return Err(InsertError::conflict(full_path, path, &self.path));
         }
     }
 
@@ -386,7 +400,7 @@ impl<'path, V> Node<'path, V> {
         // check if this Node existing children which would be
         // unreachable if we insert the wildcard here
         if !self.children.is_empty() {
-            return Err(InsertError::Conflict);
+            return Err(InsertError::conflict(full_path, path, &self.path));
         }
 
         // Param
@@ -427,17 +441,17 @@ impl<'path, V> Node<'path, V> {
 
         // catch all
         if wildcard_index + wildcard.len() != path.len() {
-            return Err(InsertError::InvalidWildcardLocation);
+            return Err(InsertError::InvalidCatchAll);
         }
 
         if !self.path.is_empty() && self.path[self.path.len() - 1] == b'/' {
-            return Err(InsertError::Conflict);
+            return Err(InsertError::conflict(full_path, path, &self.path));
         }
 
         // Currently fixed width 1 for '/'
         wildcard_index -= 1;
         if path[wildcard_index] != b'/' {
-            return Err(InsertError::InvalidWildcardLocation);
+            return Err(InsertError::InvalidCatchAll);
         }
 
         // first node: CatchAll Node with empty path
@@ -1275,7 +1289,8 @@ mod tests {
 
         for route in routes {
             tree.insert(route, route.to_owned()).unwrap();
-            assert!(tree.insert(route, route.to_owned()).is_err());
+            let res = tree.insert(route, route.to_owned());
+            assert_eq!(res, Err(InsertError::Conflict { with: route.into() }));
         }
 
         check_requests(
@@ -1618,15 +1633,18 @@ mod tests {
             };
         }
 
-        // With fixTrailingSlash = false
+        // without fix trailing slash = false
         for test in &tests {
             let res = tree.path_ignore_case(test.inn, false);
             match res {
                 None => (),
                 Some(res) => {
                     if test.slash {
-                        // test needs a trailingSlash fix. It must not be found!
-                        panic!("Found without fixTrailingSlash: {}; got {}", test.inn, res);
+                        // test needs a trailing slash fix. It must not be found!
+                        panic!(
+                            "Found without fix_trailing_slash: {}; got {}",
+                            test.inn, res
+                        );
                     }
                     if res != test.out {
                         panic!("Wrong result for route '{}': {}", res, test.out);
@@ -1639,25 +1657,34 @@ mod tests {
     #[test]
     fn test_tree_wildcard_conflict_ex() {
         let conflicts = vec![
-            "/who/are/foo",
-            "/who/are/foo/",
-            "/who/are/foo/bar",
-            "/conxxx",
-            "/conooo/xxx",
+            ("/who/are/foo", "/who/are/*you"),
+            ("/who/are/foo/", "/who/are/*you"),
+            ("/who/are/foo/bar", "/who/are/*you"),
+            ("/conxxx", "/con:tact"),
+            ("/conooo/xxx", "/con:tact"),
+            ("/whose/:users/:user", "/whose/:users/:name"),
         ];
 
         for conflict in conflicts {
             let mut tree = Node::default();
 
-            let routes = vec!["/con:tact", "/who/are/*you", "/who/foo/hello"];
+            let routes = vec![
+                "/con:tact",
+                "/who/are/*you",
+                "/who/foo/hello",
+                "/whose/:users/:name",
+            ];
 
             for route in routes {
                 tree.insert(route, route.to_owned()).unwrap();
             }
 
+            let res = tree.insert(conflict.0, conflict.0.to_owned());
             assert_eq!(
-                tree.insert(conflict, conflict.to_owned()),
-                Err(InsertError::Conflict)
+                res,
+                Err(InsertError::Conflict {
+                    with: conflict.1.into()
+                })
             );
         }
     }
