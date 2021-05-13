@@ -10,15 +10,13 @@
 //! ```rust
 //! use matchit::Node;
 //!
-//! fn main() {
-//!     let mut matcher = Node::default();
-//!     matcher.insert("/home", "Welcome!");
-//!     matcher.insert("/users/:id", "A User");
+//! let mut matcher = Node::default();
+//! matcher.insert("/home", "Welcome!");
+//! matcher.insert("/users/:id", "A User");
 //!
-//!     let matched = matcher.at("/users/1").unwrap();
-//!     assert_eq!(matched.params.get("id"), Some("1"));
-//!     assert_eq!(matched.value, &"A User");
-//! }
+//! let matched = matcher.at("/users/1").unwrap();
+//! assert_eq!(matched.params.get("id"), Some("1"));
+//! assert_eq!(matched.value, &"A User");
 //! ```
 //!
 //! `matchit` relies on a tree structure which makes heavy use of *common prefixes*, it is effectively a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).

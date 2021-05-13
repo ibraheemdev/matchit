@@ -135,10 +135,10 @@ impl IntoIterator for Params {
 impl Params {
     /// Returns the value of the first `Param` whose key matches the given name.
     pub fn get(&self, name: impl AsRef<str>) -> Option<&str> {
-        match self.0.iter().find(|param| param.key == name.as_ref()) {
-            Some(param) => Some(&param.value),
-            None => None,
-        }
+        self.0
+            .iter()
+            .find(|param| param.key == name.as_ref())
+            .map(|param| param.value.as_ref())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -349,10 +349,10 @@ impl<'path, V> Node<'path, V> {
       // Check for longer wildcard, e.g. :name and :names
       && (self.path.len() >= path.len() || path[self.path.len()] == b'/')
         {
-            return self.insert_helper(path, full_path, value);
+            self.insert_helper(path, full_path, value)
         } else {
             // Wildcard conflict
-            return Err(InsertError::Conflict);
+            Err(InsertError::Conflict)
         }
     }
 
@@ -603,10 +603,7 @@ impl<'path, V> Node<'path, V> {
                 // If there is no value for this route, but this route has a
                 // wildcard child, there must be a value for this path with an
                 // additional trailing slash
-                if path.as_ref() == [b'/']
-                    && current.wild_child
-                    && current.node_type != NodeType::Root
-                {
+                if path == [b'/'] && current.wild_child && current.node_type != NodeType::Root {
                     return Err(Tsr::Yes);
                 }
 
