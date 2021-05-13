@@ -1,4 +1,5 @@
-//! The radix tree implementation
+// The radix tree implementation
+
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::cmp::min;
@@ -9,12 +10,36 @@ use std::str;
 
 /// The response returned when getting the value for a specific path with
 /// [`Node::at`](crate::Node::at)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Match<V> {
     /// The value stored under the matched node.
     pub value: V,
     /// The route parameters. See [parameters](/index.html#parameters) for more details.
     pub params: Params,
+}
+
+/// Represents errors that can occur inserting new routes.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum InsertError {
+    /// The inserted path conflicts with an existing route.
+    ///
+    /// This error may unexpectedly come up when registering the following two routes:
+    ///
+    /// ```text
+    /// /user/:id
+    /// /user/get
+    /// ```
+    ///
+    /// This is due to the strict requirements of the internal radix tree.
+    /// This should be fixed in the future.
+    Conflict,
+    /// Only one wildcard per path segment is allowed
+    TooManyWildcards,
+    /// Wildcards must have a non-empty name.
+    UnnamedWildcard,
+    /// Wildcards are only allowed at the end of a path.
+    InvalidWildcardLocation,
 }
 
 /// Indicates whether a route exists at the same path with/without a trailing slash.
@@ -33,7 +58,7 @@ pub struct Match<V> {
 ///     assert_eq!(tsr, Tsr::Yes);
 /// }
 /// ```
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Tsr {
     Yes,
     No,
@@ -49,7 +74,7 @@ impl From<bool> for Tsr {
 }
 
 /// Param is a single URL parameter, consisting of a key and a value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
 pub struct Param {
     pub key: String,
     pub value: String,
@@ -80,7 +105,7 @@ impl Param {
 ///  let third_key = &params[2].key;   // the name of the 3rd parameter
 ///  let third_value = &params[2].value; // the value of the 3rd parameter
 /// ```
-#[derive(Default, Debug, PartialEq)]
+#[derive(Default, Debug, PartialEq, Eq, Ord, PartialOrd, Clone)]
 pub struct Params(pub Vec<Param>);
 
 impl Index<usize> for Params {
@@ -127,7 +152,7 @@ impl Params {
 }
 
 /// The types of nodes the tree can hold
-#[derive(PartialEq, PartialOrd, Debug)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 pub enum NodeType {
     /// The root path
     Root,
@@ -182,20 +207,26 @@ impl<'path, V> Node<'path, V> {
     /// matcher.insert("/home", "Welcome!");
     /// matcher.insert("/users/:id", "A User");
     /// ```
-    pub fn insert(&mut self, path: &'path str, value: V) {
+    pub fn insert(&mut self, path: &'path str, value: V) -> Result<(), InsertError> {
         self.priority += 1;
 
         // Empty tree
         if self.path.is_empty() && self.children.is_empty() {
-            self.insert_child(path.as_ref(), path.as_ref(), value);
+            self.insert_child(path.as_ref(), path.as_ref(), value)?;
             self.node_type = NodeType::Root;
-            return;
+            return Ok(());
         }
-        self.insert_helper(path.as_ref(), path, value);
+
+        self.insert_helper(path.as_ref(), path, value)
     }
 
     #[inline]
-    fn insert_helper(&mut self, mut path: &'path [u8], full_path: &str, value: V) {
+    fn insert_helper(
+        &mut self,
+        mut path: &'path [u8],
+        full_path: &str,
+        value: V,
+    ) -> Result<(), InsertError> {
         // Find the longest common prefix.
         // This also implies that the common prefix contains no ':' or '*'
         // since the existing key can't contain those chars.
@@ -259,15 +290,17 @@ impl<'path, V> Node<'path, V> {
                 return self.children[child].insert_child(path, full_path, value);
             }
 
-            self.insert_child(path, full_path, value)
+            return self.insert_child(path, full_path, value);
         } else {
             // Otherwise add value to current node
             if self.value.is_some() {
-                panic!("a value is already registered for path '{}'", full_path);
+                return Err(InsertError::Conflict);
             }
 
             self.value = Some(UnsafeCell::new(value));
         }
+
+        Ok(())
     }
 
     // Increments priority of the given child and reorders if necessary
@@ -300,7 +333,12 @@ impl<'path, V> Node<'path, V> {
     }
 
     #[inline]
-    fn wild_child_conflict(&mut self, path: &'path [u8], full_path: &str, value: V) {
+    fn wild_child_conflict(
+        &mut self,
+        path: &'path [u8],
+        full_path: &str,
+        value: V,
+    ) -> Result<(), InsertError> {
         self.priority += 1;
 
         // Check if the wildcard matches
@@ -311,67 +349,44 @@ impl<'path, V> Node<'path, V> {
       // Check for longer wildcard, e.g. :name and :names
       && (self.path.len() >= path.len() || path[self.path.len()] == b'/')
         {
-            self.insert_helper(path, full_path, value);
+            return self.insert_helper(path, full_path, value);
         } else {
             // Wildcard conflict
-            let path_seg = if self.node_type == NodeType::CatchAll {
-                str::from_utf8(path).unwrap()
-            } else {
-                str::from_utf8(path).unwrap().splitn(2, '/').next().unwrap()
-            };
-
-            let prefix = format!(
-                "{}{}",
-                &full_path[..full_path.find(path_seg).unwrap()],
-                str::from_utf8(&self.path).unwrap(),
-            );
-
-            panic!(
-        "'{}' in new path '{}' conflicts with existing wildcard '{}' in existing prefix '{}'",
-        path_seg,
-        full_path,
-        str::from_utf8(&self.path).unwrap(),
-        prefix
-      );
+            return Err(InsertError::Conflict);
         }
     }
 
-    fn insert_child(&mut self, mut path: &'path [u8], full_path: &str, value: V) {
+    fn insert_child(
+        &mut self,
+        mut path: &'path [u8],
+        full_path: &str,
+        value: V,
+    ) -> Result<(), InsertError> {
         let (wildcard, wildcard_index, valid) = find_wildcard(path);
 
         if wildcard_index.is_none() {
             self.value = Some(UnsafeCell::new(value));
             self.path = path.into();
-            return;
+            return Ok(());
         };
 
         let mut wildcard_index = wildcard_index.unwrap();
         let wildcard = wildcard.unwrap();
+
         // the wildcard name must not contain ':' and '*'
         if !valid {
-            panic!(
-                "only one wildcard per path segment is allowed, has: '{}' in path '{}'",
-                str::from_utf8(wildcard).unwrap(),
-                full_path
-            );
+            return Err(InsertError::TooManyWildcards);
         };
 
         // check if the wildcard has a name
         if wildcard.len() < 2 {
-            panic!(
-                "wildcards must be named with a non-empty name in path '{}'",
-                full_path
-            );
+            return Err(InsertError::UnnamedWildcard);
         }
 
         // check if this Node existing children which would be
         // unreachable if we insert the wildcard here
         if !self.children.is_empty() {
-            panic!(
-                "wildcard segment '{}' conflicts with existing children in path '{}'",
-                str::from_utf8(wildcard).unwrap(),
-                full_path
-            )
+            return Err(InsertError::Conflict);
         }
 
         // Param
@@ -407,28 +422,22 @@ impl<'path, V> Node<'path, V> {
             }
             // Otherwise we're done. Insert the value in the new leaf
             self.children[0].value = Some(UnsafeCell::new(value));
-            return;
+            return Ok(());
         }
 
         // catch all
         if wildcard_index + wildcard.len() != path.len() {
-            panic!(
-                "catch-all routes are only allowed at the end of the path in path '{}'",
-                full_path
-            );
+            return Err(InsertError::InvalidWildcardLocation);
         }
 
         if !self.path.is_empty() && self.path[self.path.len() - 1] == b'/' {
-            panic!(
-                "catch-all conflicts with existing value for the path segment root in path '{}'",
-                full_path
-            );
+            return Err(InsertError::Conflict);
         }
 
         // Currently fixed width 1 for '/'
         wildcard_index -= 1;
         if path[wildcard_index] != b'/' {
-            panic!("no / before catch-all in path '{}'", full_path);
+            return Err(InsertError::InvalidWildcardLocation);
         }
 
         // first node: CatchAll Node with empty path
@@ -453,6 +462,8 @@ impl<'path, V> Node<'path, V> {
         };
 
         self.children[0].children = vec![child];
+
+        Ok(())
     }
 
     /// Returns the value registered at the given path.
@@ -570,10 +581,8 @@ impl<'path, V> Node<'path, V> {
                         }
                         NodeType::CatchAll => {
                             params.push(Param {
-                                key: str::from_utf8(current.path[2..].as_ref())
-                                    .unwrap()
-                                    .to_owned(),
-                                value: str::from_utf8(path).unwrap().to_owned(),
+                                key: str::from_utf8(current.path[2..].as_ref()).unwrap().into(),
+                                value: str::from_utf8(path).unwrap().into(),
                             });
 
                             return match current.value.as_ref() {
@@ -581,7 +590,7 @@ impl<'path, V> Node<'path, V> {
                                 None => Err(Tsr::No),
                             };
                         }
-                        _ => panic!("invalid node type"),
+                        _ => unreachable!(),
                     }
                 }
             } else if path == prefix.as_ref() {
@@ -885,7 +894,7 @@ impl<'path, V> Node<'path, V> {
                 insensitive_path.extend_from_slice(&path);
                 true
             }
-            _ => panic!("invalid node type"),
+            _ => unreachable!(),
         }
     }
 }
@@ -936,8 +945,6 @@ fn find_wildcard(path: &[u8]) -> (Option<&[u8]>, Option<usize>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::panic;
-    use std::sync::Mutex;
 
     struct TestRequest {
         path: &'static str,
@@ -1026,10 +1033,6 @@ mod tests {
         prio
     }
 
-    fn fake_value(val: &'static str) -> String {
-        val.into()
-    }
-
     #[test]
     fn params() {
         let params = Params(vec![
@@ -1066,7 +1069,7 @@ mod tests {
         ];
 
         for route in routes {
-            tree.insert(route, fake_value(route));
+            tree.insert(route, route.to_owned()).unwrap();
         }
 
         check_requests(
@@ -1111,7 +1114,7 @@ mod tests {
         ];
 
         for route in routes {
-            tree.insert(route, fake_value(route));
+            tree.insert(route, route.to_owned()).unwrap();
         }
 
         check_requests(
@@ -1206,23 +1209,17 @@ mod tests {
     type TestRoute = (&'static str, bool);
 
     fn test_routes(routes: Vec<TestRoute>) {
-        let tree = Mutex::new(Node::default());
+        let mut tree = Node::default();
 
         for route in routes {
-            let recv = panic::catch_unwind(|| {
-                let mut guard = match tree.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                guard.insert(route.0, ());
-            });
+            let res = tree.insert(route.0, ());
 
             if route.1 {
-                if recv.is_ok() {
-                    // panic!("no panic for conflicting route '{}'", route.0);
+                if res.is_ok() {
+                    panic!("no panic for conflicting route '{}'", route.0);
                 }
-            } else if recv.is_err() {
-                panic!("unexpected panic for route '{}': {:?}", route.0, recv);
+            } else if res.is_err() {
+                panic!("unexpected panic for route '{}': {:?}", route.0, res);
             }
         }
     }
@@ -1269,7 +1266,7 @@ mod tests {
 
     #[test]
     fn test_tree_duplicate_path() {
-        let tree = Mutex::new(Node::default());
+        let mut tree = Node::default();
 
         let routes = vec![
             "/",
@@ -1280,33 +1277,12 @@ mod tests {
         ];
 
         for route in routes {
-            let mut recv = panic::catch_unwind(|| {
-                let mut guard = match tree.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                guard.insert(route, fake_value(route));
-            });
-
-            if recv.is_err() {
-                panic!("panic inserting route '{}': {:?}", route, recv);
-            }
-
-            recv = panic::catch_unwind(|| {
-                let mut guard = match tree.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                guard.insert(route, fake_value(route));
-            });
-
-            if recv.is_ok() {
-                panic!("no panic while inserting duplicate route '{}'", route);
-            }
+            tree.insert(route, route.to_owned()).unwrap();
+            assert!(tree.insert(route, route.to_owned()).is_err());
         }
 
         check_requests(
-            &mut tree.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
+            &mut tree,
             vec![
                 TestRequest::new("/", false, "/", Params::default()),
                 TestRequest::new("/doc/", false, "/doc/", Params::default()),
@@ -1334,24 +1310,14 @@ mod tests {
 
     #[test]
     fn test_empty_wildcard_name() {
-        let tree = Mutex::new(Node::default());
+        let mut tree = Node::default();
         let routes = vec!["/user:", "/user:/", "/cmd/:/", "/src/*"];
 
         for route in routes {
-            let recv = panic::catch_unwind(|| {
-                let mut guard = match tree.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                guard.insert(route, fake_value(route));
-            });
-
-            if recv.is_ok() {
-                panic!(
-                    "no panic while inserting route with empty wildcard name '{}",
-                    route
-                );
-            }
+            assert_eq!(
+                tree.insert(route, route.to_owned()),
+                Err(InsertError::UnnamedWildcard)
+            );
         }
     }
 
@@ -1378,24 +1344,15 @@ mod tests {
         let routes = vec!["/:foo:bar", "/:foo:bar/", "/:foo*bar"];
 
         for route in routes {
-            let tree = Mutex::new(Node::default());
-            let recv = panic::catch_unwind(|| {
-                let mut guard = match tree.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                guard.insert(route, fake_value(route));
-            });
-
-            if recv.is_ok() {
-                panic!("only one wildcard per path segment is allowed");
-            }
+            let mut tree = Node::default();
+            let res = tree.insert(route, route.to_owned());
+            assert_eq!(res, Err(InsertError::TooManyWildcards));
         }
     }
 
     #[test]
     fn test_tree_trailing_slash_redirect() {
-        let tree = Mutex::new(Node::default());
+        let mut tree = Node::default();
         let routes = vec![
             "/hi",
             "/b/",
@@ -1424,16 +1381,10 @@ mod tests {
         ];
 
         for route in routes {
-            let recv = panic::catch_unwind(|| {
-                let mut guard = match tree.lock() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => poisoned.into_inner(),
-                };
-                guard.insert(route, fake_value(route));
-            });
+            let res = tree.insert(route, route.to_owned());
 
-            if recv.is_err() {
-                panic!("panic inserting route '{}': {:?}", route, recv);
+            if res.is_err() {
+                panic!("panic inserting route '{}': {:?}", route, res);
             }
         }
 
@@ -1455,11 +1406,7 @@ mod tests {
         ];
 
         for route in tsr_routes {
-            let guard = match tree.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            let res = guard.at(route);
+            let res = tree.at(route);
 
             match res {
                 Ok(_) => {
@@ -1476,11 +1423,7 @@ mod tests {
         let no_tsr_routes = vec!["/", "/no", "/no/", "/_", "/_/", "/api/world/abc"];
 
         for route in no_tsr_routes {
-            let guard = match tree.lock() {
-                Ok(guard) => guard,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            let res = guard.at(route);
+            let res = tree.at(route);
 
             match res {
                 Ok(_) => {
@@ -1499,7 +1442,7 @@ mod tests {
     fn test_tree_root_trailing_slash_redirect() {
         let mut tree = Node::default();
 
-        tree.insert("/:test", fake_value("/:test"));
+        tree.insert("/:test", "/:test".to_owned()).unwrap();
 
         let res = tree.at("/");
 
@@ -1520,43 +1463,43 @@ mod tests {
         let mut tree = Node::default();
 
         let routes = vec![
-      "/hi",
-      "/b/",
-      "/ABC/",
-      "/search/:query",
-      "/cmd/:tool/",
-      "/src/*filepath",
-      "/x",
-      "/x/y",
-      "/y/",
-      "/y/z",
-      "/0/:id",
-      "/0/:id/1",
-      "/1/:id/",
-      "/1/:id/2",
-      "/aa",
-      "/a/",
-      "/doc",
-      "/doc/go_faq.html",
-      "/doc/go1.html",
-      "/doc/go/away",
-      "/no/a",
-      "/no/b",
-      "/Π",
-      "/u/apfêl/",
-      "/u/äpfêl/",
-      "/u/öpfêl",
-      "/v/Äpfêl/",
-      "/v/Öpfêl",
-      "/w/♬",
-      "/w/♭/",
-      "/w/𠜎",
-      "/w/𠜏/",
-      "/loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong",
+            "/hi",
+            "/b/",
+            "/ABC/",
+            "/search/:query",
+            "/cmd/:tool/",
+            "/src/*filepath",
+            "/x",
+            "/x/y",
+            "/y/",
+            "/y/z",
+            "/0/:id",
+            "/0/:id/1",
+            "/1/:id/",
+            "/1/:id/2",
+            "/aa",
+            "/a/",
+            "/doc",
+            "/doc/go_faq.html",
+            "/doc/go1.html",
+            "/doc/go/away",
+            "/no/a",
+            "/no/b",
+            "/Π",
+            "/u/apfêl/",
+            "/u/äpfêl/",
+            "/u/öpfêl",
+            "/v/Äpfêl/",
+            "/v/Öpfêl",
+            "/w/♬",
+            "/w/♭/",
+            "/w/𠜎",
+            "/w/𠜏/",
+            "/loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong",
     ];
 
         for route in &routes {
-            tree.insert(route, fake_value(route));
+            tree.insert(route, route.to_owned()).unwrap();
         }
 
         // Check out == in for all registered routes
@@ -1587,66 +1530,67 @@ mod tests {
         }
 
         let tests = vec![
-      ("/HI", "/hi", false),
-      ("/HI/", "/hi", true),
-      ("/B", "/b/", true),
-      ("/B/", "/b/", false),
-      ("/abc", "/ABC/", true),
-      ("/abc/", "/ABC/", false),
-      ("/aBc", "/ABC/", true),
-      ("/aBc/", "/ABC/", false),
-      ("/abC", "/ABC/", true),
-      ("/abC/", "/ABC/", false),
-      ("/SEARCH/QUERY", "/search/QUERY", false),
-      ("/SEARCH/QUERY/", "/search/QUERY", true),
-      ("/CMD/TOOL/", "/cmd/TOOL/", false),
-      ("/CMD/TOOL", "/cmd/TOOL/", true),
-      ("/SRC/FILE/PATH", "/src/FILE/PATH", false),
-      ("/x/Y", "/x/y", false),
-      ("/x/Y/", "/x/y", true),
-      ("/X/y", "/x/y", false),
-      ("/X/y/", "/x/y", true),
-      ("/X/Y", "/x/y", false),
-      ("/X/Y/", "/x/y", true),
-      ("/Y/", "/y/", false),
-      ("/Y", "/y/", true),
-      ("/Y/z", "/y/z", false),
-      ("/Y/z/", "/y/z", true),
-      ("/Y/Z", "/y/z", false),
-      ("/Y/Z/", "/y/z", true),
-      ("/y/Z", "/y/z", false),
-      ("/y/Z/", "/y/z", true),
-      ("/Aa", "/aa", false),
-      ("/Aa/", "/aa", true),
-      ("/AA", "/aa", false),
-      ("/AA/", "/aa", true),
-      ("/aA", "/aa", false),
-      ("/aA/", "/aa", true),
-      ("/A/", "/a/", false),
-      ("/A", "/a/", true),
-      ("/DOC", "/doc", false),
-      ("/DOC/", "/doc", true),
-      ("/NO", "", true),
-      ("/DOC/GO", "", true),
-      // [TODO] unicode vs ascii case sensitivity
-      // ("/π", "/Π", false)
-      // ("/π/", "/Π", true),
-      // ("/u/ÄPFÊL/", "/u/äpfêl/", false)
-      // ("/u/ÄPFÊL", "/u/äpfêl/", true),
-      // ("/u/ÖPFÊL/", "/u/öpfêl", true),
-      // ("/u/ÖPFÊL", "/u/öpfêl", false)
-      // ("/v/äpfêL/", "/v/Äpfêl/", false)
-      // ("/v/äpfêL", "/v/Äpfêl/", true),
-      // ("/v/öpfêL/", "/v/Öpfêl", true),
-      // ("/v/öpfêL", "/v/Öpfêl", false)
-      ("/w/♬/", "/w/♬", true),
-      ("/w/♭", "/w/♭/", true),
-      ("/w/𠜎/", "/w/𠜎", true),
-      ("/w/𠜏", "/w/𠜏/", true),
-      (
-        "/lOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOng/",
-        "/loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong",
-        true),
+            ("/HI", "/hi", false),
+            ("/HI/", "/hi", true),
+            ("/B", "/b/", true),
+            ("/B/", "/b/", false),
+            ("/abc", "/ABC/", true),
+            ("/abc/", "/ABC/", false),
+            ("/aBc", "/ABC/", true),
+            ("/aBc/", "/ABC/", false),
+            ("/abC", "/ABC/", true),
+            ("/abC/", "/ABC/", false),
+            ("/SEARCH/QUERY", "/search/QUERY", false),
+            ("/SEARCH/QUERY/", "/search/QUERY", true),
+            ("/CMD/TOOL/", "/cmd/TOOL/", false),
+            ("/CMD/TOOL", "/cmd/TOOL/", true),
+            ("/SRC/FILE/PATH", "/src/FILE/PATH", false),
+            ("/x/Y", "/x/y", false),
+            ("/x/Y/", "/x/y", true),
+            ("/X/y", "/x/y", false),
+            ("/X/y/", "/x/y", true),
+            ("/X/Y", "/x/y", false),
+            ("/X/Y/", "/x/y", true),
+            ("/Y/", "/y/", false),
+            ("/Y", "/y/", true),
+            ("/Y/z", "/y/z", false),
+            ("/Y/z/", "/y/z", true),
+            ("/Y/Z", "/y/z", false),
+            ("/Y/Z/", "/y/z", true),
+            ("/y/Z", "/y/z", false),
+            ("/y/Z/", "/y/z", true),
+            ("/Aa", "/aa", false),
+            ("/Aa/", "/aa", true),
+            ("/AA", "/aa", false),
+            ("/AA/", "/aa", true),
+            ("/aA", "/aa", false),
+            ("/aA/", "/aa", true),
+            ("/A/", "/a/", false),
+            ("/A", "/a/", true),
+            ("/DOC", "/doc", false),
+            ("/DOC/", "/doc", true),
+            ("/NO", "", true),
+            ("/DOC/GO", "", true),
+            // [TODO] unicode vs ascii case sensitivity
+            // ("/π", "/Π", false)
+            // ("/π/", "/Π", true),
+            // ("/u/ÄPFÊL/", "/u/äpfêl/", false)
+            // ("/u/ÄPFÊL", "/u/äpfêl/", true),
+            // ("/u/ÖPFÊL/", "/u/öpfêl", true),
+            // ("/u/ÖPFÊL", "/u/öpfêl", false)
+            // ("/v/äpfêL/", "/v/Äpfêl/", false)
+            // ("/v/äpfêL", "/v/Äpfêl/", true),
+            // ("/v/öpfêL/", "/v/Öpfêl", true),
+            // ("/v/öpfêL", "/v/Öpfêl", false)
+            ("/w/♬/", "/w/♬", true),
+            ("/w/♭", "/w/♭/", true),
+            ("/w/𠜎/", "/w/𠜎", true),
+            ("/w/𠜏", "/w/𠜏/", true),
+            (
+                "/lOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOng/",
+                "/loooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooong",
+                true
+            ),
     ];
 
         struct Test {
@@ -1696,29 +1640,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "conflicts with existing wildcard")]
     fn test_tree_wildcard_conflict_ex() {
         let conflicts = vec![
             "/who/are/foo",
             "/who/are/foo/",
             "/who/are/foo/bar",
             "/conxxx",
-            "xxx",
             "/conooo/xxx",
         ];
 
         for conflict in conflicts {
-            // I have to re-create a 'tree', because the 'tree' will be
-            // in an inconsistent state when the loop recovers from the
-            // panic which threw by 'addRoute' function.
             let mut tree = Node::default();
 
             let routes = vec!["/con:tact", "/who/are/*you", "/who/foo/hello"];
 
             for route in routes {
-                tree.insert(route, fake_value(route));
+                tree.insert(route, route.to_owned()).unwrap();
             }
-            tree.insert(conflict, fake_value(conflict));
+
+            assert_eq!(
+                tree.insert(conflict, conflict.to_owned()),
+                Err(InsertError::Conflict)
+            );
         }
     }
 }

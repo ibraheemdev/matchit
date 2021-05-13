@@ -55,7 +55,7 @@
 //!
 //! The second type are *catch-all* parameters and have the form `*name`. Like the name suggests, they match everything. Therefore they must always be at the **end** of the pattern:
 //!
-//! ```ignore
+//! ```text
 //! Pattern: /src/*filepath
 //!
 //!  /src/                     match
@@ -67,7 +67,7 @@
 //!
 //! The matcher relies on a tree structure which makes heavy use of *common prefixes*, it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie) (or [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a common prefix share a parent. Here is a short example what the routing tree for the `GET` request method could look like:
 //!
-//! ```ignore,none
+//! ```text
 //! Priority   Path             Handle
 //! 9          \                *<1>
 //! 3          ├s               None
@@ -90,7 +90,7 @@
 //! 1. Nodes which are part of the most routing paths are evaluated first. This helps make more routes reachable as fast as possible.
 //! 2. It acts as a cost compensation. The longest reachable path (highest cost) can always be evaluated first. The following scheme visualizes the tree structure. Nodes are evaluated from top to bottom and from left to right.
 //!
-//! ```ignore,none
+//! ```text
 //! ├------------
 //! ├---------
 //! ├-----
@@ -102,7 +102,7 @@
 mod tree;
 
 #[doc(inline)]
-pub use tree::{Match, Node, NodeType, Param, Params, Tsr};
+pub use tree::{InsertError, Match, Node, NodeType, Param, Params, Tsr};
 
 mod test_readme {
     macro_rules! doc_comment {
