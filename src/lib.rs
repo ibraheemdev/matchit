@@ -104,8 +104,8 @@ use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::cmp::min;
 use std::fmt;
+use std::iter::{self, FromIterator};
 use std::mem;
-use std::ops::{Index, IndexMut};
 use std::slice;
 use std::str;
 
@@ -230,16 +230,9 @@ impl std::error::Error for MatchError {}
 
 /// A single URL parameter, consisting of a key and a value.
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Default)]
-pub struct Param<'key, 'value> {
-    pub key: &'key str,
-    pub value: &'value str,
-}
-
-impl<'key, 'value> Param<'key, 'value> {
-    /// Create a new route parameter with the given key/value.
-    pub fn new(key: &'key str, value: &'value str) -> Self {
-        Self { key, value }
-    }
+struct Param<'key, 'value> {
+    key: &'key str,
+    value: &'value str,
 }
 
 /// A list of parameters returned by a route match.
@@ -250,8 +243,8 @@ impl<'key, 'value> Param<'key, 'value> {
 /// # matcher.insert("/users/:id", true).unwrap();
 /// let matched = matcher.at("/users/1")?;
 ///
-/// for param in &matched.params {
-///     println!("key: {}, value: {}", param.key, param.value);
+/// for (key, value) in matched.params.iter() {
+///     println!("key: {}, value: {}", key, value);
 /// }
 ///
 /// let id = matched.params.get("id");
@@ -259,87 +252,162 @@ impl<'key, 'value> Param<'key, 'value> {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Default, Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[derive(Debug, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Params<'key, 'value> {
-    vec: Vec<Param<'key, 'value>>,
+    kind: ParamsKind<'key, 'value>,
+}
+
+// most routes have 1/2 parameters, so we can avoid a heap allocation in that case.
+const SMALL: usize = 2;
+
+#[derive(Debug, PartialEq, Eq, Ord, PartialOrd)]
+enum ParamsKind<'key, 'value> {
+    Small([Param<'key, 'value>; SMALL], usize),
+    Large(Vec<Param<'key, 'value>>),
+}
+
+impl<'key, 'value> Default for Params<'key, 'value> {
+    fn default() -> Self {
+        let kind = ParamsKind::Small(Default::default(), 0);
+        Self { kind }
+    }
 }
 
 impl<'key, 'value> Params<'key, 'value> {
-    pub fn new(iter: impl IntoIterator<Item = Param<'key, 'value>>) -> Self {
-        Self {
-            vec: iter.into_iter().collect(),
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the value of the first parameter registered matched for the given key.
+    pub fn get(&self, key: impl AsRef<str>) -> Option<&'value str> {
+        match &self.kind {
+            ParamsKind::Small(arr, _) => arr
+                .iter()
+                .find(|param| param.key == key.as_ref())
+                .map(|param| param.value),
+            ParamsKind::Large(vec) => vec
+                .iter()
+                .find(|param| param.key == key.as_ref())
+                .map(|param| param.value),
         }
     }
 
-    /// Returns the value of the first [`Param`] whose key matches the given name.
-    pub fn get(&self, name: impl AsRef<str>) -> Option<&str> {
-        self.vec
-            .iter()
-            .find(|param| param.key == name.as_ref())
-            .map(|param| param.value)
-    }
-
     /// Returns an iterator over the parameters in the list.
-    pub fn iter(&self) -> slice::Iter<'_, Param<'key, 'value>> {
-        self.vec.iter()
-    }
-
-    /// Returns an iterator that allows modifying each value.
-    pub fn iter_mut(&mut self) -> slice::IterMut<'_, Param<'key, 'value>> {
-        self.vec.iter_mut()
+    pub fn iter(&self) -> Iter<'_, 'key, 'value> {
+        Iter::new(self)
     }
 
     /// Returns `true` if there are no parameters in the list.
     pub fn is_empty(&self) -> bool {
-        self.vec.is_empty()
+        match &self.kind {
+            ParamsKind::Small(_, len) => *len == 0,
+            ParamsKind::Large(vec) => vec.is_empty(),
+        }
     }
 
-    /// Inserts a [`Param`] into the list.
-    pub fn push(&mut self, param: Param<'key, 'value>) {
-        self.vec.push(param)
+    /// Inserts a key value parameter pair into the list.
+    pub fn push(&mut self, key: &'key str, value: &'value str) {
+        #[cold]
+        fn drain_to_vec<T: Default>(len: usize, elem: T, arr: &mut [T; SMALL]) -> Vec<T> {
+            let mut vec = Vec::with_capacity(len + 1);
+            vec.extend(arr.iter_mut().map(mem::take));
+            vec.push(elem);
+            return vec;
+        }
+
+        let param = Param { key, value };
+        match &mut self.kind {
+            ParamsKind::Small(arr, len) => {
+                if *len == SMALL {
+                    self.kind = ParamsKind::Large(drain_to_vec(*len, param, arr));
+                    return;
+                }
+                arr[*len] = param;
+                *len += 1;
+            }
+            ParamsKind::Large(vec) => vec.push(param),
+        }
+    }
+}
+
+impl<'key, 'value> FromIterator<(&'key str, &'value str)> for Params<'key, 'value> {
+    fn from_iter<T: IntoIterator<Item = (&'key str, &'value str)>>(iter: T) -> Self {
+        let mut params = Self::default();
+        for (key, value) in iter.into_iter() {
+            params.push(key, value);
+        }
+        params
     }
 }
 
 impl<'key, 'value> IntoIterator for Params<'key, 'value> {
-    type IntoIter = std::vec::IntoIter<Param<'key, 'value>>;
-    type Item = Param<'key, 'value>;
+    type IntoIter = IntoIter<'key, 'value>;
+    type Item = (&'key str, &'value str);
 
     fn into_iter(self) -> Self::IntoIter {
-        self.vec.into_iter()
+        IntoIter::new(self)
     }
 }
 
-impl<'key, 'value, 'params> IntoIterator for &'params mut Params<'key, 'value> {
-    type IntoIter = slice::IterMut<'params, Param<'key, 'value>>;
-    type Item = &'params mut Param<'key, 'value>;
+pub struct Iter<'params, 'key, 'value> {
+    kind: IterKind<'params, 'key, 'value>,
+}
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.vec.iter_mut()
+impl<'params, 'key, 'value> Iter<'params, 'key, 'value> {
+    fn new(params: &'params Params<'key, 'value>) -> Self {
+        let kind = match &params.kind {
+            ParamsKind::Small(arr, len) => IterKind::Small(arr.iter().take(*len)),
+            ParamsKind::Large(vec) => IterKind::Large(vec.iter()),
+        };
+        Self { kind }
     }
 }
 
-impl<'key, 'value, 'params> IntoIterator for &'params Params<'key, 'value> {
-    type IntoIter = slice::Iter<'params, Param<'key, 'value>>;
-    type Item = &'params Param<'key, 'value>;
+enum IterKind<'params, 'key, 'value> {
+    Small(iter::Take<slice::Iter<'params, Param<'key, 'value>>>),
+    Large(slice::Iter<'params, Param<'key, 'value>>),
+}
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.vec.iter()
+impl<'params, 'key, 'value> Iterator for Iter<'params, 'key, 'value> {
+    type Item = (&'key str, &'value str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.kind {
+            IterKind::Small(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
+            IterKind::Large(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
+        }
     }
 }
 
-impl<'key, 'value> Index<usize> for Params<'key, 'value> {
-    type Output = Param<'key, 'value>;
+pub struct IntoIter<'key, 'value> {
+    kind: IntoIterKind<'key, 'value>,
+}
 
-    #[inline]
-    fn index(&self, i: usize) -> &Self::Output {
-        &self.vec[i]
+impl<'key, 'value> IntoIter<'key, 'value> {
+    fn new(params: Params<'key, 'value>) -> Self {
+        let kind = match params.kind {
+            ParamsKind::Small(arr, len) => {
+                IntoIterKind::Small(std::array::IntoIter::new(arr).take(len))
+            }
+            ParamsKind::Large(vec) => IntoIterKind::Large(vec.into_iter()),
+        };
+        Self { kind }
     }
 }
 
-impl<'key, 'value> IndexMut<usize> for Params<'key, 'value> {
-    #[inline]
-    fn index_mut(&mut self, i: usize) -> &mut Self::Output {
-        &mut self.vec[i]
+enum IntoIterKind<'key, 'value> {
+    Small(iter::Take<std::array::IntoIter<Param<'key, 'value>, SMALL>>),
+    Large(std::vec::IntoIter<Param<'key, 'value>>),
+}
+
+impl<'key, 'value> Iterator for IntoIter<'key, 'value> {
+    type Item = (&'key str, &'value str);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.kind {
+            IntoIterKind::Small(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
+            IntoIterKind::Large(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
+        }
     }
 }
 
@@ -746,10 +814,10 @@ impl<'route, V> Node<'route, V> {
                                 end += 1;
                             }
 
-                            params.push(Param {
-                                key: str::from_utf8(&current.path[1..]).unwrap(),
-                                value: str::from_utf8(&path[..end]).unwrap(),
-                            });
+                            params.push(
+                                str::from_utf8(&current.path[1..]).unwrap(),
+                                str::from_utf8(&path[..end]).unwrap(),
+                            );
 
                             // we need to go deeper!
                             if end < path.len() {
@@ -781,10 +849,10 @@ impl<'route, V> Node<'route, V> {
                             return Err(MatchError::new(false));
                         }
                         NodeType::CatchAll => {
-                            params.push(Param {
-                                key: str::from_utf8(current.path[2..].as_ref()).unwrap(),
-                                value: str::from_utf8(path).unwrap(),
-                            });
+                            params.push(
+                                str::from_utf8(current.path[2..].as_ref()).unwrap(),
+                                str::from_utf8(path).unwrap(),
+                            );
 
                             return match current.value.as_ref() {
                                 Some(value) => Ok(Match { value, params }),
@@ -1235,19 +1303,27 @@ mod tests {
 
     #[test]
     fn params() {
-        let params = Params::new(vec![
-            Param {
-                key: "hello",
-                value: "world",
-            },
-            Param {
-                key: "rust-is",
-                value: "awesome",
-            },
-        ]);
+        let vec = vec![
+            ("hello", "hello"),
+            ("world", "world"),
+            ("foo", "foo"),
+            ("bar", "bar"),
+            ("baz", "baz"),
+        ];
 
-        assert_eq!(params.get("hello"), Some("world"));
-        assert_eq!(params.get("rust-is"), Some("awesome"));
+        let params = vec.iter().cloned().collect::<Params<'_, '_>>();
+        for (key, value) in vec.clone() {
+            assert_eq!(params.get(key), Some(value));
+        }
+
+        let mut params = Params::default();
+        for (key, value) in vec.clone() {
+            params.push(key, value);
+            assert_eq!(params.get(key), Some(value));
+        }
+
+        assert!(params.iter().eq(vec.clone()));
+        assert!(params.into_iter().eq(vec.clone()));
     }
 
     #[test]
@@ -1325,80 +1401,74 @@ mod tests {
                     "/cmd/test/",
                     false,
                     "/cmd/:tool/",
-                    Params::new(vec![Param::new("tool", "test")]),
+                    Params::from_iter(vec![("tool", "test")]),
                 ),
                 TestRequest::new(
                     "/cmd/test",
                     true,
                     "",
-                    Params::new(vec![Param::new("tool", "test")]),
+                    Params::from_iter(vec![("tool", "test")]),
                 ),
                 TestRequest::new(
                     "/cmd/test/3",
                     false,
                     "/cmd/:tool/:sub",
-                    Params::new(vec![Param::new("tool", "test"), Param::new("sub", "3")]),
+                    Params::from_iter(vec![("tool", "test"), ("sub", "3")]),
                 ),
                 TestRequest::new(
                     "/src/",
                     false,
                     "/src/*filepath",
-                    Params::new(vec![Param::new("filepath", "/")]),
+                    Params::from_iter(vec![("filepath", "/")]),
                 ),
                 TestRequest::new(
                     "/src/some/file.png",
                     false,
                     "/src/*filepath",
-                    Params::new(vec![Param::new("filepath", "/some/file.png")]),
+                    Params::from_iter(vec![("filepath", "/some/file.png")]),
                 ),
                 TestRequest::new("/search/", false, "/search/", Params::default()),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé",
                     false,
                     "/search/:query",
-                    Params::new(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+                    Params::from_iter(vec![("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé/",
                     true,
                     "",
-                    Params::new(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+                    Params::from_iter(vec![("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean",
                     false,
                     "/user_:name",
-                    Params::new(vec![Param::new("name", "rustacean")]),
+                    Params::from_iter(vec![("name", "rustacean")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean/about",
                     false,
                     "/user_:name/about",
-                    Params::new(vec![Param::new("name", "rustacean")]),
+                    Params::from_iter(vec![("name", "rustacean")]),
                 ),
                 TestRequest::new(
                     "/files/js/inc/framework.js",
                     false,
                     "/files/:dir/*filepath",
-                    Params::new(vec![
-                        Param::new("dir", "js"),
-                        Param::new("filepath", "/inc/framework.js"),
-                    ]),
+                    Params::from_iter(vec![("dir", "js"), ("filepath", "/inc/framework.js")]),
                 ),
                 TestRequest::new(
                     "/info/gordon/public",
                     false,
                     "/info/:user/public",
-                    Params::new(vec![Param::new("user", "gordon")]),
+                    Params::from_iter(vec![("user", "gordon")]),
                 ),
                 TestRequest::new(
                     "/info/gordon/project/go",
                     false,
                     "/info/:user/project/:project",
-                    Params::new(vec![
-                        Param::new("user", "gordon"),
-                        Param::new("project", "go"),
-                    ]),
+                    Params::from_iter(vec![("user", "gordon"), ("project", "go")]),
                 ),
             ],
         );
@@ -1491,19 +1561,19 @@ mod tests {
                     "/src/some/file.png",
                     false,
                     "/src/*filepath",
-                    Params::new(vec![Param::new("filepath", "/some/file.png")]),
+                    Params::from_iter(vec![("filepath", "/some/file.png")]),
                 ),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé",
                     false,
                     "/search/:query",
-                    Params::new(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+                    Params::from_iter(vec![("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean",
                     false,
                     "/user_:name",
-                    Params::new(vec![Param::new("name", "rustacean")]),
+                    Params::from_iter(vec![("name", "rustacean")]),
                 ),
             ],
         );
