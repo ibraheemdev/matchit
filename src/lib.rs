@@ -111,12 +111,12 @@ use std::str;
 
 /// A successful match consisting of the registered value and the URL parameters, returned by
 /// [`Node::at`](crate::Node::at).
-#[derive(Debug, Clone)]
-pub struct Match<V> {
+#[derive(Debug)]
+pub struct Match<'key, 'value, V> {
     /// The value stored under the matched node.
     pub value: V,
     /// The route parameters. See [parameters](crate#parameters) for more details.
-    pub params: Params,
+    pub params: Params<'key, 'value>,
 }
 
 /// Represents errors that can occur when inserting a new route.
@@ -228,19 +228,16 @@ impl fmt::Display for MatchError {
 impl std::error::Error for MatchError {}
 
 /// A single URL parameter, consisting of a key and a value.
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
-pub struct Param {
-    pub key: String,
-    pub value: String,
+#[derive(Debug, PartialEq, Eq, Ord, PartialOrd, Default)]
+pub struct Param<'key, 'value> {
+    pub key: &'key str,
+    pub value: &'value str,
 }
 
-impl Param {
+impl<'key, 'value> Param<'key, 'value> {
     /// Create a new route parameter with the given key/value.
-    pub fn new(key: impl Into<String>, value: impl Into<String>) -> Self {
-        Self {
-            key: key.into(),
-            value: value.into(),
-        }
+    pub fn new(key: &'key str, value: &'value str) -> Self {
+        Self { key, value }
     }
 }
 
@@ -261,78 +258,87 @@ impl Param {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Default, Debug, PartialEq, Eq, Ord, PartialOrd, Clone)]
-pub struct Params(pub Vec<Param>);
+#[derive(Default, Debug, PartialEq, Eq, Ord, PartialOrd)]
+pub struct Params<'key, 'value> {
+    vec: Vec<Param<'key, 'value>>,
+}
 
-impl Params {
+impl<'key, 'value> Params<'key, 'value> {
+    pub fn new(iter: impl IntoIterator<Item = Param<'key, 'value>>) -> Self {
+        Self {
+            vec: iter.into_iter().collect(),
+        }
+    }
+
     /// Returns the value of the first [`Param`] whose key matches the given name.
     pub fn get(&self, name: impl AsRef<str>) -> Option<&str> {
-        self.0
+        self.vec
             .iter()
             .find(|param| param.key == name.as_ref())
             .map(|param| param.value.as_ref())
     }
 
     /// Returns an iterator over the parameters in the list.
-    pub fn iter(&self) -> slice::Iter<'_, Param> {
-        self.0.iter()
+    pub fn iter(&self) -> slice::Iter<'_, Param<'key, 'value>> {
+        self.vec.iter()
     }
 
     /// Returns an iterator that allows modifying each value.
-    pub fn iter_mut(&mut self) -> slice::IterMut<'_, Param> {
-        self.0.iter_mut()
+    pub fn iter_mut(&mut self) -> slice::IterMut<'_, Param<'key, 'value>> {
+        self.vec.iter_mut()
     }
 
     /// Returns `true` if there are no parameters in the list.
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.vec.is_empty()
     }
 
     /// Inserts a [`Param`] into the list.
-    pub fn push(&mut self, param: Param) {
-        self.0.push(param);
+    pub fn push(&mut self, param: Param<'key, 'value>) {
+        self.vec.push(param)
     }
 }
 
-impl IntoIterator for Params {
-    type IntoIter = std::vec::IntoIter<Param>;
-    type Item = Param;
+impl<'key, 'value> IntoIterator for Params<'key, 'value> {
+    type IntoIter = std::vec::IntoIter<Param<'key, 'value>>;
+    type Item = Param<'key, 'value>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.vec.into_iter()
     }
 }
 
-impl<'a> IntoIterator for &'a mut Params {
-    type IntoIter = std::slice::IterMut<'a, Param>;
-    type Item = &'a mut Param;
+impl<'key, 'value, 'params> IntoIterator for &'params mut Params<'key, 'value> {
+    type IntoIter = slice::IterMut<'params, Param<'key, 'value>>;
+    type Item = &'params mut Param<'key, 'value>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter_mut()
+        self.vec.iter_mut()
     }
 }
 
-impl<'a> IntoIterator for &'a Params {
-    type IntoIter = std::slice::Iter<'a, Param>;
-    type Item = &'a Param;
+impl<'key, 'value, 'params> IntoIterator for &'params Params<'key, 'value> {
+    type IntoIter = slice::Iter<'params, Param<'key, 'value>>;
+    type Item = &'params Param<'key, 'value>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
+        self.vec.iter()
     }
 }
 
-impl Index<usize> for Params {
-    type Output = Param;
+impl<'key, 'value> Index<usize> for Params<'key, 'value> {
+    type Output = Param<'key, 'value>;
 
     #[inline]
-    fn index(&self, i: usize) -> &Param {
-        &self.0[i]
+    fn index(&self, i: usize) -> &Self::Output {
+        &self.vec[i]
     }
 }
 
-impl IndexMut<usize> for Params {
-    fn index_mut(&mut self, i: usize) -> &mut Param {
-        &mut self.0[i]
+impl<'key, 'value> IndexMut<usize> for Params<'key, 'value> {
+    #[inline]
+    fn index_mut(&mut self, i: usize) -> &mut Self::Output {
+        &mut self.vec[i]
     }
 }
 
@@ -353,12 +359,12 @@ enum NodeType {
 ///
 /// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
-pub struct Node<'path, V> {
-    path: Cow<'path, [u8]>,
+pub struct Node<'route, V> {
+    path: Cow<'route, [u8]>,
     wild_child: bool,
     node_type: NodeType,
-    indices: Cow<'path, [u8]>,
-    children: Vec<Node<'path, V>>,
+    indices: Cow<'route, [u8]>,
+    children: Vec<Node<'route, V>>,
     // See `at_inner` for why an unsafe cell is needed.
     value: Option<UnsafeCell<V>>,
     priority: u32,
@@ -378,13 +384,13 @@ impl<V> Default for Node<'_, V> {
     }
 }
 
-impl<'path, V> Node<'path, V> {
+impl<'route, V> Node<'route, V> {
     /// Construct a new `Node`.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Insert a value into the tree under the given path.
+    /// Insert a value into the tree under the given route.
     /// ```rust
     /// # use matchit::Node;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -394,33 +400,33 @@ impl<'path, V> Node<'path, V> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn insert(&mut self, path: &'path str, value: V) -> Result<(), InsertError> {
+    pub fn insert(&mut self, route: &'route str, value: V) -> Result<(), InsertError> {
         self.priority += 1;
 
         // Empty tree
         if self.path.is_empty() && self.children.is_empty() {
-            self.insert_child(path.as_ref(), path.as_ref(), value)?;
+            self.insert_child(route.as_bytes(), route, value)?;
             self.node_type = NodeType::Root;
             return Ok(());
         }
 
-        self.insert_helper(path.as_ref(), path, value)
+        self.insert_helper(route.as_ref(), route, value)
     }
 
     #[inline]
     fn insert_helper(
         &mut self,
-        mut path: &'path [u8],
-        full_path: &str,
+        mut prefix: &'route [u8],
+        route: &'route str,
         value: V,
     ) -> Result<(), InsertError> {
         // Find the longest common prefix.
         // This also implies that the common prefix contains no ':' or '*'
         // since the existing key can't contain those chars.
         let mut i = 0;
-        let max = min(path.len(), self.path.len());
+        let max = min(prefix.len(), self.path.len());
 
-        while i < max && path[i] == self.path[i] {
+        while i < max && prefix[i] == self.path[i] {
             i += 1;
         }
 
@@ -439,31 +445,31 @@ impl<'path, V> Node<'path, V> {
 
             self.children = vec![child];
             self.indices = self.path[i..i + 1].to_owned().into();
-            self.path = path[..i].into();
+            self.path = prefix[..i].into();
             self.wild_child = false;
         }
 
         // Make new node a child of this node
-        if path.len() > i {
-            path = &path[i..];
+        if prefix.len() > i {
+            prefix = &prefix[i..];
 
             if self.wild_child {
-                return self.children[0].wild_child_conflict(path, full_path, value);
+                return self.children[0].wild_child_conflict(prefix, route, value);
             }
 
-            let idxc = path[0];
+            let idxc = prefix[0];
 
             // `/` after param
             if self.node_type == NodeType::Param && idxc == b'/' && self.children.len() == 1 {
                 self.children[0].priority += 1;
-                return self.children[0].insert_helper(path, full_path, value);
+                return self.children[0].insert_helper(prefix, route, value);
             }
 
             // Check if a child with the next path byte exists
             for mut i in 0..self.indices.len() {
                 if idxc == self.indices[i] {
                     i = self.incr_child_priority(i);
-                    return self.children[i].insert_helper(path, full_path, value);
+                    return self.children[i].insert_helper(prefix, route, value);
                 }
             }
 
@@ -474,14 +480,14 @@ impl<'path, V> Node<'path, V> {
                 self.children.push(Self::default());
 
                 let child = self.incr_child_priority(self.indices.len() - 1);
-                return self.children[child].insert_child(path, full_path, value);
+                return self.children[child].insert_child(prefix, route, value);
             }
 
-            return self.insert_child(path, full_path, value);
+            return self.insert_child(prefix, route, value);
         } else {
             // Otherwise add value to current node
             if self.value.is_some() {
-                return Err(InsertError::conflict(full_path, path, &self.path));
+                return Err(InsertError::conflict(route, prefix, &self.path));
             }
 
             self.value = Some(UnsafeCell::new(value));
@@ -522,37 +528,37 @@ impl<'path, V> Node<'path, V> {
     #[inline]
     fn wild_child_conflict(
         &mut self,
-        path: &'path [u8],
-        full_path: &str,
+        prefix: &'route [u8],
+        route: &'route str,
         value: V,
     ) -> Result<(), InsertError> {
         self.priority += 1;
 
         // Check if the wildcard matches
-        if path.len() >= self.path.len()
-      && self.path == &path[..self.path.len()]
+        if prefix.len() >= self.path.len()
+      && self.path == &prefix[..self.path.len()]
       // Adding a child to a CatchAll Node is not possible
       && self.node_type != NodeType::CatchAll
       // Check for longer wildcard, e.g. :name and :names
-      && (self.path.len() >= path.len() || path[self.path.len()] == b'/')
+      && (self.path.len() >= prefix.len() || prefix[self.path.len()] == b'/')
         {
-            self.insert_helper(path, full_path, value)
+            self.insert_helper(prefix, route, value)
         } else {
-            Err(InsertError::conflict(full_path, path, &self.path))
+            Err(InsertError::conflict(route, prefix, &self.path))
         }
     }
 
     fn insert_child(
         &mut self,
-        mut path: &'path [u8],
-        full_path: &str,
+        mut prefix: &'route [u8],
+        route: &'route str,
         value: V,
     ) -> Result<(), InsertError> {
-        let (wildcard, wildcard_index, valid) = find_wildcard(path);
+        let (wildcard, wildcard_index, valid) = find_wildcard(prefix);
 
         if wildcard_index.is_none() {
             self.value = Some(UnsafeCell::new(value));
-            self.path = path.into();
+            self.path = prefix.into();
             return Ok(());
         };
 
@@ -572,15 +578,15 @@ impl<'path, V> Node<'path, V> {
         // check if this Node existing children which would be
         // unreachable if we insert the wildcard here
         if !self.children.is_empty() {
-            return Err(InsertError::conflict(full_path, path, &self.path));
+            return Err(InsertError::conflict(route, prefix, &self.path));
         }
 
         // Param
         if wildcard[0] == b':' {
             // Insert prefix before the current wildcard
             if wildcard_index > 0 {
-                self.path = path[..wildcard_index].into();
-                path = &path[wildcard_index..];
+                self.path = prefix[..wildcard_index].into();
+                prefix = &prefix[wildcard_index..];
             }
 
             let child = Self {
@@ -596,15 +602,15 @@ impl<'path, V> Node<'path, V> {
             // If the path doesn't end with the wildcard, then there
             // will be another non-wildcard subpath starting with '/'
 
-            if wildcard.len() < path.len() {
-                path = &path[wildcard.len()..];
+            if wildcard.len() < prefix.len() {
+                prefix = &prefix[wildcard.len()..];
                 let child = Self {
                     priority: 1,
                     ..Self::default()
                 };
 
                 self.children[0].children = vec![child];
-                return self.children[0].children[0].insert_child(path, full_path, value);
+                return self.children[0].children[0].insert_child(prefix, route, value);
             }
             // Otherwise we're done. Insert the value in the new leaf
             self.children[0].value = Some(UnsafeCell::new(value));
@@ -612,17 +618,17 @@ impl<'path, V> Node<'path, V> {
         }
 
         // catch all
-        if wildcard_index + wildcard.len() != path.len() {
+        if wildcard_index + wildcard.len() != prefix.len() {
             return Err(InsertError::InvalidCatchAll);
         }
 
         if !self.path.is_empty() && self.path[self.path.len() - 1] == b'/' {
-            return Err(InsertError::conflict(full_path, path, &self.path));
+            return Err(InsertError::conflict(route, prefix, &self.path));
         }
 
         // Currently fixed width 1 for '/'
         wildcard_index -= 1;
-        if path[wildcard_index] != b'/' {
+        if prefix[wildcard_index] != b'/' {
             return Err(InsertError::InvalidCatchAll);
         }
 
@@ -633,14 +639,14 @@ impl<'path, V> Node<'path, V> {
             ..Self::default()
         };
 
-        self.path = path[..wildcard_index].into();
+        self.path = prefix[..wildcard_index].into();
         self.children = vec![child];
         self.indices = slice::from_ref(&b'/').into();
         self.children[0].priority += 1;
 
         // Second node: node holding the variable
         let child = Self {
-            path: path[wildcard_index..].into(),
+            path: prefix[wildcard_index..].into(),
             node_type: NodeType::CatchAll,
             value: Some(UnsafeCell::new(value)),
             priority: 1,
@@ -652,8 +658,8 @@ impl<'path, V> Node<'path, V> {
         Ok(())
     }
 
-    /// Returns the value registered at the given path.
-    /// If no value can be found it returns a trailing slash redirect recommendation.
+    /// Tries to find a value in the router matching the given path.
+    /// If no value can be found it returns a trailing slash redirect recommendation, see [`tsr`](crate::MatchError::tsr).
     /// ```rust
     /// # use matchit::Node;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -665,12 +671,12 @@ impl<'path, V> Node<'path, V> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn at(&self, path: impl AsRef<str>) -> Result<Match<&V>, MatchError> {
+    pub fn at<'path>(&self, path: &'path str) -> Result<Match<'_, 'path, &V>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
-                // SAFETY: We have an immutable reference to self, and we only 
-                // expose mutable references to value through &mut self, so we 
-                // can give safely expose an immmutable reference to value of 
+                // SAFETY: We have an immutable reference to self, and we only
+                // expose mutable references to value through &mut self, so we
+                // can give safely expose an immmutable reference to value of
                 // self's lifetime
                 value: unsafe { &*v.value.get() },
                 params: v.params,
@@ -679,9 +685,10 @@ impl<'path, V> Node<'path, V> {
         }
     }
 
-    /// Returns a mutable reference to the value registered at the given path.
-    /// See [`Node::at`](crate::Node::at) for details.
-    pub fn at_mut(&mut self, path: impl AsRef<str>) -> Result<Match<&mut V>, MatchError> {
+    /// Tries to find a value in the router matching the given path, and returns a mutable
+    /// reference to it. If no value can be found it returns a trailing slash redirect
+    /// recommendation, see [`tsr`](crate::MatchError::tsr).
+    pub fn at_mut<'path>(&self, path: &'path str) -> Result<Match<'_, 'path, &mut V>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have a unique reference to self, so we can safely
@@ -693,12 +700,15 @@ impl<'path, V> Node<'path, V> {
         }
     }
 
-    // It's a bit sad that we have to introduce unsafecell here, but rust doesn't really have a way
+    // It's a bit sad that we have to introduce unsafe here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
-    fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&UnsafeCell<V>>, MatchError> {
+    fn at_inner<'path>(
+        &self,
+        path: &'path str,
+    ) -> Result<Match<'_, 'path, &UnsafeCell<V>>, MatchError> {
         let mut current = self;
-        let mut path = path.as_ref().as_bytes();
+        let mut path = path.as_bytes();
         let mut params = Params::default();
 
         // outer loop for walking the tree to get a path's value
@@ -736,8 +746,8 @@ impl<'path, V> Node<'path, V> {
                             }
 
                             params.push(Param {
-                                key: str::from_utf8(&current.path[1..]).unwrap().into(),
-                                value: str::from_utf8(&path[..end]).unwrap().into(),
+                                key: str::from_utf8(&current.path[1..]).unwrap(),
+                                value: str::from_utf8(&path[..end]).unwrap(),
                             });
 
                             // we need to go deeper!
@@ -1138,7 +1148,7 @@ mod tests {
         path: &'static str,
         should_be_nil: bool,
         route: &'static str,
-        params: Params,
+        params: Params<'static, 'static>,
     }
 
     impl TestRequest {
@@ -1146,7 +1156,7 @@ mod tests {
             path: &'static str,
             should_be_nil: bool,
             route: &'static str,
-            params: Params,
+            params: Params<'static, 'static>,
         ) -> TestRequest {
             TestRequest {
                 path,
@@ -1224,14 +1234,14 @@ mod tests {
 
     #[test]
     fn params() {
-        let params = Params(vec![
+        let params = Params::new(vec![
             Param {
-                key: "hello".to_owned(),
-                value: "world".to_owned(),
+                key: "hello",
+                value: "world",
             },
             Param {
-                key: "rust-is".to_string(),
-                value: "awesome".to_string(),
+                key: "rust-is",
+                value: "awesome",
             },
         ]);
 
@@ -1314,62 +1324,62 @@ mod tests {
                     "/cmd/test/",
                     false,
                     "/cmd/:tool/",
-                    Params(vec![Param::new("tool", "test")]),
+                    Params::new(vec![Param::new("tool", "test")]),
                 ),
                 TestRequest::new(
                     "/cmd/test",
                     true,
                     "",
-                    Params(vec![Param::new("tool", "test")]),
+                    Params::new(vec![Param::new("tool", "test")]),
                 ),
                 TestRequest::new(
                     "/cmd/test/3",
                     false,
                     "/cmd/:tool/:sub",
-                    Params(vec![Param::new("tool", "test"), Param::new("sub", "3")]),
+                    Params::new(vec![Param::new("tool", "test"), Param::new("sub", "3")]),
                 ),
                 TestRequest::new(
                     "/src/",
                     false,
                     "/src/*filepath",
-                    Params(vec![Param::new("filepath", "/")]),
+                    Params::new(vec![Param::new("filepath", "/")]),
                 ),
                 TestRequest::new(
                     "/src/some/file.png",
                     false,
                     "/src/*filepath",
-                    Params(vec![Param::new("filepath", "/some/file.png")]),
+                    Params::new(vec![Param::new("filepath", "/some/file.png")]),
                 ),
                 TestRequest::new("/search/", false, "/search/", Params::default()),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé",
                     false,
                     "/search/:query",
-                    Params(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+                    Params::new(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé/",
                     true,
                     "",
-                    Params(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+                    Params::new(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean",
                     false,
                     "/user_:name",
-                    Params(vec![Param::new("name", "rustacean")]),
+                    Params::new(vec![Param::new("name", "rustacean")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean/about",
                     false,
                     "/user_:name/about",
-                    Params(vec![Param::new("name", "rustacean")]),
+                    Params::new(vec![Param::new("name", "rustacean")]),
                 ),
                 TestRequest::new(
                     "/files/js/inc/framework.js",
                     false,
                     "/files/:dir/*filepath",
-                    Params(vec![
+                    Params::new(vec![
                         Param::new("dir", "js"),
                         Param::new("filepath", "/inc/framework.js"),
                     ]),
@@ -1378,13 +1388,13 @@ mod tests {
                     "/info/gordon/public",
                     false,
                     "/info/:user/public",
-                    Params(vec![Param::new("user", "gordon")]),
+                    Params::new(vec![Param::new("user", "gordon")]),
                 ),
                 TestRequest::new(
                     "/info/gordon/project/go",
                     false,
                     "/info/:user/project/:project",
-                    Params(vec![
+                    Params::new(vec![
                         Param::new("user", "gordon"),
                         Param::new("project", "go"),
                     ]),
@@ -1480,19 +1490,19 @@ mod tests {
                     "/src/some/file.png",
                     false,
                     "/src/*filepath",
-                    Params(vec![Param::new("filepath", "/some/file.png")]),
+                    Params::new(vec![Param::new("filepath", "/some/file.png")]),
                 ),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé",
                     false,
                     "/search/:query",
-                    Params(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
+                    Params::new(vec![Param::new("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean",
                     false,
                     "/user_:name",
-                    Params(vec![Param::new("name", "rustacean")]),
+                    Params::new(vec![Param::new("name", "rustacean")]),
                 ),
             ],
         );
