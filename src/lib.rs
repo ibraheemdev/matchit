@@ -668,8 +668,10 @@ impl<'path, V> Node<'path, V> {
     pub fn at(&self, path: impl AsRef<str>) -> Result<Match<&V>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
-                // SAFETY: We have an immutable reference to `self`, so we can give out a immutable
-                // reference to `value` of the same lifetime
+                // SAFETY: We have an immutable reference to self, and we only 
+                // expose mutable references to value through &mut self, so we 
+                // can give safely expose an immmutable reference to value of 
+                // self's lifetime
                 value: unsafe { &*v.value.get() },
                 params: v.params,
             }),
@@ -682,8 +684,8 @@ impl<'path, V> Node<'path, V> {
     pub fn at_mut(&mut self, path: impl AsRef<str>) -> Result<Match<&mut V>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
-                // SAFETY: We have a unique reference to `self`, so we can give out a unique
-                // reference to `value` of the same lifetime
+                // SAFETY: We have a unique reference to self, so we can safely
+                // expose a unique reference to value of self's lifetime
                 value: unsafe { &mut *v.value.get() },
                 params: v.params,
             }),
@@ -694,7 +696,7 @@ impl<'path, V> Node<'path, V> {
     // It's a bit sad that we have to introduce unsafecell here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
-    fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&'_ UnsafeCell<V>>, MatchError> {
+    fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&UnsafeCell<V>>, MatchError> {
         let mut current = self;
         let mut path = path.as_ref().as_bytes();
         let mut params = Params::default();
@@ -857,7 +859,6 @@ impl<'path, V> Node<'path, V> {
         }
     }
 
-    // recursive case-insensitive match function used by `Node::find_case_insensitive_path`
     fn path_ignore_case_helper(
         &self,
         mut path: &[u8],
@@ -1026,7 +1027,6 @@ impl<'path, V> Node<'path, V> {
         false
     }
 
-    // recursive case-insensitive match function used by n.findCaseInsensitivePath
     fn path_ignore_case_match_helper(
         &self,
         mut path: &[u8],
@@ -1186,6 +1186,7 @@ mod tests {
                         request.path
                     );
 
+                    // test at_mut
                     let res_mut = tree.at_mut(request.path).unwrap();
                     res_mut.value.push_str("CHECKED");
 
