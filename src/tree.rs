@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::cmp::min;
+use std::fmt;
 use std::mem;
 use std::ops::{Index, IndexMut};
 use std::slice;
@@ -14,7 +15,7 @@ use std::str;
 pub struct Match<V> {
     /// The value stored under the matched node.
     pub value: V,
-    /// The route parameters. See [parameters](/index.html#parameters) for more details.
+    /// The route parameters. See [parameters](crate#parameters) for more details.
     pub params: Params,
 }
 
@@ -45,6 +46,28 @@ pub enum InsertError {
     InvalidCatchAll,
 }
 
+impl fmt::Display for InsertError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Conflict { with } => {
+                write!(
+                    f,
+                    "insertion failed due to conflict with previously registered path: {}",
+                    with
+                )
+            }
+            Self::TooManyParams => write!(f, "only one parameter is allowed per path segment"),
+            Self::UnnamedParam => write!(f, "parameters must be registered with a name"),
+            Self::InvalidCatchAll => write!(
+                f,
+                "catch-all parameters are only allowed at the end of a path"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for InsertError {}
+
 impl InsertError {
     fn conflict(insert: &str, prefix: &[u8], existing: &[u8]) -> Self {
         let with = format!(
@@ -57,36 +80,52 @@ impl InsertError {
     }
 }
 
-/// Indicates whether a route exists at the same path with/without a trailing slash.
-/// ```rust
-/// # use matchit::{Node, Tsr};
-///
-/// let mut matcher = Node::new();
-/// matcher.insert("/home", "Welcome!");
-/// matcher.insert("/blog/", "Our blog.");
-///
-/// if let Err(tsr) = matcher.at("/home/") {
-///     assert_eq!(tsr, Tsr::Yes);
-/// }
-///
-/// if let Err(tsr) = matcher.at("/blog") {
-///     assert_eq!(tsr, Tsr::Yes);
-/// }
-/// ```
+/// A failed match attempt, with trailing slash redirect information.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum Tsr {
-    Yes,
-    No,
+pub struct MatchError {
+    tsr: bool,
 }
 
-impl From<bool> for Tsr {
-    fn from(from: bool) -> Self {
-        match from {
-            true => Tsr::Yes,
-            false => Tsr::No,
-        }
+impl MatchError {
+    /// Indicates whether a route exists at the same path with/without a trailing slash.
+    /// ```rust
+    /// # use matchit::Node;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut matcher = Node::new();
+    /// matcher.insert("/home", "Welcome!")?;
+    /// matcher.insert("/blog/", "Our blog.")?;
+    ///
+    /// if let Err(err) = matcher.at("/home/") {
+    ///     assert!(err.tsr());
+    /// }
+    ///
+    /// if let Err(err) = matcher.at("/blog") {
+    ///     assert!(err.tsr());
+    /// }
+    ///
+    /// if let Err(err) = matcher.at("/foobar") {
+    ///     assert!(!err.tsr());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn tsr(&self) -> bool {
+        self.tsr
+    }
+
+    fn new(tsr: bool) -> Self {
+        Self { tsr }
     }
 }
+
+impl fmt::Display for MatchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "no route registered under the given path")
+    }
+}
+
+impl std::error::Error for MatchError {}
 
 /// A single URL parameter, consisting of a key and a value.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
@@ -109,8 +148,9 @@ impl Param {
 ///
 /// ```rust
 /// # let mut matcher = matchit::Node::new();
-/// # matcher.insert("/users/:id", true);
-/// let matched = matcher.at("/users/1").unwrap();
+/// # matcher.insert("/users/:id", true).unwrap();
+/// # fn main() -> Result<(), Box<dyn std::error::Error> {
+/// let matched = matcher.at("/users/1")?;
 ///
 /// for param in &matched.params {
 ///     println!("key: {}, value: {}", param.key, param.value);
@@ -118,6 +158,7 @@ impl Param {
 ///
 /// let id = matched.params.get("id");
 /// assert_eq!(id, Some("1"));
+/// # }
 /// ```
 #[derive(Default, Debug, PartialEq, Eq, Ord, PartialOrd, Clone)]
 pub struct Params(pub Vec<Param>);
@@ -146,7 +187,7 @@ impl Params {
         self.0.is_empty()
     }
 
-    /// Inserts a URL parameter into the vector
+    /// Inserts a [`Param`] into the list.
     pub fn push(&mut self, param: Param) {
         self.0.push(param);
     }
@@ -207,7 +248,7 @@ enum NodeType {
     Static,
 }
 
-/// A node in radix tree ordered by priority.
+/// A node in a radix tree ordered by priority.
 ///
 /// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
@@ -217,7 +258,7 @@ pub struct Node<'path, V> {
     node_type: NodeType,
     indices: Cow<'path, [u8]>,
     children: Vec<Node<'path, V>>,
-    // See `at_inner` for why this is needed.
+    // See `at_inner` for why an unsafe cell is needed.
     value: Option<UnsafeCell<V>>,
     priority: u32,
 }
@@ -242,13 +283,15 @@ impl<'path, V> Node<'path, V> {
         Self::default()
     }
 
-    /// Insert a `Node` with the given value to the path.
+    /// Insert a value into the tree under the given path.
     /// ```rust
     /// # use matchit::Node;
-    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut matcher = Node::new();
-    /// matcher.insert("/home", "Welcome!");
-    /// matcher.insert("/users/:id", "A User");
+    /// matcher.insert("/home", "Welcome!")?;
+    /// matcher.insert("/users/:id", "A User")?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn insert(&mut self, path: &'path str, value: V) -> Result<(), InsertError> {
         self.priority += 1;
@@ -394,7 +437,7 @@ impl<'path, V> Node<'path, V> {
         {
             self.insert_helper(path, full_path, value)
         } else {
-            return Err(InsertError::conflict(full_path, path, &self.path));
+            Err(InsertError::conflict(full_path, path, &self.path))
         }
     }
 
@@ -512,14 +555,16 @@ impl<'path, V> Node<'path, V> {
     /// If no value can be found it returns a trailing slash redirect recommendation.
     /// ```rust
     /// # use matchit::Node;
-    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut matcher = Node::new();
-    /// matcher.insert("/home", "Welcome!");
+    /// matcher.insert("/home", "Welcome!")?;
     ///
     /// let matched = matcher.at("/home").unwrap();
     /// assert_eq!(*matched.value, "Welcome!");
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn at(&self, path: impl AsRef<str>) -> Result<Match<&V>, Tsr> {
+    pub fn at(&self, path: impl AsRef<str>) -> Result<Match<&V>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have an immutable reference to `self`, so we can give out a immutable
@@ -532,8 +577,8 @@ impl<'path, V> Node<'path, V> {
     }
 
     /// Returns a mutable reference to the value registered at the given path.
-    /// See [Node::at](crate::Node::at) for details.
-    pub fn at_mut(&mut self, path: impl AsRef<str>) -> Result<Match<&mut V>, Tsr> {
+    /// See [`Node::at`](crate::Node::at) for details.
+    pub fn at_mut(&mut self, path: impl AsRef<str>) -> Result<Match<&mut V>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have a unique reference to `self`, so we can give out a unique
@@ -548,7 +593,7 @@ impl<'path, V> Node<'path, V> {
     // It's a bit sad that we have to introduce unsafecell here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
-    fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&'_ UnsafeCell<V>>, Tsr> {
+    fn at_inner(&self, path: impl AsRef<str>) -> Result<Match<&'_ UnsafeCell<V>>, MatchError> {
         let mut current = self;
         let mut path = path.as_ref().as_bytes();
         let mut params = Params::default();
@@ -575,7 +620,7 @@ impl<'path, V> Node<'path, V> {
                         // We can recommend to redirect to the same URL without a
                         // trailing slash if a leaf exists for that path.
                         let tsr = path == [b'/'] && current.value.is_some();
-                        return Err(tsr.into());
+                        return Err(MatchError::new(tsr));
                     }
 
                     current = &current.children[0];
@@ -603,7 +648,7 @@ impl<'path, V> Node<'path, V> {
 
                                 // ... but we can't
                                 let tsr = path.len() == end + 1;
-                                return Err(tsr.into());
+                                return Err(MatchError::new(tsr));
                             }
 
                             if let Some(value) = current.value.as_ref() {
@@ -616,10 +661,10 @@ impl<'path, V> Node<'path, V> {
                                     && current.value.is_some())
                                     || (current.path.as_ref().is_empty()
                                         && current.indices.as_ref() == [b'/']);
-                                return Err(tsr.into());
+                                return Err(MatchError::new(tsr));
                             }
 
-                            return Err(Tsr::No);
+                            return Err(MatchError::new(false));
                         }
                         NodeType::CatchAll => {
                             params.push(Param {
@@ -629,7 +674,7 @@ impl<'path, V> Node<'path, V> {
 
                             return match current.value.as_ref() {
                                 Some(value) => Ok(Match { value, params }),
-                                None => Err(Tsr::No),
+                                None => Err(MatchError::new(false)),
                             };
                         }
                         _ => unreachable!(),
@@ -646,7 +691,7 @@ impl<'path, V> Node<'path, V> {
                 // wildcard child, there must be a value for this path with an
                 // additional trailing slash
                 if path == [b'/'] && current.wild_child && current.node_type != NodeType::Root {
-                    return Err(Tsr::Yes);
+                    return Err(MatchError::new(true));
                 }
 
                 // No value found. Check if a value for this path + a
@@ -657,11 +702,11 @@ impl<'path, V> Node<'path, V> {
                         let tsr = (current.path.len() == 1 && current.value.is_some())
                             || (current.node_type == NodeType::CatchAll
                                 && current.children[0].value.is_some());
-                        return Err(tsr.into());
+                        return Err(MatchError::new(tsr));
                     }
                 }
 
-                return Err(Tsr::No);
+                return Err(MatchError::new(false));
             }
 
             // Nothing found. We can recommend to redirect to the same URL with an
@@ -672,7 +717,7 @@ impl<'path, V> Node<'path, V> {
                     && path == &prefix[..prefix.len() - 1]
                     && current.value.is_some());
 
-            return Err(tsr.into());
+            return Err(MatchError::new(tsr));
         }
     }
 
@@ -682,11 +727,14 @@ impl<'path, V> Node<'path, V> {
     /// ```rust
     /// # use matchit::Node;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut matcher = Node::new();
-    /// matcher.insert("/home", "Welcome!");
+    /// matcher.insert("/home", "Welcome!")?;
     ///
     /// let path = matcher.path_ignore_case("/HoMe/", true).unwrap();
     /// assert_eq!(path, "/home");
+    /// # Ok(())
+    /// # }
     /// ````
     pub fn path_ignore_case(
         &self,
@@ -708,7 +756,7 @@ impl<'path, V> Node<'path, V> {
         }
     }
 
-    // recursive case-insensitive match function used by n.find_case_insensitive_path
+    // recursive case-insensitive match function used by `Node::find_case_insensitive_path`
     fn path_ignore_case_helper(
         &self,
         mut path: &[u8],
@@ -1452,8 +1500,8 @@ mod tests {
                 Ok(_) => {
                     panic!("non-nil value for TSR route '{}'", route);
                 }
-                Err(tsr) => {
-                    if tsr == Tsr::No {
+                Err(err) => {
+                    if !err.tsr() {
                         panic!("expected TSR recommendation for route '{}'", route);
                     }
                 }
@@ -1469,8 +1517,8 @@ mod tests {
                 Ok(_) => {
                     panic!("non-nil value for TSR route '{}'", route);
                 }
-                Err(tsr) => {
-                    if tsr == Tsr::Yes {
+                Err(err) => {
+                    if err.tsr() {
                         panic!("expected no TSR recommendation for route '{}'", route);
                     }
                 }
@@ -1490,8 +1538,8 @@ mod tests {
             Ok(_) => {
                 panic!("non-nil value for route '/'");
             }
-            Err(tsr) => {
-                if tsr == Tsr::Yes {
+            Err(err) => {
+                if err.tsr() {
                     panic!("expected no TSR recommendation for route '/'");
                 }
             }

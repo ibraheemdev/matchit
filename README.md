@@ -10,14 +10,16 @@ Matches URL patterns with support for dynamic and wildcard segments.
 ```rust
 use matchit::Node;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut matcher = Node::new();
-    matcher.insert("/home", "Welcome!");
-    matcher.insert("/users/:id", "A User");
+    matcher.insert("/home", "Welcome!")?;
+    matcher.insert("/users/:id", "A User")?;
 
-    let matched = matcher.at("/users/1").unwrap();
+    let matched = matcher.at("/users/1")?;
     assert_eq!(matched.params.get("id"), Some("1"));
     assert_eq!(*matched.value, "A User");
+
+    Ok(())
 }
 ```
 

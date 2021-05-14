@@ -10,13 +10,16 @@
 //! ```rust
 //! use matchit::Node;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut matcher = Node::new();
-//! matcher.insert("/home", "Welcome!");
-//! matcher.insert("/users/:id", "A User");
+//! matcher.insert("/home", "Welcome!")?;
+//! matcher.insert("/users/:id", "A User")?;
 //!
-//! let matched = matcher.at("/users/1").unwrap();
+//! let matched = matcher.at("/users/1")?;
 //! assert_eq!(matched.params.get("id"), Some("1"));
 //! assert_eq!(*matched.value, "A User");
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! `matchit` relies on a tree structure which makes heavy use of *common prefixes*, it is effectively a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
@@ -100,7 +103,7 @@
 mod tree;
 
 #[doc(inline)]
-pub use tree::{InsertError, Match, Node, Param, Params, Tsr};
+pub use tree::{InsertError, Match, MatchError, Node, Param, Params};
 
 mod test_readme {
     macro_rules! doc_comment {
