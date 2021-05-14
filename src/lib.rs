@@ -100,7 +100,7 @@
 mod tree;
 
 #[doc(inline)]
-pub use tree::{InsertError, Match, Node, NodeType, Param, Params, Tsr};
+pub use tree::{InsertError, Match, Node, Param, Params, Tsr};
 
 mod test_readme {
     macro_rules! doc_comment {

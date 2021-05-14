@@ -196,7 +196,7 @@ impl IndexMut<usize> for Params {
 
 /// The types of nodes the tree can hold
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
-pub enum NodeType {
+enum NodeType {
     /// The root path
     Root,
     /// A URL parameter, ex: `/:id`. See `Param`
