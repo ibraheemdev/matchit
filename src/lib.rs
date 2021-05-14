@@ -173,7 +173,7 @@ impl InsertError {
         let with = format!(
             "{}{}",
             &insert[..insert.rfind(str::from_utf8(prefix).unwrap()).unwrap()],
-            str::from_utf8(&existing).unwrap(),
+            str::from_utf8(existing).unwrap(),
         );
 
         InsertError::Conflict { with }
@@ -210,11 +210,12 @@ impl MatchError {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn tsr(&self) -> bool {
+    pub fn tsr(self) -> bool {
         self.tsr
     }
 
-    fn new(tsr: bool) -> Self {
+    /// Creates a new match error with the given trailing slash redirect.
+    pub fn new(tsr: bool) -> Self {
         Self { tsr }
     }
 }
@@ -275,7 +276,7 @@ impl<'key, 'value> Params<'key, 'value> {
         self.vec
             .iter()
             .find(|param| param.key == name.as_ref())
-            .map(|param| param.value.as_ref())
+            .map(|param| param.value)
     }
 
     /// Returns an iterator over the parameters in the list.
@@ -444,7 +445,7 @@ impl<'route, V> Node<'route, V> {
             mem::swap(&mut self.children, &mut child.children);
 
             self.children = vec![child];
-            self.indices = self.path[i..i + 1].to_owned().into();
+            self.indices = self.path[i..=i].to_owned().into();
             self.path = prefix[..i].into();
             self.wild_child = false;
         }
@@ -781,8 +782,8 @@ impl<'route, V> Node<'route, V> {
                         }
                         NodeType::CatchAll => {
                             params.push(Param {
-                                key: str::from_utf8(current.path[2..].as_ref()).unwrap().into(),
-                                value: str::from_utf8(path).unwrap().into(),
+                                key: str::from_utf8(current.path[2..].as_ref()).unwrap(),
+                                value: str::from_utf8(path).unwrap(),
                             });
 
                             return match current.value.as_ref() {
@@ -895,20 +896,7 @@ impl<'route, V> Node<'route, V> {
                     // skip char bytes already processed
                     buf = shift_n_bytes(buf, self.path.len());
 
-                    if buf[0] != 0 {
-                        // old char not finished
-                        for i in 0..self.indices.len() {
-                            if self.indices[i] == buf[0] {
-                                // continue with child node
-                                return self.children[i].path_ignore_case_helper(
-                                    path,
-                                    insensitive_path,
-                                    buf,
-                                    fix_trailing_slash,
-                                );
-                            }
-                        }
-                    } else {
+                    if buf[0] == 0 {
                         // process a new char
                         let mut current_char = 0 as char;
 
@@ -975,6 +963,19 @@ impl<'route, V> Node<'route, V> {
                                         fix_trailing_slash,
                                     );
                                 }
+                            }
+                        }
+                    } else {
+                        // old char not finished
+                        for i in 0..self.indices.len() {
+                            if self.indices[i] == buf[0] {
+                                // continue with child node
+                                return self.children[i].path_ignore_case_helper(
+                                    path,
+                                    insensitive_path,
+                                    buf,
+                                    fix_trailing_slash,
+                                );
                             }
                         }
                     }
@@ -1089,7 +1090,7 @@ impl<'route, V> Node<'route, V> {
                 false
             }
             NodeType::CatchAll => {
-                insensitive_path.extend_from_slice(&path);
+                insensitive_path.extend_from_slice(path);
                 true
             }
             _ => unreachable!(),
