@@ -180,6 +180,7 @@ mod tests {
 
     #[test]
     fn params() {
+        // test heap allocated params (4+)
         let vec = vec![
             ("hello", "hello"),
             ("world", "world"),
@@ -192,6 +193,28 @@ mod tests {
         for (key, value) in vec.clone() {
             params.push(key, value);
             assert_eq!(params.get(key), Some(value));
+        }
+
+        match params.kind {
+            ParamsKind::Small(..) => panic!(),
+            ParamsKind::Large(..) => {}
+        }
+
+        assert!(params.iter().eq(vec.clone()));
+        assert!(params.into_iter().eq(vec.clone()));
+
+        // test stack allocated params (up to 3)
+        let vec = vec![("hello", "hello"), ("world", "world"), ("baz", "baz")];
+
+        let mut params = Params::new();
+        for (key, value) in vec.clone() {
+            params.push(key, value);
+            assert_eq!(params.get(key), Some(value));
+        }
+
+        match params.kind {
+            ParamsKind::Small(..) => {}
+            ParamsKind::Large(..) => panic!(),
         }
 
         assert!(params.iter().eq(vec.clone()));
