@@ -209,7 +209,7 @@ impl<V> Node<V> {
 
         // Check if the wildcard matches
         if prefix.len() >= self.path.len()
-      && self.path == &prefix[..self.path.len()]
+      && self.path == prefix[..self.path.len()]
       // Adding a child to a CatchAll Node is not possible
       && self.node_type != NodeType::CatchAll
       // Check for longer wildcard, e.g. :name and :names
@@ -440,10 +440,8 @@ impl<V> Node<V> {
                                 current = &current.children[0];
                                 // No value found. Check if a value for this path + a
                                 // trailing slash exists for TSR recommendation
-                                let tsr = (current.path == [b'/']
-                                    && current.value.is_some())
-                                    || (current.path.is_empty()
-                                        && current.indices == [b'/']);
+                                let tsr = (current.path == [b'/'] && current.value.is_some())
+                                    || (current.path.is_empty() && current.indices == [b'/']);
                                 return Err(MatchError::new(tsr));
                             }
 

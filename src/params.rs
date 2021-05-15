@@ -83,7 +83,7 @@ impl<'k, 'v> Params<'k, 'v> {
             let mut vec = Vec::with_capacity(len + 1);
             vec.extend(arr.iter_mut().map(mem::take));
             vec.push(elem);
-            return vec;
+            vec
         }
 
         let param = Param { key, value };
