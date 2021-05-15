@@ -1,10 +1,8 @@
 use crate::{InsertError, MatchError, Params};
 
-use std::borrow::Cow;
 use std::cell::UnsafeCell;
 use std::cmp::min;
 use std::mem;
-use std::slice;
 use std::str;
 
 /// A successful match consisting of the registered value and the URL parameters, returned by
@@ -34,24 +32,24 @@ enum NodeType {
 ///
 /// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
-pub struct Node<'r, V> {
-    path: Cow<'r, [u8]>,
+pub struct Node<V> {
+    path: Vec<u8>,
     wild_child: bool,
     node_type: NodeType,
-    indices: Cow<'r, [u8]>,
-    children: Vec<Node<'r, V>>,
+    indices: Vec<u8>,
+    children: Vec<Self>,
     // See `at_inner` for why an unsafe cell is needed.
     value: Option<UnsafeCell<V>>,
     priority: u32,
 }
 
-impl<V> Default for Node<'_, V> {
+impl<V> Default for Node<V> {
     fn default() -> Self {
         Self {
-            path: Cow::default(),
+            path: Vec::new(),
             wild_child: false,
             node_type: NodeType::Static,
-            indices: Cow::default(),
+            indices: Vec::new(),
             children: Vec::new(),
             value: None,
             priority: 0,
@@ -59,7 +57,7 @@ impl<V> Default for Node<'_, V> {
     }
 }
 
-impl<'r, V> Node<'r, V> {
+impl<V> Node<V> {
     /// Construct a new `Node`.
     pub fn new() -> Self {
         Self::default()
@@ -75,24 +73,25 @@ impl<'r, V> Node<'r, V> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn insert(&mut self, route: &'r str, value: V) -> Result<(), InsertError> {
+    pub fn insert(&mut self, route: impl Into<String>, value: V) -> Result<(), InsertError> {
+        let route = route.into();
         self.priority += 1;
 
         // Empty tree
         if self.path.is_empty() && self.children.is_empty() {
-            self.insert_child(route.as_bytes(), route, value)?;
+            self.insert_child(route.as_bytes(), &route, value)?;
             self.node_type = NodeType::Root;
             return Ok(());
         }
 
-        self.insert_helper(route.as_ref(), route, value)
+        self.insert_helper(route.as_bytes(), &route, value)
     }
 
     #[inline]
     fn insert_helper(
         &mut self,
-        mut prefix: &'r [u8],
-        route: &'r str,
+        mut prefix: &[u8],
+        route: &str,
         value: V,
     ) -> Result<(), InsertError> {
         // Find the longest common prefix.
@@ -108,9 +107,9 @@ impl<'r, V> Node<'r, V> {
         // Split edge
         if i < self.path.len() {
             let mut child = Self {
-                path: self.path[i..].to_owned().into(),
+                path: self.path[i..].to_owned(),
                 wild_child: self.wild_child,
-                indices: self.indices.clone(),
+                indices: self.indices.to_owned(),
                 value: self.value.take(),
                 priority: self.priority - 1,
                 ..Self::default()
@@ -119,8 +118,8 @@ impl<'r, V> Node<'r, V> {
             mem::swap(&mut self.children, &mut child.children);
 
             self.children = vec![child];
-            self.indices = self.path[i..=i].to_owned().into();
-            self.path = prefix[..i].into();
+            self.indices = self.path[i..=i].to_owned();
+            self.path = prefix[..i].to_owned();
             self.wild_child = false;
         }
 
@@ -150,7 +149,7 @@ impl<'r, V> Node<'r, V> {
 
             // Otherwise insert it
             if idxc != b':' && idxc != b'*' {
-                self.indices.to_mut().push(idxc);
+                self.indices.push(idxc);
 
                 self.children.push(Self::default());
 
@@ -162,7 +161,7 @@ impl<'r, V> Node<'r, V> {
         } else {
             // Otherwise add value to current node
             if self.value.is_some() {
-                return Err(InsertError::conflict(route, prefix, &self.path));
+                return Err(InsertError::conflict(route, &prefix, &self.path));
             }
 
             self.value = Some(UnsafeCell::new(value));
@@ -193,8 +192,7 @@ impl<'r, V> Node<'r, V> {
                 &self.indices[new_pos..pos], // rest without char at 'pos'
                 &self.indices[pos + 1..],
             ]
-            .concat()
-            .into();
+            .concat();
         }
 
         new_pos
@@ -203,8 +201,8 @@ impl<'r, V> Node<'r, V> {
     #[inline]
     fn wild_child_conflict(
         &mut self,
-        prefix: &'r [u8],
-        route: &'r str,
+        prefix: &[u8],
+        route: &str,
         value: V,
     ) -> Result<(), InsertError> {
         self.priority += 1;
@@ -219,21 +217,21 @@ impl<'r, V> Node<'r, V> {
         {
             self.insert_helper(prefix, route, value)
         } else {
-            Err(InsertError::conflict(route, prefix, &self.path))
+            Err(InsertError::conflict(&route, &prefix, &self.path))
         }
     }
 
     fn insert_child(
         &mut self,
-        mut prefix: &'r [u8],
-        route: &'r str,
+        mut prefix: &[u8],
+        route: &str,
         value: V,
     ) -> Result<(), InsertError> {
-        let (wildcard, wildcard_index, valid) = find_wildcard(prefix);
+        let (wildcard, wildcard_index, valid) = find_wildcard(&prefix);
 
         if wildcard_index.is_none() {
             self.value = Some(UnsafeCell::new(value));
-            self.path = prefix.into();
+            self.path = prefix.to_owned();
             return Ok(());
         };
 
@@ -253,20 +251,20 @@ impl<'r, V> Node<'r, V> {
         // check if this Node existing children which would be
         // unreachable if we insert the wildcard here
         if !self.children.is_empty() {
-            return Err(InsertError::conflict(route, prefix, &self.path));
+            return Err(InsertError::conflict(&route, &prefix, &self.path));
         }
 
         // Param
         if wildcard[0] == b':' {
             // Insert prefix before the current wildcard
             if wildcard_index > 0 {
-                self.path = prefix[..wildcard_index].into();
+                self.path = prefix[..wildcard_index].to_owned();
                 prefix = &prefix[wildcard_index..];
             }
 
             let child = Self {
                 node_type: NodeType::Param,
-                path: wildcard.into(),
+                path: wildcard.to_owned(),
                 ..Self::default()
             };
 
@@ -298,7 +296,7 @@ impl<'r, V> Node<'r, V> {
         }
 
         if !self.path.is_empty() && self.path[self.path.len() - 1] == b'/' {
-            return Err(InsertError::conflict(route, prefix, &self.path));
+            return Err(InsertError::conflict(&route, &prefix, &self.path));
         }
 
         // Currently fixed width 1 for '/'
@@ -314,14 +312,14 @@ impl<'r, V> Node<'r, V> {
             ..Self::default()
         };
 
-        self.path = prefix[..wildcard_index].into();
+        self.path = prefix[..wildcard_index].to_owned();
         self.children = vec![child];
-        self.indices = slice::from_ref(&b'/').into();
+        self.indices = vec![b'/'];
         self.children[0].priority += 1;
 
         // Second node: node holding the variable
         let child = Self {
-            path: prefix[wildcard_index..].into(),
+            path: prefix[wildcard_index..].to_owned(),
             node_type: NodeType::CatchAll,
             value: Some(UnsafeCell::new(value)),
             priority: 1,
@@ -387,7 +385,7 @@ impl<'r, V> Node<'r, V> {
         'walk: loop {
             let prefix = &current.path;
             if path.len() > prefix.len() {
-                if prefix.as_ref() == &path[..prefix.len()] {
+                if prefix == &path[..prefix.len()] {
                     path = &path[prefix.len()..];
 
                     // If this node does not have a wildcard (Param or CatchAll)
@@ -442,10 +440,10 @@ impl<'r, V> Node<'r, V> {
                                 current = &current.children[0];
                                 // No value found. Check if a value for this path + a
                                 // trailing slash exists for TSR recommendation
-                                let tsr = (current.path.as_ref() == [b'/']
+                                let tsr = (current.path == [b'/']
                                     && current.value.is_some())
-                                    || (current.path.as_ref().is_empty()
-                                        && current.indices.as_ref() == [b'/']);
+                                    || (current.path.is_empty()
+                                        && current.indices == [b'/']);
                                 return Err(MatchError::new(tsr));
                             }
 
@@ -453,7 +451,7 @@ impl<'r, V> Node<'r, V> {
                         }
                         NodeType::CatchAll => {
                             params.push(
-                                str::from_utf8(current.path[2..].as_ref()).unwrap(),
+                                str::from_utf8(&current.path[2..]).unwrap(),
                                 str::from_utf8(path).unwrap(),
                             );
 
@@ -465,7 +463,7 @@ impl<'r, V> Node<'r, V> {
                         _ => unreachable!(),
                     }
                 }
-            } else if path == prefix.as_ref() {
+            } else if path == prefix {
                 // We should have reached the node containing the value.
                 // Check if this node has a value registered.
                 if let Some(value) = current.value.as_ref() {
@@ -553,7 +551,7 @@ impl<'r, V> Node<'r, V> {
             && (self.path.is_empty()
                 || lower_path[1..self.path.len()].eq_ignore_ascii_case(&self.path[1..]))
         {
-            insensitive_path.extend_from_slice(self.path.as_ref());
+            insensitive_path.extend_from_slice(&self.path);
 
             path = &path[self.path.len()..];
 
@@ -701,7 +699,7 @@ impl<'r, V> Node<'r, V> {
                 && lower_path[1..].eq_ignore_ascii_case(&self.path[1..lower_path.len()])
                 && self.value.is_some()
             {
-                insensitive_path.extend_from_slice(self.path.as_ref());
+                insensitive_path.extend_from_slice(&self.path);
                 return true;
             }
         }
@@ -749,7 +747,7 @@ impl<'r, V> Node<'r, V> {
                     return true;
                 } else if fix_trailing_slash
                     && self.children.len() == 1
-                    && self.children[0].path.as_ref() == [b'/']
+                    && self.children[0].path == [b'/']
                     && self.children[0].value.is_some()
                 {
                     // No value found. Check if a value for this path + a
@@ -849,7 +847,7 @@ mod tests {
 
     type TestRequests = Vec<TestRequest>;
 
-    fn check_requests(tree: &mut Node<'static, String>, requests: TestRequests) {
+    fn check_requests(tree: &mut Node<String>, requests: TestRequests) {
         for request in requests {
             let res = tree.at(request.path);
 
@@ -890,7 +888,7 @@ mod tests {
         }
     }
 
-    fn check_priorities(n: &mut Node<'_, String>) -> u32 {
+    fn check_priorities(n: &mut Node<String>) -> u32 {
         let mut prio: u32 = 0;
         for i in 0..n.children.len() {
             prio += check_priorities(&mut n.children[i]);
@@ -1351,7 +1349,7 @@ mod tests {
     ];
 
         for route in &routes {
-            tree.insert(route, route.to_owned()).unwrap();
+            tree.insert(*route, route.to_owned()).unwrap();
         }
 
         // Check out == in for all registered routes
