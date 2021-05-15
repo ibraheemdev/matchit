@@ -106,8 +106,8 @@ For even better scalability, the child nodes on each tree level are ordered by p
 
 ```text
 running 4 tests
-test bench_actix            ... bench:      35,074 ns/iter (+/- 279)
-test bench_matchit          ... bench:         249 ns/iter (+/- 8)
-test bench_regex_set        ... bench:      21,819 ns/iter (+/- 207)
-test bench_route_recognizer ... bench:       4,444 ns/iter (+/- 30)
+test bench_actix            ... bench:      35,165 ns/iter (+/- 310)
+test bench_matchit          ... bench:         233 ns/iter (+/- 10)
+test bench_regex_set        ... bench:      22,160 ns/iter (+/- 190)
+test bench_route_recognizer ... bench:       4,510 ns/iter (+/- 28)
 ```

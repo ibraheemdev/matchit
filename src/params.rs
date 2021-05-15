@@ -33,8 +33,8 @@ pub struct Params<'k, 'v> {
     kind: ParamsKind<'k, 'v>,
 }
 
-// most routes have 1/2 parameters, so we can avoid a heap allocation in that case.
-const SMALL: usize = 2;
+// most routes have 1-3 dynamic parameters, so we can avoid a heap allocation in common cases.
+const SMALL: usize = 3;
 
 #[derive(Debug, PartialEq, Eq, Ord, PartialOrd)]
 enum ParamsKind<'k, 'v> {
