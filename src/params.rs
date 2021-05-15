@@ -52,8 +52,9 @@ impl<'k, 'v> Params<'k, 'v> {
     /// Returns the value of the first parameter registered matched for the given key.
     pub fn get(&self, key: impl AsRef<str>) -> Option<&'v str> {
         match &self.kind {
-            ParamsKind::Small(arr, _) => arr
+            ParamsKind::Small(arr, len) => arr
                 .iter()
+                .take(*len)
                 .find(|param| param.key == key.as_ref())
                 .map(|param| param.value),
             ParamsKind::Large(vec) => vec
@@ -179,8 +180,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn params() {
-        // test heap allocated params (4+)
+    fn heap_alloc() {
         let vec = vec![
             ("hello", "hello"),
             ("world", "world"),
@@ -202,8 +202,10 @@ mod tests {
 
         assert!(params.iter().eq(vec.clone()));
         assert!(params.into_iter().eq(vec.clone()));
+    }
 
-        // test stack allocated params (up to 3)
+    #[test]
+    fn stack_alloc() {
         let vec = vec![("hello", "hello"), ("world", "world"), ("baz", "baz")];
 
         let mut params = Params::new();
@@ -219,5 +221,11 @@ mod tests {
 
         assert!(params.iter().eq(vec.clone()));
         assert!(params.into_iter().eq(vec.clone()));
+    }
+
+    #[test]
+    fn ignore_array_default() {
+        let params = Params::new();
+        assert!(params.get("").is_none());
     }
 }
