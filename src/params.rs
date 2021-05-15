@@ -1,4 +1,4 @@
-use std::iter::{self, FromIterator};
+use std::iter;
 use std::mem;
 use std::slice;
 
@@ -42,17 +42,11 @@ enum ParamsKind<'k, 'v> {
     Large(Vec<Param<'k, 'v>>),
 }
 
-impl<'k, 'v> Default for Params<'k, 'v> {
-    fn default() -> Self {
-        let kind = ParamsKind::Small(Default::default(), 0);
-        Self { kind }
-    }
-}
-
 impl<'k, 'v> Params<'k, 'v> {
     /// Creates a new list of URL parameters.
-    pub fn new() -> Self {
-        Self::default()
+    pub(crate) fn new() -> Self {
+        let kind = ParamsKind::Small(Default::default(), 0);
+        Self { kind }
     }
 
     /// Returns the value of the first parameter registered matched for the given key.
@@ -83,7 +77,7 @@ impl<'k, 'v> Params<'k, 'v> {
     }
 
     /// Inserts a key value parameter pair into the list.
-    pub fn push(&mut self, key: &'k str, value: &'v str) {
+    pub(crate) fn push(&mut self, key: &'k str, value: &'v str) {
         #[cold]
         fn drain_to_vec<T: Default>(len: usize, elem: T, arr: &mut [T; SMALL]) -> Vec<T> {
             let mut vec = Vec::with_capacity(len + 1);
@@ -104,16 +98,6 @@ impl<'k, 'v> Params<'k, 'v> {
             }
             ParamsKind::Large(vec) => vec.push(param),
         }
-    }
-}
-
-impl<'k, 'v> FromIterator<(&'k str, &'v str)> for Params<'k, 'v> {
-    fn from_iter<T: IntoIterator<Item = (&'k str, &'v str)>>(iter: T) -> Self {
-        let mut params = Self::default();
-        for (key, value) in iter.into_iter() {
-            params.push(key, value);
-        }
-        params
     }
 }
 
@@ -204,12 +188,7 @@ mod tests {
             ("baz", "baz"),
         ];
 
-        let params = vec.iter().cloned().collect::<Params<'_, '_>>();
-        for (key, value) in vec.clone() {
-            assert_eq!(params.get(key), Some(value));
-        }
-
-        let mut params = Params::default();
+        let mut params = Params::new();
         for (key, value) in vec.clone() {
             params.push(key, value);
             assert_eq!(params.get(key), Some(value));

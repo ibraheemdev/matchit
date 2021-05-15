@@ -99,7 +99,7 @@ impl MatchError {
         self.tsr
     }
 
-    /// Creates a new match error with the given trailing slash redirect.
+    /// Creates a new match error with the given `tsr`.
     pub fn new(tsr: bool) -> Self {
         Self { tsr }
     }

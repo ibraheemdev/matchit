@@ -381,7 +381,7 @@ impl<'r, V> Node<'r, V> {
     fn at_inner<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &UnsafeCell<V>>, MatchError> {
         let mut current = self;
         let mut path = path.as_bytes();
-        let mut params = Params::default();
+        let mut params = Params::new();
 
         // outer loop for walking the tree to get a path's value
         'walk: loop {
@@ -815,7 +815,14 @@ fn find_wildcard(path: &[u8]) -> (Option<&[u8]>, Option<usize>, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::iter::FromIterator;
+
+    fn params(vec: Vec<(&'static str, &'static str)>) -> Params<'static, 'static> {
+        let mut params = Params::new();
+        for (key, value) in vec {
+            params.push(key, value);
+        }
+        params
+    }
 
     struct TestRequest {
         path: &'static str,
@@ -930,17 +937,17 @@ mod tests {
         check_requests(
             &mut tree,
             vec![
-                TestRequest::new("/a", false, "/a", Params::default()),
-                TestRequest::new("/", true, "", Params::default()),
-                TestRequest::new("/hi", false, "/hi", Params::default()),
-                TestRequest::new("/contact", false, "/contact", Params::default()),
-                TestRequest::new("/co", false, "/co", Params::default()),
-                TestRequest::new("/con", true, "", Params::default()), // key mismatch
-                TestRequest::new("/cona", true, "", Params::default()), // key mismatch
-                TestRequest::new("/no", true, "", Params::default()),  // no matching child
-                TestRequest::new("/ab", false, "/ab", Params::default()),
-                TestRequest::new("/ʯ", false, "/ʯ", Params::default()),
-                TestRequest::new("/β", false, "/β", Params::default()),
+                TestRequest::new("/a", false, "/a", Params::new()),
+                TestRequest::new("/", true, "", Params::new()),
+                TestRequest::new("/hi", false, "/hi", Params::new()),
+                TestRequest::new("/contact", false, "/contact", Params::new()),
+                TestRequest::new("/co", false, "/co", Params::new()),
+                TestRequest::new("/con", true, "", Params::new()), // key mismatch
+                TestRequest::new("/cona", true, "", Params::new()), // key mismatch
+                TestRequest::new("/no", true, "", Params::new()),  // no matching child
+                TestRequest::new("/ab", false, "/ab", Params::new()),
+                TestRequest::new("/ʯ", false, "/ʯ", Params::new()),
+                TestRequest::new("/β", false, "/β", Params::new()),
             ],
         );
 
@@ -975,79 +982,74 @@ mod tests {
         check_requests(
             &mut tree,
             vec![
-                TestRequest::new("/", false, "/", Params::default()),
+                TestRequest::new("/", false, "/", Params::new()),
                 TestRequest::new(
                     "/cmd/test/",
                     false,
                     "/cmd/:tool/",
-                    Params::from_iter(vec![("tool", "test")]),
+                    params(vec![("tool", "test")]),
                 ),
-                TestRequest::new(
-                    "/cmd/test",
-                    true,
-                    "",
-                    Params::from_iter(vec![("tool", "test")]),
-                ),
+                TestRequest::new("/cmd/test", true, "", params(vec![("tool", "test")])),
                 TestRequest::new(
                     "/cmd/test/3",
                     false,
                     "/cmd/:tool/:sub",
-                    Params::from_iter(vec![("tool", "test"), ("sub", "3")]),
+                    params(vec![("tool", "test"), ("sub", "3")]),
                 ),
                 TestRequest::new(
                     "/src/",
                     false,
                     "/src/*filepath",
-                    Params::from_iter(vec![("filepath", "/")]),
+                    params(vec![("filepath", "/")]),
                 ),
                 TestRequest::new(
                     "/src/some/file.png",
                     false,
                     "/src/*filepath",
-                    Params::from_iter(vec![("filepath", "/some/file.png")]),
+                    params(vec![("filepath", "/some/file.png")]),
                 ),
-                TestRequest::new("/search/", false, "/search/", Params::default()),
+                TestRequest::new("/search/", false, "/search/", Params::new()),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé",
                     false,
                     "/search/:query",
-                    Params::from_iter(vec![("query", "someth!ng+in+ünìcodé")]),
+                    params(vec![("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé/",
                     true,
                     "",
-                    Params::from_iter(vec![("query", "someth!ng+in+ünìcodé")]),
+                    params(vec![("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean",
                     false,
                     "/user_:name",
-                    Params::from_iter(vec![("name", "rustacean")]),
+                    params(vec![("name", "rustacean")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean/about",
                     false,
                     "/user_:name/about",
-                    Params::from_iter(vec![("name", "rustacean")]),
+                    params(vec![("name", "rustacean")]),
                 ),
                 TestRequest::new(
                     "/files/js/inc/framework.js",
                     false,
                     "/files/:dir/*filepath",
-                    Params::from_iter(vec![("dir", "js"), ("filepath", "/inc/framework.js")]),
+                    params(vec![("dir", "js"), ("filepath", "/inc/framework.js")]),
                 ),
                 TestRequest::new(
                     "/info/gordon/public",
                     false,
                     "/info/:user/public",
-                    Params::from_iter(vec![("user", "gordon")]),
+                    params(vec![("user", "gordon")]),
                 ),
                 TestRequest::new(
                     "/info/gordon/project/go",
                     false,
                     "/info/:user/project/:project",
-                    Params::from_iter(vec![("user", "gordon"), ("project", "go")]),
+                    params(vec![("user", "gordon"), ("project", "go")]),
                 ),
             ],
         );
@@ -1134,25 +1136,25 @@ mod tests {
         check_requests(
             &mut tree,
             vec![
-                TestRequest::new("/", false, "/", Params::default()),
-                TestRequest::new("/doc/", false, "/doc/", Params::default()),
+                TestRequest::new("/", false, "/", Params::new()),
+                TestRequest::new("/doc/", false, "/doc/", Params::new()),
                 TestRequest::new(
                     "/src/some/file.png",
                     false,
                     "/src/*filepath",
-                    Params::from_iter(vec![("filepath", "/some/file.png")]),
+                    params(vec![("filepath", "/some/file.png")]),
                 ),
                 TestRequest::new(
                     "/search/someth!ng+in+ünìcodé",
                     false,
                     "/search/:query",
-                    Params::from_iter(vec![("query", "someth!ng+in+ünìcodé")]),
+                    params(vec![("query", "someth!ng+in+ünìcodé")]),
                 ),
                 TestRequest::new(
                     "/user_rustacean",
                     false,
                     "/user_:name",
-                    Params::from_iter(vec![("name", "rustacean")]),
+                    params(vec![("name", "rustacean")]),
                 ),
             ],
         );
