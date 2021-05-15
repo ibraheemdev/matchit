@@ -11,3 +11,10 @@ repository = "https://github.com/ibraheemdev/matchit"
 readme = "README.md"
 
 [dependencies]
+# None :)
+
+[dev-dependencies]
+# Benchmarks
+actix-router = "0.2.7"
+regex = "1.5.4"
+route-recognizer = "0.3.0"
