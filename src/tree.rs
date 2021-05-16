@@ -769,13 +769,11 @@ impl<V> Node<V> {
     }
 }
 
-const fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
-    match n {
-        0 => bytes,
-        1 => [bytes[1], bytes[2], bytes[3], 0],
-        2 => [bytes[2], bytes[3], 0, 0],
-        3 => [bytes[3], 0, 0, 0],
-        _ => [0; 4],
+// Shift bytes in array by n bytes left
+pub const fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
+    match u32::from_ne_bytes(bytes).overflowing_shr((n * 8) as u32) {
+        (_, true) => [0; 4],
+        (shifted, false) => shifted.to_ne_bytes(),
     }
 }
 
