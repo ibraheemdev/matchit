@@ -32,18 +32,18 @@ enum NodeType {
 ///
 /// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
-pub struct Node<V> {
+pub struct Node<T> {
     path: Vec<u8>,
     wild_child: bool,
     node_type: NodeType,
     indices: Vec<u8>,
     children: Vec<Self>,
     // See `at_inner` for why an unsafe cell is needed.
-    value: Option<UnsafeCell<V>>,
+    value: Option<UnsafeCell<T>>,
     priority: u32,
 }
 
-impl<V> Default for Node<V> {
+impl<T> Default for Node<T> {
     fn default() -> Self {
         Self {
             path: Vec::new(),
@@ -57,13 +57,13 @@ impl<V> Default for Node<V> {
     }
 }
 
-impl<V> Node<V> {
+impl<T> Node<T> {
     /// Construct a new `Node`.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Insert a value into the tree under the given route.
+    /// Register a value in the tree under the given route.
     /// ```rust
     /// # use matchit::Node;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -73,28 +73,23 @@ impl<V> Node<V> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn insert(&mut self, route: impl Into<String>, value: V) -> Result<(), InsertError> {
+    pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into();
 
         self.priority += 1;
 
         // Empty tree
         if self.path.is_empty() && self.children.is_empty() {
-            self.insert_child(route.as_bytes(), &route, value)?;
+            self.insert_child(route.as_bytes(), &route, val)?;
             self.node_type = NodeType::Root;
             return Ok(());
         }
 
-        self.insert_helper(route.as_bytes(), &route, value)
+        self.insert_helper(route.as_bytes(), &route, val)
     }
 
     #[inline]
-    fn insert_helper(
-        &mut self,
-        mut prefix: &[u8],
-        route: &str,
-        value: V,
-    ) -> Result<(), InsertError> {
+    fn insert_helper(&mut self, mut prefix: &[u8], route: &str, val: T) -> Result<(), InsertError> {
         // Find the longest common prefix.
         // This also implies that the common prefix contains no ':' or '*'
         // since the existing key can't contain those chars.
@@ -129,7 +124,7 @@ impl<V> Node<V> {
             prefix = &prefix[i..];
 
             if self.wild_child {
-                return self.children[0].wild_child_conflict(prefix, route, value);
+                return self.children[0].wild_child_conflict(prefix, route, val);
             }
 
             let idxc = prefix[0];
@@ -137,14 +132,14 @@ impl<V> Node<V> {
             // `/` after param
             if self.node_type == NodeType::Param && idxc == b'/' && self.children.len() == 1 {
                 self.children[0].priority += 1;
-                return self.children[0].insert_helper(prefix, route, value);
+                return self.children[0].insert_helper(prefix, route, val);
             }
 
             // Check if a child with the next path byte exists
             for mut i in 0..self.indices.len() {
                 if idxc == self.indices[i] {
                     i = self.incr_child_priority(i);
-                    return self.children[i].insert_helper(prefix, route, value);
+                    return self.children[i].insert_helper(prefix, route, val);
                 }
             }
 
@@ -155,17 +150,17 @@ impl<V> Node<V> {
                 self.children.push(Self::default());
 
                 let child = self.incr_child_priority(self.indices.len() - 1);
-                return self.children[child].insert_child(prefix, route, value);
+                return self.children[child].insert_child(prefix, route, val);
             }
 
-            return self.insert_child(prefix, route, value);
+            return self.insert_child(prefix, route, val);
         } else {
             // Otherwise add value to current node
             if self.value.is_some() {
                 return Err(InsertError::conflict(route, &prefix, &self.path));
             }
 
-            self.value = Some(UnsafeCell::new(value));
+            self.value = Some(UnsafeCell::new(val));
         }
 
         Ok(())
@@ -204,7 +199,7 @@ impl<V> Node<V> {
         &mut self,
         prefix: &[u8],
         route: &str,
-        value: V,
+        val: T,
     ) -> Result<(), InsertError> {
         self.priority += 1;
 
@@ -216,22 +211,17 @@ impl<V> Node<V> {
       // Check for longer wildcard, e.g. :name and :names
       && (self.path.len() >= prefix.len() || prefix[self.path.len()] == b'/')
         {
-            self.insert_helper(prefix, route, value)
+            self.insert_helper(prefix, route, val)
         } else {
             Err(InsertError::conflict(&route, &prefix, &self.path))
         }
     }
 
-    fn insert_child(
-        &mut self,
-        mut prefix: &[u8],
-        route: &str,
-        value: V,
-    ) -> Result<(), InsertError> {
+    fn insert_child(&mut self, mut prefix: &[u8], route: &str, val: T) -> Result<(), InsertError> {
         let (wildcard, wildcard_index, valid) = find_wildcard(&prefix);
 
         if wildcard_index.is_none() {
-            self.value = Some(UnsafeCell::new(value));
+            self.value = Some(UnsafeCell::new(val));
             self.path = prefix.to_owned();
             return Ok(());
         };
@@ -284,10 +274,10 @@ impl<V> Node<V> {
                 };
 
                 self.children[0].children = vec![child];
-                return self.children[0].children[0].insert_child(prefix, route, value);
+                return self.children[0].children[0].insert_child(prefix, route, val);
             }
             // Otherwise we're done. Insert the value in the new leaf
-            self.children[0].value = Some(UnsafeCell::new(value));
+            self.children[0].value = Some(UnsafeCell::new(val));
             return Ok(());
         }
 
@@ -325,7 +315,7 @@ impl<V> Node<V> {
         let child = Self {
             path: prefix[wildcard_index..].to_owned(),
             node_type: NodeType::CatchAll,
-            value: Some(UnsafeCell::new(value)),
+            value: Some(UnsafeCell::new(val)),
             priority: 1,
             ..Self::default()
         };
@@ -348,7 +338,7 @@ impl<V> Node<V> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn at<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &V>, MatchError> {
+    pub fn at<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &T>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have an immutable reference to self, and we only
@@ -365,7 +355,7 @@ impl<V> Node<V> {
     /// Tries to find a value in the router matching the given path, and returns a mutable
     /// reference to it. If no value can be found it returns a trailing slash redirect
     /// recommendation, see [`tsr`](crate::MatchError::tsr).
-    pub fn at_mut<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &mut V>, MatchError> {
+    pub fn at_mut<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &mut T>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have a unique reference to self, so we can safely
@@ -380,7 +370,7 @@ impl<V> Node<V> {
     // It's a bit sad that we have to introduce unsafe here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
-    fn at_inner<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &UnsafeCell<V>>, MatchError> {
+    fn at_inner<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &UnsafeCell<T>>, MatchError> {
         let mut current = self;
         let mut path = path.as_bytes();
         let mut params = Params::new();

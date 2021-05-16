@@ -65,8 +65,8 @@ impl<'k, 'v> Params<'k, 'v> {
     }
 
     /// Returns an iterator over the parameters in the list.
-    pub fn iter(&self) -> Iter<'_, 'k, 'v> {
-        Iter::new(self)
+    pub fn iter(&self) -> ParamsIter<'_, 'k, 'v> {
+        ParamsIter::new(self)
     }
 
     /// Returns `true` if there are no parameters in the list.
@@ -102,75 +102,33 @@ impl<'k, 'v> Params<'k, 'v> {
     }
 }
 
-impl<'k, 'v> IntoIterator for Params<'k, 'v> {
-    type IntoIter = IntoIter<'k, 'v>;
-    type Item = (&'k str, &'v str);
-
-    fn into_iter(self) -> Self::IntoIter {
-        IntoIter::new(self)
-    }
+/// An iterator over the keys and values of a route's [parameters](crate::Params).
+pub struct ParamsIter<'ps, 'k, 'v> {
+    kind: ParamsIterKind<'ps, 'k, 'v>,
 }
 
-/// An iterator over the keys and values of URL [parameters](crate::Params).
-pub struct Iter<'ps, 'k, 'v> {
-    kind: IterKind<'ps, 'k, 'v>,
-}
-
-impl<'ps, 'k, 'v> Iter<'ps, 'k, 'v> {
+impl<'ps, 'k, 'v> ParamsIter<'ps, 'k, 'v> {
     fn new(params: &'ps Params<'k, 'v>) -> Self {
         let kind = match &params.kind {
-            ParamsKind::Small(arr, len) => IterKind::Small(arr.iter().take(*len)),
-            ParamsKind::Large(vec) => IterKind::Large(vec.iter()),
+            ParamsKind::Small(arr, len) => ParamsIterKind::Small(arr.iter().take(*len)),
+            ParamsKind::Large(vec) => ParamsIterKind::Large(vec.iter()),
         };
         Self { kind }
     }
 }
 
-enum IterKind<'ps, 'k, 'v> {
+enum ParamsIterKind<'ps, 'k, 'v> {
     Small(iter::Take<slice::Iter<'ps, Param<'k, 'v>>>),
     Large(slice::Iter<'ps, Param<'k, 'v>>),
 }
 
-impl<'ps, 'k, 'v> Iterator for Iter<'ps, 'k, 'v> {
+impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
     type Item = (&'k str, &'v str);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.kind {
-            IterKind::Small(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
-            IterKind::Large(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
-        }
-    }
-}
-
-/// An owned iterator over the keys and values of URL [parameters](crate::Params).
-pub struct IntoIter<'k, 'v> {
-    kind: IntoIterKind<'k, 'v>,
-}
-
-impl<'k, 'v> IntoIter<'k, 'v> {
-    fn new(params: Params<'k, 'v>) -> Self {
-        let kind = match params.kind {
-            ParamsKind::Small(arr, len) => {
-                IntoIterKind::Small(std::array::IntoIter::new(arr).take(len))
-            }
-            ParamsKind::Large(vec) => IntoIterKind::Large(vec.into_iter()),
-        };
-        Self { kind }
-    }
-}
-
-enum IntoIterKind<'k, 'v> {
-    Small(iter::Take<std::array::IntoIter<Param<'k, 'v>, SMALL>>),
-    Large(std::vec::IntoIter<Param<'k, 'v>>),
-}
-
-impl<'k, 'v> Iterator for IntoIter<'k, 'v> {
-    type Item = (&'k str, &'v str);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.kind {
-            IntoIterKind::Small(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
-            IntoIterKind::Large(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
+            ParamsIterKind::Small(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
+            ParamsIterKind::Large(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
         }
     }
 }
@@ -201,7 +159,6 @@ mod tests {
         }
 
         assert!(params.iter().eq(vec.clone()));
-        assert!(params.into_iter().eq(vec.clone()));
     }
 
     #[test]
@@ -220,7 +177,6 @@ mod tests {
         }
 
         assert!(params.iter().eq(vec.clone()));
-        assert!(params.into_iter().eq(vec.clone()));
     }
 
     #[test]

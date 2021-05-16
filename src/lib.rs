@@ -105,7 +105,7 @@ mod params;
 mod tree;
 
 pub use error::{InsertError, MatchError};
-pub use params::{IntoIter, Iter, Params};
+pub use params::{Params, ParamsIter};
 pub use tree::{Match, Node};
 
 #[cfg(doctest)]
