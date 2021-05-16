@@ -75,6 +75,7 @@ impl<V> Node<V> {
     /// ```
     pub fn insert(&mut self, route: impl Into<String>, value: V) -> Result<(), InsertError> {
         let route = route.into();
+
         self.priority += 1;
 
         // Empty tree
@@ -300,7 +301,10 @@ impl<V> Node<V> {
         }
 
         // Currently fixed width 1 for '/'
-        wildcard_index -= 1;
+        wildcard_index = wildcard_index
+            .checked_sub(1)
+            .ok_or(InsertError::MalformedPath)?;
+
         if prefix[wildcard_index] != b'/' {
             return Err(InsertError::InvalidCatchAll);
         }
@@ -765,7 +769,6 @@ impl<V> Node<V> {
     }
 }
 
-// Shift bytes in array by n bytes left
 const fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
     match n {
         0 => bytes,
@@ -1523,5 +1526,11 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[test]
+    fn malformed_path() {
+        let mut tree = Node::new();
+        assert_eq!(tree.insert("*x", 1), Err(InsertError::MalformedPath));
     }
 }

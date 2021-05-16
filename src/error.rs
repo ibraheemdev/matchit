@@ -26,6 +26,8 @@ pub enum InsertError {
     UnnamedParam,
     /// Catch-all parameters are only allowed at the end of a path.
     InvalidCatchAll,
+    /// Invalid tokens in the inserted path.
+    MalformedPath,
 }
 
 impl fmt::Display for InsertError {
@@ -44,6 +46,7 @@ impl fmt::Display for InsertError {
                 f,
                 "catch-all parameters are only allowed at the end of a path"
             ),
+            Self::MalformedPath => write!(f, "malformed path"),
         }
     }
 }
