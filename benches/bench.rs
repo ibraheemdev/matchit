@@ -159,7 +159,6 @@ fn call() -> impl Iterator<Item = &'static str> {
 
 fn compare_routers(c: &mut Criterion) {
     let mut group = c.benchmark_group("Compare Routers");
-    //group.significance_level(0.1).sample_size(500);
 
     let mut matchit = matchit::Node::new();
     for route in register!(colon) {
