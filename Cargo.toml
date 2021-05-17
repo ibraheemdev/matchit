@@ -1,12 +1,12 @@
 [package]
 name = "matchit"
-version = "0.3.2"
+version = "0.4.0"
 license = "MIT"
 authors = ["ibraheem <ibrah1440@gmail.com>"]
 edition = "2018"
 description = "A blazing fast URL router and path matcher."
 categories = ["network-programming", "algorithms"]
-keywords = ["router", "path", "tree", "radix", "match", "url"]
+keywords = ["router", "path", "tree", "match", "url"]
 repository = "https://github.com/ibraheemdev/matchit"
 readme = "README.md"
 
