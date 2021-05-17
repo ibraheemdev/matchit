@@ -1411,16 +1411,16 @@ mod tests {
             ("/NO", "", true),
             ("/DOC/GO", "", true),
             // [TODO] unicode vs ascii case sensitivity
-            // ("/π", "/Π", false)
+            // ("/π", "/Π", false),
             // ("/π/", "/Π", true),
-            // ("/u/ÄPFÊL/", "/u/äpfêl/", false)
+            // ("/u/ÄPFÊL/", "/u/äpfêl/", false),
             // ("/u/ÄPFÊL", "/u/äpfêl/", true),
             // ("/u/ÖPFÊL/", "/u/öpfêl", true),
-            // ("/u/ÖPFÊL", "/u/öpfêl", false)
-            // ("/v/äpfêL/", "/v/Äpfêl/", false)
+            // ("/u/ÖPFÊL", "/u/öpfêl", false),
+            // ("/v/äpfêL/", "/v/Äpfêl/", false),
             // ("/v/äpfêL", "/v/Äpfêl/", true),
             // ("/v/öpfêL/", "/v/Öpfêl", true),
-            // ("/v/öpfêL", "/v/Öpfêl", false)
+            // ("/v/öpfêL", "/v/Öpfêl", false),
             ("/w/♬/", "/w/♬", true),
             ("/w/♭", "/w/♭/", true),
             ("/w/𠜎/", "/w/𠜎", true),
@@ -1449,15 +1449,10 @@ mod tests {
 
         // With fixTrailingSlash = true
         for test in &tests {
-            let res = tree.path_ignore_case(test.inn, true);
-            match res {
-                None => (),
-                Some(res) => {
-                    if res != test.out {
-                        panic!("Wrong result for route '{}': {}", res, test.out);
-                    }
-                }
-            };
+            let res = tree.path_ignore_case(test.inn, true).unwrap_or_default();
+            if res != test.out {
+                panic!("Wrong result for route '{}': {}", res, test.out);
+            }
         }
 
         // without fix trailing slash = false
