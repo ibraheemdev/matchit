@@ -106,7 +106,7 @@ impl MatchError {
         self.tsr
     }
 
-    fn new(tsr: bool) -> Self {
+    pub(crate) fn new(tsr: bool) -> Self {
         Self { tsr }
     }
 }
