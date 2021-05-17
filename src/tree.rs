@@ -355,7 +355,7 @@ impl<T> Node<T> {
     /// Tries to find a value in the router matching the given path, and returns a mutable
     /// reference to it. If no value can be found it returns a trailing slash redirect
     /// recommendation, see [`tsr`](crate::MatchError::tsr).
-    pub fn at_mut<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &mut T>, MatchError> {
+    pub fn at_mut<'p>(&mut self, path: &'p str) -> Result<Match<'_, 'p, &mut T>, MatchError> {
         match self.at_inner(path) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have a unique reference to self, so we can safely
