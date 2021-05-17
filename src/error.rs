@@ -106,8 +106,7 @@ impl MatchError {
         self.tsr
     }
 
-    /// Creates a new match error with the given `tsr`.
-    pub fn new(tsr: bool) -> Self {
+    fn new(tsr: bool) -> Self {
         Self { tsr }
     }
 }
