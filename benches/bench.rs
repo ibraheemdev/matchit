@@ -1,7 +1,4 @@
-#![feature(test, bench_black_box)]
-
-extern crate test;
-use test::Bencher;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 macro_rules! register {
     (colon) => {{
@@ -160,53 +157,68 @@ fn call() -> impl Iterator<Item = &'static str> {
     std::array::IntoIter::new(arr)
 }
 
-#[bench]
-fn bench_matchit(b: &mut Bencher) {
-    let mut tree = matchit::Node::default();
+fn compare_routers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Compare Routers");
+    //group.significance_level(0.1).sample_size(500);
+
+    let mut matchit = matchit::Node::new();
     for route in register!(colon) {
-        tree.insert(route, true).unwrap();
+        matchit.insert(route, true).unwrap();
     }
-    b.iter(|| {
-        for call in call() {
-            let _ = std::hint::black_box(tree.at(call));
-        }
+    group.bench_function("matchit", |b| {
+        b.iter(|| {
+            for route in call() {
+                black_box(matchit.at(route).unwrap());
+            }
+        });
     });
-}
 
-#[bench]
-fn bench_regex_set(b: &mut Bencher) {
-    let set = regex::RegexSet::new(register!(regex)).unwrap();
-    b.iter(|| {
-        for call in call() {
-            std::hint::black_box(set.matches(call));
-        }
+    let gonzales = gonzales::RouterBuilder::new().build(register!(brackets));
+    group.bench_function("gonzales", |b| {
+        b.iter(|| {
+            for route in call() {
+                black_box(gonzales.route(route).unwrap());
+            }
+        });
     });
-}
 
-#[bench]
-fn bench_actix(b: &mut Bencher) {
-    let mut router = actix_router::Router::<bool>::build();
+    let mut actix = actix_router::Router::<bool>::build();
     for route in register!(brackets) {
-        router.path(route, true);
+        actix.path(route, true);
     }
-    let router = router.finish();
-    b.iter(|| {
-        for call in call() {
-            let mut path = actix_router::Path::new(call);
-            std::hint::black_box(router.recognize(&mut path));
-        }
+    let actix = actix.finish();
+    group.bench_function("actix", |b| {
+        b.iter(|| {
+            for route in call() {
+                let mut path = actix_router::Path::new(route);
+                black_box(actix.recognize(&mut path).unwrap());
+            }
+        });
     });
+
+    let regex_set = regex::RegexSet::new(register!(regex)).unwrap();
+    group.bench_function("regex", |b| {
+        b.iter(|| {
+            for route in call() {
+                black_box(regex_set.matches(route));
+            }
+        });
+    });
+
+    let mut route_recognizer = route_recognizer::Router::new();
+    for route in register!(colon) {
+        route_recognizer.add(route, true);
+    }
+    group.bench_function("route-recognizer", |b| {
+        b.iter(|| {
+            for route in call() {
+                black_box(route_recognizer.recognize(route).unwrap());
+            }
+        });
+    });
+    
+    group.finish();
 }
 
-#[bench]
-fn bench_route_recognizer(b: &mut Bencher) {
-    let mut router = route_recognizer::Router::new();
-    for route in register!(colon) {
-        router.add(route, true);
-    }
-    b.iter(|| {
-        for call in call() {
-            let _ = std::hint::black_box(router.recognize(call));
-        }
-    });
-}
+criterion_group!(benches, compare_routers);
+criterion_main!(benches);

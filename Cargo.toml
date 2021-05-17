@@ -4,9 +4,9 @@ version = "0.3.2"
 license = "MIT"
 authors = ["ibraheem <ibrah1440@gmail.com>"]
 edition = "2018"
-description = "A high performance URL path (route) matcher based on a radix tree."
+description = "A blazing fast URL router and path matcher."
 categories = ["network-programming", "algorithms"]
-keywords = ["path", "tree", "radix", "match", "url"]
+keywords = ["router", "path", "tree", "radix", "match", "url"]
 repository = "https://github.com/ibraheemdev/matchit"
 readme = "README.md"
 
@@ -15,6 +15,12 @@ readme = "README.md"
 
 [dev-dependencies]
 # Benchmarks
+criterion = "0.3.4"
 actix-router = "0.2.7"
 regex = "1.5.4"
 route-recognizer = "0.3.0"
+gonzales = "0.0.2-beta"
+
+[[bench]]
+name = "bench"
+harness = false

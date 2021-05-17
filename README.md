@@ -105,9 +105,18 @@ For even better scalability, the child nodes on each tree level are ordered by p
 # Benchmarks
 
 ```text
-running 4 tests
-test bench_actix            ... bench:      35,165 ns/iter (+/- 310)
-test bench_matchit          ... bench:         233 ns/iter (+/- 10)
-test bench_regex_set        ... bench:      22,160 ns/iter (+/- 190)
-test bench_route_recognizer ... bench:       4,510 ns/iter (+/- 28)
+Compare Routers/matchit 
+time:   [276.36 ns 276.70 ns 277.03 ns]
+
+Compare Routers/gonzales
+time:   [318.69 ns 318.97 ns 319.29 ns]
+
+Compare Routers/actix   
+time:   [36.218 us 36.241 us 36.265 us]
+
+Compare Routers/regex   
+time:   [24.111 us 24.221 us 24.345 us]
+
+Compare Routers/route-recognizer
+time:   [4.5428 us 4.5599 us 4.5801 us]
 ```
