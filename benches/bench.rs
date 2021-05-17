@@ -216,7 +216,7 @@ fn compare_routers(c: &mut Criterion) {
             }
         });
     });
-    
+
     group.finish();
 }
 
