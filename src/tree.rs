@@ -372,21 +372,21 @@ impl<T> Node<T> {
     // `at_mut`.
     fn at_inner<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &UnsafeCell<T>>, MatchError> {
         let mut current = self;
-        let mut path = path.as_bytes();
+        let mut path = path;
         let mut params = Params::new();
 
         // outer loop for walking the tree to get a path's value
         'walk: loop {
             let prefix = &current.path;
             if path.len() > prefix.len() {
-                if prefix == &path[..prefix.len()] {
+                if prefix == &path[..prefix.len()].as_bytes() {
                     path = &path[prefix.len()..];
 
                     // If this node does not have a wildcard (Param or CatchAll)
                     // child, we can just look up the next child node and continue
                     // to walk down the tree
                     if !current.wild_child {
-                        let idxc = path[0];
+                        let idxc = path.as_bytes()[0];
                         for (i, c) in current.indices.iter().enumerate() {
                             if idxc == *c {
                                 current = &current.children[i];
@@ -396,7 +396,7 @@ impl<T> Node<T> {
                         // Nothing found.
                         // We can recommend to redirect to the same URL without a
                         // trailing slash if a leaf exists for that path.
-                        let tsr = path == [b'/'] && current.value.is_some();
+                        let tsr = path == "/" && current.value.is_some();
                         return Err(MatchError::new(tsr));
                     }
 
@@ -405,14 +405,11 @@ impl<T> Node<T> {
                         NodeType::Param => {
                             // find param end (either '/' or path end)
                             let mut end = 0;
-                            while end < path.len() && path[end] != b'/' {
+                            while end < path.len() && path.as_bytes()[end] != b'/' {
                                 end += 1;
                             }
 
-                            params.push(
-                                str::from_utf8(&current.path[1..]).unwrap(),
-                                str::from_utf8(&path[..end]).unwrap(),
-                            );
+                            params.push(str::from_utf8(&current.path[1..]).unwrap(), &path[..end]);
 
                             // we need to go deeper!
                             if end < path.len() {
@@ -442,10 +439,7 @@ impl<T> Node<T> {
                             return Err(MatchError::new(false));
                         }
                         NodeType::CatchAll => {
-                            params.push(
-                                str::from_utf8(&current.path[2..]).unwrap(),
-                                str::from_utf8(path).unwrap(),
-                            );
+                            params.push(str::from_utf8(&current.path[2..]).unwrap(), path);
 
                             return match current.value.as_ref() {
                                 Some(value) => Ok(Match { value, params }),
@@ -455,7 +449,7 @@ impl<T> Node<T> {
                         _ => unreachable!(),
                     }
                 }
-            } else if path == prefix {
+            } else if path.as_bytes() == prefix {
                 // We should have reached the node containing the value.
                 // Check if this node has a value registered.
                 if let Some(value) = current.value.as_ref() {
@@ -465,7 +459,7 @@ impl<T> Node<T> {
                 // If there is no value for this route, but this route has a
                 // wildcard child, there must be a value for this path with an
                 // additional trailing slash
-                if path == [b'/'] && current.wild_child && current.node_type != NodeType::Root {
+                if path == "/" && current.wild_child && current.node_type != NodeType::Root {
                     return Err(MatchError::new(true));
                 }
 
@@ -486,10 +480,10 @@ impl<T> Node<T> {
 
             // Nothing found. We can recommend to redirect to the same URL with an
             // extra trailing slash if a leaf exists for that path
-            let tsr = (path == [b'/'])
+            let tsr = (path == "/")
                 || (prefix.len() == path.len() + 1
                     && prefix[path.len()] == b'/'
-                    && path == &prefix[..prefix.len() - 1]
+                    && path.as_bytes() == &prefix[..prefix.len() - 1]
                     && current.value.is_some());
 
             return Err(MatchError::new(tsr));
