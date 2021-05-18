@@ -379,7 +379,7 @@ impl<T> Node<T> {
         'walk: loop {
             let prefix = &current.path;
             if path.len() > prefix.len() {
-                if prefix == &path[..prefix.len()].as_bytes() {
+                if prefix == &path.as_bytes()[..prefix.len()] {
                     path = &path[prefix.len()..];
 
                     // If this node does not have a wildcard (Param or CatchAll)
