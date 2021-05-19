@@ -387,48 +387,51 @@ impl<T> Node<T> {
                     // to walk down the tree
                     if !current.wild_child {
                         let idxc = path.as_bytes()[0];
-                        for (i, c) in current.indices.iter().enumerate() {
-                            if idxc == *c {
+                        match current.indices.iter().position(|&c| c == idxc) {
+                            Some(i) => {
                                 current = &current.children[i];
                                 continue 'walk;
                             }
+                            None => {
+                                // Nothing found.
+                                // We can recommend to redirect to the same URL without a
+                                // trailing slash if a leaf exists for that path.
+                                let tsr = path == "/" && current.value.is_some();
+                                return Err(MatchError::new(tsr));
+                            }
                         }
-                        // Nothing found.
-                        // We can recommend to redirect to the same URL without a
-                        // trailing slash if a leaf exists for that path.
-                        let tsr = path == "/" && current.value.is_some();
-                        return Err(MatchError::new(tsr));
                     }
 
                     current = &current.children[0];
                     match current.node_type {
                         NodeType::Param => {
                             // find param end (either '/' or path end)
-                            let mut end = 0;
-                            while end < path.len() && path.as_bytes()[end] != b'/' {
-                                end += 1;
-                            }
+                            let end = path
+                                .as_bytes()
+                                .iter()
+                                .position(|&c| c == b'/')
+                                .unwrap_or(path.len());
 
                             params.push(str::from_utf8(&current.path[1..]).unwrap(), &path[..end]);
 
                             // we need to go deeper!
                             if end < path.len() {
-                                if !current.children.is_empty() {
-                                    path = &path[end..];
-
-                                    current = &current.children[0];
-                                    continue 'walk;
+                                // ... but we can't
+                                if current.children.is_empty() {
+                                    let tsr = path.len() == end + 1;
+                                    return Err(MatchError::new(tsr));
                                 }
 
-                                // ... but we can't
-                                let tsr = path.len() == end + 1;
-                                return Err(MatchError::new(tsr));
+                                path = &path[end..];
+                                current = &current.children[0];
+                                continue 'walk;
                             }
 
                             if let Some(value) = current.value.as_ref() {
                                 return Ok(Match { value, params });
                             } else if current.children.len() == 1 {
                                 current = &current.children[0];
+
                                 // No value found. Check if a value for this path + a
                                 // trailing slash exists for TSR recommendation
                                 let tsr = (current.path == [b'/'] && current.value.is_some())
@@ -465,14 +468,12 @@ impl<T> Node<T> {
 
                 // No value found. Check if a value for this path + a
                 // trailing slash exists for trailing slash recommendation
-                for (i, c) in current.indices.iter().enumerate() {
-                    if *c == b'/' {
-                        current = &current.children[i];
-                        let tsr = (current.path.len() == 1 && current.value.is_some())
-                            || (current.node_type == NodeType::CatchAll
-                                && current.children[0].value.is_some());
-                        return Err(MatchError::new(tsr));
-                    }
+                if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
+                    current = &current.children[i];
+                    let tsr = (current.path.len() == 1 && current.value.is_some())
+                        || (current.node_type == NodeType::CatchAll
+                            && current.children[0].value.is_some());
+                    return Err(MatchError::new(tsr));
                 }
 
                 return Err(MatchError::new(false));
