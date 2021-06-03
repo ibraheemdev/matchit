@@ -19,8 +19,13 @@ criterion = "0.3.4"
 actix-router = "0.2.7"
 regex = "1.5.4"
 route-recognizer = "0.3.0"
-gonzales = "0.0.2-beta"
+gonzales = "0.0.3-beta"
 
 [[bench]]
 name = "bench"
 harness = false
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1

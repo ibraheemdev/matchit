@@ -167,7 +167,7 @@ fn compare_routers(c: &mut Criterion) {
     group.bench_function("matchit", |b| {
         b.iter(|| {
             for route in call() {
-                black_box(matchit.at(route).unwrap());
+                black_box(matchit.at(route.as_bytes()).unwrap());
             }
         });
     });
