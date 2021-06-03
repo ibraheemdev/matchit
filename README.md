@@ -107,7 +107,7 @@ As it turns out, this method of routing is extremely fast. In fact, `matchit` is
 
 ```text
 Compare Routers/matchit 
-time:   [227.53 ns 228.32 ns 229.29 ns]
+time:   [172.69 ns 173.29 ns 173.92 ns]
 
 Compare Routers/actix   
 time:   [36.218 us 36.241 us 36.265 us]
