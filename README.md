@@ -102,11 +102,11 @@ For even better scalability, the child nodes on each tree level are ordered by p
 
 # Benchmarks
 
-As it turns out, this method of routing is extremely fast. In fact, `matchit` is one of the fastest, if not *the* fastest router out there. Here's a simple benchmark matching 4 paths against 130 registered routes. Matchit find the correct route in under 300 nanoseconds, blowing other regex based routers out of the water. You can view the benchmark code in the [`bench.rs`](https://github.com/ibraheemdev/matchit/blob/master/benches/bench.rs) file. 
+As it turns out, this method of routing is extremely fast. In fact, `matchit` is one of the fastest, if not *the* fastest router out there. Here's a simple benchmark matching 4 paths against 130 registered routes. Matchit find the correct route in under 200 nanoseconds, blowing other routers out of the water. You can view the benchmark code in the [`bench.rs`](https://github.com/ibraheemdev/matchit/blob/master/benches/bench.rs) file. 
 
 ```text
 Compare Routers/matchit 
-time:   [227.53 ns 228.32 ns 229.29 ns]
+time:   [172.69 ns 173.29 ns 173.92 ns]
 
 Compare Routers/actix   
 time:   [36.218 us 36.241 us 36.265 us]
