@@ -86,17 +86,17 @@ impl MatchError {
     /// matcher.insert("/blog/", "Our blog.")?;
     ///
     /// // a route exists without the trailing slash
-    /// if let Err(err) = matcher.at(b"/home/") {
+    /// if let Err(err) = matcher.at("/home/") {
     ///     assert!(err.tsr());
     /// }
     ///
     /// // a route exists with a trailing slash
-    /// if let Err(err) = matcher.at(b"/blog") {
+    /// if let Err(err) = matcher.at("/blog") {
     ///     assert!(err.tsr());
     /// }
     ///
     /// // no routes match, with or without a trailing slash
-    /// if let Err(err) = matcher.at(b"/foobar") {
+    /// if let Err(err) = matcher.at("/foobar") {
     ///     assert!(!err.tsr());
     /// }
     /// # Ok(())

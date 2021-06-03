@@ -9,23 +9,33 @@ struct Param<'k, 'v> {
     value: &'v [u8],
 }
 
+impl<'k, 'v> Param<'k, 'v> {
+    // this could be from_utf8_unchecked, but we'll keep this safe for now
+    fn key_str(&self) -> &'k str {
+        std::str::from_utf8(self.key).unwrap()
+    }
+
+    fn value_str(&self) -> &'v str {
+        std::str::from_utf8(self.value).unwrap()
+    }
+}
+
 /// A list of parameters returned by a route match.
 ///
 /// ```rust
-/// # use std::str;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// # let mut matcher = matchit::Node::new();
 /// # matcher.insert("/users/:id", true).unwrap();
-/// let matched = matcher.at(b"/users/978")?;
+/// let matched = matcher.at("/users/1")?;
 ///
 /// // you can iterate through the keys and values
 /// for (key, value) in matched.params.iter() {
-///     println!("key: {}, value: {}", str::from_utf8(key)?, str::from_utf8(value)?);
+///     println!("key: {}, value: {}", key, value);
 /// }
 ///
 /// // or get a specific value by key
-/// let id = matched.params.get("id").unwrap();
-/// assert_eq!(id, b"978");
+/// let id = matched.params.get("id");
+/// assert_eq!(id, Some("1"));
 /// # Ok(())
 /// # }
 /// ```
@@ -52,18 +62,18 @@ impl<'k, 'v> Params<'k, 'v> {
     }
 
     /// Returns the value of the first parameter registered matched for the given key.
-    pub fn get(&self, key: impl AsRef<[u8]>) -> Option<&'v [u8]> {
+    pub fn get(&self, key: impl AsRef<[u8]>) -> Option<&'v str> {
         match &self.kind {
             ParamsKind::None => None,
             ParamsKind::Small(arr, len) => arr
                 .iter()
                 .take(*len)
                 .find(|param| param.key == key.as_ref())
-                .map(|param| param.value),
+                .map(|param| param.value_str()),
             ParamsKind::Large(vec) => vec
                 .iter()
                 .find(|param| param.key == key.as_ref())
-                .map(|param| param.value),
+                .map(|param| param.value_str()),
         }
     }
 
@@ -132,13 +142,17 @@ enum ParamsIterKind<'ps, 'k, 'v> {
 }
 
 impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
-    type Item = (&'k [u8], &'v [u8]);
+    type Item = (&'k str, &'v str);
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.kind {
             ParamsIterKind::None => None,
-            ParamsIterKind::Small(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
-            ParamsIterKind::Large(ref mut iter) => iter.next().map(|p| (p.key, p.value)),
+            ParamsIterKind::Small(ref mut iter) => {
+                iter.next().map(|p| (p.key_str(), p.value_str()))
+            }
+            ParamsIterKind::Large(ref mut iter) => {
+                iter.next().map(|p| (p.key_str(), p.value_str()))
+            }
         }
     }
 }
@@ -154,17 +168,17 @@ mod tests {
 
     #[test]
     fn heap_alloc() {
-        let vec: Vec<(&[u8], &[u8])> = vec![
-            (b"hello", b"hello"),
-            (b"world", b"world"),
-            (b"foo", b"foo"),
-            (b"bar", b"bar"),
-            (b"baz", b"baz"),
+        let vec = vec![
+            ("hello", "hello"),
+            ("world", "world"),
+            ("foo", "foo"),
+            ("bar", "bar"),
+            ("baz", "baz"),
         ];
 
         let mut params = Params::new();
         for (key, value) in vec.clone() {
-            params.push(key, value);
+            params.push(key.as_bytes(), value.as_bytes());
             assert_eq!(params.get(key), Some(value));
         }
 
@@ -178,12 +192,11 @@ mod tests {
 
     #[test]
     fn stack_alloc() {
-        let vec: Vec<(&[u8], &[u8])> =
-            vec![(b"hello", b"hello"), (b"world", b"world"), (b"baz", b"baz")];
+        let vec = vec![("hello", "hello"), ("world", "world"), ("baz", "baz")];
 
         let mut params = Params::new();
         for (key, value) in vec.clone() {
-            params.push(key, value);
+            params.push(key.as_bytes(), value.as_bytes());
             assert_eq!(params.get(key), Some(value));
         }
 

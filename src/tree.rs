@@ -333,13 +333,13 @@ impl<T> Node<T> {
     /// let mut matcher = Node::new();
     /// matcher.insert("/home", "Welcome!")?;
     ///
-    /// let matched = matcher.at(b"/home").unwrap();
+    /// let matched = matcher.at("/home").unwrap();
     /// assert_eq!(*matched.value, "Welcome!");
     /// # Ok(())
     /// # }
     /// ```
-    pub fn at<'p>(&self, path: &'p [u8]) -> Result<Match<'_, 'p, &T>, MatchError> {
-        match self.at_inner(path) {
+    pub fn at<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &T>, MatchError> {
+        match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have an immutable reference to self, and we only
                 // expose mutable references to value through &mut self, so we
@@ -355,8 +355,8 @@ impl<T> Node<T> {
     /// Tries to find a value in the router matching the given path, and returns a mutable
     /// reference to it. If no value can be found it returns a trailing slash redirect
     /// recommendation, see [`tsr`](crate::MatchError::tsr).
-    pub fn at_mut<'p>(&mut self, path: &'p [u8]) -> Result<Match<'_, 'p, &mut T>, MatchError> {
-        match self.at_inner(path) {
+    pub fn at_mut<'p>(&mut self, path: &'p str) -> Result<Match<'_, 'p, &mut T>, MatchError> {
+        match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have a unique reference to self, so we can safely
                 // expose a unique reference to value of self's lifetime
@@ -370,6 +370,8 @@ impl<T> Node<T> {
     // It's a bit sad that we have to introduce unsafe here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
+
+    #[inline(always)]
     fn at_inner<'p>(&self, path: &'p [u8]) -> Result<Match<'_, 'p, &UnsafeCell<T>>, MatchError> {
         let mut current = self;
         let mut path = path;
@@ -826,7 +828,7 @@ mod tests {
 
     fn check_requests(tree: &mut Node<String>, requests: TestRequests) {
         for request in requests {
-            let res = tree.at(request.path.as_bytes());
+            let res = tree.at(request.path);
 
             match res {
                 Err(_) => {
@@ -852,13 +854,13 @@ mod tests {
                     );
 
                     // test at_mut
-                    let res_mut = tree.at_mut(request.path.as_bytes()).unwrap();
+                    let res_mut = tree.at_mut(request.path).unwrap();
                     res_mut.value.push_str("CHECKED");
 
-                    let res = tree.at(request.path.as_bytes()).unwrap();
+                    let res = tree.at(request.path).unwrap();
                     assert!(res.value.contains("CHECKED"));
 
-                    let res_mut = tree.at_mut(request.path.as_bytes()).unwrap();
+                    let res_mut = tree.at_mut(request.path).unwrap();
                     *res_mut.value = res_mut.value.replace("CHECKED", "");
                 }
             };
@@ -1233,7 +1235,7 @@ mod tests {
         ];
 
         for route in tsr_routes {
-            let res = tree.at(route.as_bytes());
+            let res = tree.at(route);
 
             match res {
                 Ok(_) => {
@@ -1250,7 +1252,7 @@ mod tests {
         let no_tsr_routes = vec!["/", "/no", "/no/", "/_", "/_/", "/api/world/abc"];
 
         for route in no_tsr_routes {
-            let res = tree.at(route.as_bytes());
+            let res = tree.at(route);
 
             match res {
                 Ok(_) => {
@@ -1271,7 +1273,7 @@ mod tests {
 
         tree.insert("/:test", "/:test".to_owned()).unwrap();
 
-        let res = tree.at(b"/");
+        let res = tree.at("/");
 
         match res {
             Ok(_) => {
