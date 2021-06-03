@@ -62,17 +62,17 @@ impl<'k, 'v> Params<'k, 'v> {
     }
 
     /// Returns the value of the first parameter registered matched for the given key.
-    pub fn get(&self, key: impl AsRef<[u8]>) -> Option<&'v str> {
+    pub fn get(&self, key: impl AsRef<str>) -> Option<&'v str> {
         match &self.kind {
             ParamsKind::None => None,
             ParamsKind::Small(arr, len) => arr
                 .iter()
                 .take(*len)
-                .find(|param| param.key == key.as_ref())
+                .find(|param| param.key == key.as_ref().as_bytes())
                 .map(|param| param.value_str()),
             ParamsKind::Large(vec) => vec
                 .iter()
-                .find(|param| param.key == key.as_ref())
+                .find(|param| param.key == key.as_ref().as_bytes())
                 .map(|param| param.value_str()),
         }
     }
