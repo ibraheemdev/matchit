@@ -370,6 +370,7 @@ impl<T> Node<T> {
     // It's a bit sad that we have to introduce unsafe here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
+    #[inline(always)]
     fn at_inner<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &UnsafeCell<T>>, MatchError> {
         let mut current = self;
         let mut path = path;
