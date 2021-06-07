@@ -43,6 +43,10 @@ pub struct Node<T> {
     priority: u32,
 }
 
+// SAFETY: we expose `value` per rust's usual borrowing rules, so we can just delegate these traits
+unsafe impl<T: Send> Send for Node<T> {}
+unsafe impl<T: Sync> Sync for Node<T> {}
+
 impl<T> Default for Node<T> {
     fn default() -> Self {
         Self {
@@ -341,10 +345,8 @@ impl<T> Node<T> {
     pub fn at<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &T>, MatchError> {
         match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
-                // SAFETY: We have an immutable reference to self, and we only
-                // expose mutable references to value through &mut self, so we
-                // can give safely expose an immmutable reference to value of
-                // self's lifetime
+                // SAFETY: We only expose unique references to value through &mut self
+                // and pointer is always non-null
                 value: unsafe { &*v.value.get() },
                 params: v.params,
             }),
@@ -358,8 +360,7 @@ impl<T> Node<T> {
     pub fn at_mut<'p>(&mut self, path: &'p str) -> Result<Match<'_, 'p, &mut T>, MatchError> {
         match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
-                // SAFETY: We have a unique reference to self, so we can safely
-                // expose a unique reference to value of self's lifetime
+                // SAFETY: We have a unique reference to self
                 value: unsafe { &mut *v.value.get() },
                 params: v.params,
             }),

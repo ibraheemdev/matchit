@@ -55,13 +55,12 @@ enum ParamsKind<'k, 'v> {
 }
 
 impl<'k, 'v> Params<'k, 'v> {
-    /// Creates a new list of URL parameters.
     pub(crate) fn new() -> Self {
         let kind = ParamsKind::None;
         Self { kind }
     }
 
-    /// Returns the value of the first parameter registered matched for the given key.
+    /// Returns the value of the first parameter registered under the given key.
     pub fn get(&self, key: impl AsRef<str>) -> Option<&'v str> {
         match &self.kind {
             ParamsKind::None => None,
