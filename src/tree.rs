@@ -342,7 +342,7 @@ impl<T> Node<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn at<'p>(&self, path: &'p str) -> Result<Match<'_, 'p, &T>, MatchError> {
+    pub fn at<'n, 'p>(&'n self, path: &'p str) -> Result<Match<'n, 'p, &'n T>, MatchError> {
         match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
                 // SAFETY: We only expose unique references to value through &mut self
@@ -357,7 +357,7 @@ impl<T> Node<T> {
     /// Tries to find a value in the router matching the given path, and returns a mutable
     /// reference to it. If no value can be found it returns a trailing slash redirect
     /// recommendation, see [`tsr`](crate::MatchError::tsr).
-    pub fn at_mut<'p>(&mut self, path: &'p str) -> Result<Match<'_, 'p, &mut T>, MatchError> {
+    pub fn at_mut<'n, 'p>(&'n mut self, path: &'p str) -> Result<Match<'n, 'p, &'n mut T>, MatchError> {
         match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
                 // SAFETY: We have a unique reference to self
@@ -372,7 +372,7 @@ impl<T> Node<T> {
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
     #[inline(always)]
-    fn at_inner<'p>(&self, path: &'p [u8]) -> Result<Match<'_, 'p, &UnsafeCell<T>>, MatchError> {
+    fn at_inner<'n, 'p>(&'n self, path: &'p [u8]) -> Result<Match<'n, 'p, &'n UnsafeCell<T>>, MatchError> {
         let mut current = self;
         let mut path = path;
         let mut params = Params::new();
