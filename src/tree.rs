@@ -33,7 +33,7 @@ enum NodeType {
 /// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
 pub struct Node<T> {
-    path: Vec<u8>,
+    prefix: Vec<u8>,
     wild_child: bool,
     node_type: NodeType,
     indices: Vec<u8>,
@@ -50,7 +50,7 @@ unsafe impl<T: Sync> Sync for Node<T> {}
 impl<T> Default for Node<T> {
     fn default() -> Self {
         Self {
-            path: Vec::new(),
+            prefix: Vec::new(),
             wild_child: false,
             node_type: NodeType::Static,
             indices: Vec::new(),
@@ -67,7 +67,7 @@ impl<T> Node<T> {
         Self::default()
     }
 
-    /// Register a value in the tree under the given route.
+    /// Register a value in the tree under the given path.
     /// ```rust
     /// # use matchit::Node;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -77,102 +77,132 @@ impl<T> Node<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
-        let route = route.into();
+    pub fn insert(&mut self, path: impl Into<String>, val: T) -> Result<(), InsertError> {
+        let path = path.into().into_bytes();
+        let mut prefix = path.as_ref();
 
         self.priority += 1;
 
         // Empty tree
-        if self.path.is_empty() && self.children.is_empty() {
-            self.insert_child(route.as_bytes(), &route, val)?;
+        if self.prefix.is_empty() && self.children.is_empty() {
+            self.insert_child(&prefix, &path, val)?;
             self.node_type = NodeType::Root;
             return Ok(());
         }
 
-        self.insert_helper(route.as_bytes(), &route, val)
-    }
+        let mut current = self;
 
-    #[inline]
-    fn insert_helper(&mut self, mut prefix: &[u8], route: &str, val: T) -> Result<(), InsertError> {
-        // Find the longest common prefix.
-        // This also implies that the common prefix contains no ':' or '*'
-        // since the existing key can't contain those chars.
-        let mut i = 0;
-        let max = min(prefix.len(), self.path.len());
+        'walk: loop {
+            // Find the longest common prefix.
+            // This also implies that the common prefix contains no ':' or '*'
+            // since the existing key can't contain those chars.
+            let mut i = 0;
+            let max = min(prefix.len(), current.prefix.len());
 
-        while i < max && prefix[i] == self.path[i] {
-            i += 1;
-        }
-
-        // Split edge
-        if i < self.path.len() {
-            let mut child = Self {
-                path: self.path[i..].to_owned(),
-                wild_child: self.wild_child,
-                indices: self.indices.to_owned(),
-                value: self.value.take(),
-                priority: self.priority - 1,
-                ..Self::default()
-            };
-
-            mem::swap(&mut self.children, &mut child.children);
-
-            self.children = vec![child];
-            self.indices = self.path[i..=i].to_owned();
-            self.path = prefix[..i].to_owned();
-            self.wild_child = false;
-        }
-
-        // Make new node a child of this node
-        if prefix.len() > i {
-            prefix = &prefix[i..];
-
-            if self.wild_child {
-                return self.children[0].wild_child_conflict(prefix, route, val);
+            while i < max && prefix[i] == current.prefix[i] {
+                i += 1;
             }
 
-            let idxc = prefix[0];
+            // Split edge
+            if i < current.prefix.len() {
+                let mut child = Self {
+                    prefix: current.prefix[i..].to_owned(),
+                    wild_child: current.wild_child,
+                    indices: current.indices.to_owned(),
+                    value: current.value.take(),
+                    priority: current.priority - 1,
+                    ..Self::default()
+                };
 
-            // `/` after param
-            if self.node_type == NodeType::Param && idxc == b'/' && self.children.len() == 1 {
-                self.children[0].priority += 1;
-                return self.children[0].insert_helper(prefix, route, val);
+                mem::swap(&mut current.children, &mut child.children);
+
+                current.children = vec![child];
+                current.indices = current.prefix[i..=i].to_owned();
+                current.prefix = prefix[..i].to_owned();
+                current.wild_child = false;
             }
 
-            // Check if a child with the next path byte exists
-            for mut i in 0..self.indices.len() {
-                if idxc == self.indices[i] {
-                    i = self.incr_child_priority(i);
-                    return self.children[i].insert_helper(prefix, route, val);
+            // Make new node a child of this node
+            if prefix.len() > i {
+                prefix = &prefix[i..];
+
+                if current.wild_child {
+                    current = &mut current.children[0];
+                    current.priority += 1;
+
+                    // Check if the wildcard matches
+                    if prefix.len() >= current.prefix.len()
+                    && current.prefix == prefix[..current.prefix.len()]
+                    // Adding a child to a CatchAll Node is not possible
+                    && current.node_type != NodeType::CatchAll
+                    // Check for longer wildcard, e.g. :name and :names
+                    && (current.prefix.len() >= prefix.len() || prefix[current.prefix.len()] == b'/')
+                    {
+                        continue 'walk;
+                    } else {
+                        return Err(InsertError::conflict(&path, &prefix, &current.prefix));
+                    }
                 }
+
+                let idxc = prefix[0];
+
+                // `/` after param
+                if current.node_type == NodeType::Param
+                    && idxc == b'/'
+                    && current.children.len() == 1
+                {
+                    current = &mut current.children[0];
+                    current.priority += 1;
+
+                    continue 'walk;
+                }
+
+                // Check if a child with the next path byte exists
+                for mut i in 0..current.indices.len() {
+                    if idxc == current.indices[i] {
+                        i = current.update_child_priority(i);
+                        current = &mut current.children[i];
+
+                        continue 'walk;
+                    }
+                }
+
+                // Otherwise insert it
+                if idxc != b':' && idxc != b'*' {
+                    current.indices.push(idxc);
+                    current.children.push(Self::default());
+                    current.update_child_priority(current.indices.len() - 1);
+                    current = current.children.last_mut().unwrap();
+                }
+
+                return current.insert_child(prefix, &path, val);
             }
 
-            // Otherwise insert it
-            if idxc != b':' && idxc != b'*' {
-                self.indices.push(idxc);
-
-                self.children.push(Self::default());
-
-                let child = self.incr_child_priority(self.indices.len() - 1);
-                return self.children[child].insert_child(prefix, route, val);
-            }
-
-            return self.insert_child(prefix, route, val);
-        } else {
             // Otherwise add value to current node
-            if self.value.is_some() {
-                return Err(InsertError::conflict(route, &prefix, &self.path));
+            if current.value.is_some() {
+                return Err(InsertError::conflict(&path, &prefix, &current.prefix));
             }
 
-            self.value = Some(UnsafeCell::new(val));
-        }
+            current.value = Some(UnsafeCell::new(val));
 
-        Ok(())
+            return Ok(());
+        }
     }
+
+    // add a child node, keeping wildcards at the end
+    //fn add_child(&mut self, child: Node<T>) {
+    //    let len = self.children.len();
+
+    //    if self.wild_child && len > 0 {
+    //        self.children.insert(len - 1, child);
+    //    } else {
+    //        self.children.push(child);
+    //    }
+    //}
 
     // Increments priority of the given child and reorders if necessary
     // returns the new position (index) of the child
-    fn incr_child_priority(&mut self, pos: usize) -> usize {
+    fn update_child_priority(&mut self, pos: usize) -> usize {
         self.children[pos].priority += 1;
         let prio = self.children[pos].priority;
         // adjust position (move to front)
@@ -198,135 +228,127 @@ impl<T> Node<T> {
         new_pos
     }
 
-    #[inline]
-    fn wild_child_conflict(
+    fn insert_child(
         &mut self,
-        prefix: &[u8],
-        route: &str,
+        mut prefix: &[u8],
+        full_path: &[u8],
         val: T,
     ) -> Result<(), InsertError> {
-        self.priority += 1;
+        let mut current = self;
 
-        // Check if the wildcard matches
-        if prefix.len() >= self.path.len()
-      && self.path == prefix[..self.path.len()]
-      // Adding a child to a CatchAll Node is not possible
-      && self.node_type != NodeType::CatchAll
-      // Check for longer wildcard, e.g. :name and :names
-      && (self.path.len() >= prefix.len() || prefix[self.path.len()] == b'/')
-        {
-            self.insert_helper(prefix, route, val)
-        } else {
-            Err(InsertError::conflict(&route, &prefix, &self.path))
-        }
-    }
+        loop {
+            let (wildcard, wildcard_index, valid) = find_wildcard(&prefix);
 
-    fn insert_child(&mut self, mut prefix: &[u8], route: &str, val: T) -> Result<(), InsertError> {
-        let (wildcard, wildcard_index, valid) = find_wildcard(&prefix);
-
-        if wildcard_index.is_none() {
-            self.value = Some(UnsafeCell::new(val));
-            self.path = prefix.to_owned();
-            return Ok(());
-        };
-
-        let mut wildcard_index = wildcard_index.unwrap();
-        let wildcard = wildcard.unwrap();
-
-        // the wildcard name must not contain ':' and '*'
-        if !valid {
-            return Err(InsertError::TooManyParams);
-        };
-
-        // check if the wildcard has a name
-        if wildcard.len() < 2 {
-            return Err(InsertError::UnnamedParam);
-        }
-
-        // check if this Node existing children which would be
-        // unreachable if we insert the wildcard here
-        if !self.children.is_empty() {
-            return Err(InsertError::conflict(&route, &prefix, &self.path));
-        }
-
-        // Param
-        if wildcard[0] == b':' {
-            // Insert prefix before the current wildcard
-            if wildcard_index > 0 {
-                self.path = prefix[..wildcard_index].to_owned();
-                prefix = &prefix[wildcard_index..];
-            }
-
-            let child = Self {
-                node_type: NodeType::Param,
-                path: wildcard.to_owned(),
-                ..Self::default()
+            if wildcard_index.is_none() {
+                current.value = Some(UnsafeCell::new(val));
+                current.prefix = prefix.to_owned();
+                return Ok(());
             };
 
-            self.wild_child = true;
-            self.children = vec![child];
-            self.children[0].priority += 1;
+            let mut wildcard_index = wildcard_index.unwrap();
+            let wildcard = wildcard.unwrap();
 
-            // If the path doesn't end with the wildcard, then there
-            // will be another non-wildcard subpath starting with '/'
+            // the wildcard name must not contain ':' and '*'
+            if !valid {
+                return Err(InsertError::TooManyParams);
+            };
 
-            if wildcard.len() < prefix.len() {
-                prefix = &prefix[wildcard.len()..];
+            // check if the wildcard has a name
+            if wildcard.len() < 2 {
+                return Err(InsertError::UnnamedParam);
+            }
+
+            // check if this Node existing children which would be
+            // unreachable if we insert the wildcard here
+            if !current.children.is_empty() {
+                return Err(InsertError::conflict(&full_path, &prefix, &current.prefix));
+            }
+
+            // Param
+            if wildcard[0] == b':' {
+                // Insert prefix before the current wildcard
+                if wildcard_index > 0 {
+                    current.prefix = prefix[..wildcard_index].to_owned();
+                    prefix = &prefix[wildcard_index..];
+                }
+
                 let child = Self {
-                    priority: 1,
+                    node_type: NodeType::Param,
+                    prefix: wildcard.to_owned(),
                     ..Self::default()
                 };
 
-                self.children[0].children = vec![child];
-                return self.children[0].children[0].insert_child(prefix, route, val);
+                current.wild_child = true;
+                current.children = vec![child];
+
+                current = &mut current.children[0];
+                current.priority += 1;
+
+                // If the path doesn't end with the wildcard, then there
+                // will be another non-wildcard subpath starting with '/'
+                if wildcard.len() < prefix.len() {
+                    prefix = &prefix[wildcard.len()..];
+                    let child = Self {
+                        priority: 1,
+                        ..Self::default()
+                    };
+
+                    current.children = vec![child];
+                    current = &mut current.children[0];
+                    continue;
+                }
+
+                // Otherwise we're done. Insert the value in the new leaf
+                current.value = Some(UnsafeCell::new(val));
+                return Ok(());
             }
-            // Otherwise we're done. Insert the value in the new leaf
-            self.children[0].value = Some(UnsafeCell::new(val));
+
+            // catch all
+            if wildcard_index + wildcard.len() != prefix.len() {
+                return Err(InsertError::InvalidCatchAll);
+            }
+
+            if !current.prefix.is_empty() && current.prefix[current.prefix.len() - 1] == b'/' {
+                return Err(InsertError::conflict(&full_path, &prefix, &current.prefix));
+            }
+
+            // Currently fixed width 1 for '/'
+            wildcard_index = wildcard_index
+                .checked_sub(1)
+                .ok_or(InsertError::MalformedPath)?;
+
+            if prefix[wildcard_index] != b'/' {
+                return Err(InsertError::InvalidCatchAll);
+            }
+
+            current.prefix = prefix[..wildcard_index].to_owned();
+            current.indices = vec![b'/'];
+
+            // first node: CatchAll Node with empty path
+            let child = Self {
+                wild_child: true,
+                node_type: NodeType::CatchAll,
+                ..Self::default()
+            };
+
+            current.children = vec![child];
+
+            current = &mut current.children[0];
+            current.priority += 1;
+
+            // Second node: node holding the variable
+            let child = Self {
+                prefix: prefix[wildcard_index..].to_owned(),
+                node_type: NodeType::CatchAll,
+                value: Some(UnsafeCell::new(val)),
+                priority: 1,
+                ..Self::default()
+            };
+
+            current.children = vec![child];
+
             return Ok(());
         }
-
-        // catch all
-        if wildcard_index + wildcard.len() != prefix.len() {
-            return Err(InsertError::InvalidCatchAll);
-        }
-
-        if !self.path.is_empty() && self.path[self.path.len() - 1] == b'/' {
-            return Err(InsertError::conflict(&route, &prefix, &self.path));
-        }
-
-        // Currently fixed width 1 for '/'
-        wildcard_index = wildcard_index
-            .checked_sub(1)
-            .ok_or(InsertError::MalformedPath)?;
-
-        if prefix[wildcard_index] != b'/' {
-            return Err(InsertError::InvalidCatchAll);
-        }
-
-        // first node: CatchAll Node with empty path
-        let child = Self {
-            wild_child: true,
-            node_type: NodeType::CatchAll,
-            ..Self::default()
-        };
-
-        self.path = prefix[..wildcard_index].to_owned();
-        self.children = vec![child];
-        self.indices = vec![b'/'];
-        self.children[0].priority += 1;
-
-        // Second node: node holding the variable
-        let child = Self {
-            path: prefix[wildcard_index..].to_owned(),
-            node_type: NodeType::CatchAll,
-            value: Some(UnsafeCell::new(val)),
-            priority: 1,
-            ..Self::default()
-        };
-
-        self.children[0].children = vec![child];
-
-        Ok(())
     }
 
     /// Tries to find a value in the router matching the given path.
@@ -385,7 +407,7 @@ impl<T> Node<T> {
 
         // outer loop for walking the tree to get a path's value
         'walk: loop {
-            let prefix = &current.path;
+            let prefix = &current.prefix;
             if path.len() > prefix.len() {
                 if prefix == &path[..prefix.len()] {
                     path = &path[prefix.len()..];
@@ -413,7 +435,7 @@ impl<T> Node<T> {
                             // find param end (either '/' or path end)
                             let end = path.iter().position(|&c| c == b'/').unwrap_or(path.len());
 
-                            params.push(&current.path[1..], &path[..end]);
+                            params.push(&current.prefix[1..], &path[..end]);
 
                             // we need to go deeper!
                             if end < path.len() {
@@ -435,15 +457,15 @@ impl<T> Node<T> {
 
                                 // No value found. Check if a value for this path + a
                                 // trailing slash exists for TSR recommendation
-                                let tsr = (current.path == b"/" && current.value.is_some())
-                                    || (current.path.is_empty() && current.indices == b"/");
+                                let tsr = (current.prefix == b"/" && current.value.is_some())
+                                    || (current.prefix.is_empty() && current.indices == b"/");
                                 return Err(MatchError::new(tsr));
                             }
 
                             return Err(MatchError::new(false));
                         }
                         NodeType::CatchAll => {
-                            params.push(&current.path[2..], path);
+                            params.push(&current.prefix[2..], path);
 
                             return match current.value.as_ref() {
                                 Some(value) => Ok(Match { value, params }),
@@ -471,7 +493,7 @@ impl<T> Node<T> {
                 // trailing slash exists for trailing slash recommendation
                 if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
                     current = &current.children[i];
-                    let tsr = (current.path.len() == 1 && current.value.is_some())
+                    let tsr = (current.prefix.len() == 1 && current.value.is_some())
                         || (current.node_type == NodeType::CatchAll
                             && current.children[0].value.is_some());
                     return Err(MatchError::new(tsr));
@@ -535,13 +557,13 @@ impl<T> Node<T> {
         fix_trailing_slash: bool,
     ) -> bool {
         let lower_path: &[u8] = &path.to_ascii_lowercase();
-        if lower_path.len() >= self.path.len()
-            && (self.path.is_empty()
-                || lower_path[1..self.path.len()].eq_ignore_ascii_case(&self.path[1..]))
+        if lower_path.len() >= self.prefix.len()
+            && (self.prefix.is_empty()
+                || lower_path[1..self.prefix.len()].eq_ignore_ascii_case(&self.prefix[1..]))
         {
-            insensitive_path.extend_from_slice(&self.path);
+            insensitive_path.extend_from_slice(&self.prefix);
 
-            path = &path[self.path.len()..];
+            path = &path[self.prefix.len()..];
 
             if !path.is_empty() {
                 let cached_lower_path = <&[u8]>::clone(&lower_path);
@@ -551,7 +573,7 @@ impl<T> Node<T> {
                 // the tree
                 if !self.wild_child {
                     // skip char bytes already processed
-                    buf = shift_n_bytes(buf, self.path.len());
+                    buf = shift_n_bytes(buf, self.prefix.len());
 
                     if buf[0] == 0 {
                         // process a new char
@@ -561,8 +583,8 @@ impl<T> Node<T> {
                         // chars are up to 4 byte long,
                         // -4 would definitely be another char
                         let mut off = 0;
-                        for j in 0..min(self.path.len(), 3) {
-                            let i = self.path.len() - j;
+                        for j in 0..min(self.prefix.len(), 3) {
+                            let i = self.prefix.len() - j;
                             if char_start(cached_lower_path[i]) {
                                 // read char from cached path
                                 current_char = str::from_utf8(&cached_lower_path[i..])
@@ -595,9 +617,9 @@ impl<T> Node<T> {
                                     return true;
                                 }
 
-                                if insensitive_path.len() > self.children[i].path.len() {
+                                if insensitive_path.len() > self.children[i].prefix.len() {
                                     let prev_len =
-                                        insensitive_path.len() - self.children[i].path.len();
+                                        insensitive_path.len() - self.children[i].prefix.len();
                                     insensitive_path.truncate(prev_len);
                                 }
 
@@ -660,7 +682,7 @@ impl<T> Node<T> {
                 if fix_trailing_slash {
                     for i in 0..self.indices.len() {
                         if self.indices[i] == b'/' {
-                            if (self.children[i].path.len() == 1
+                            if (self.children[i].prefix.len() == 1
                                 && self.children[i].value.is_some())
                                 || (self.children[i].node_type == NodeType::CatchAll
                                     && self.children[i].children[0].value.is_some())
@@ -682,12 +704,12 @@ impl<T> Node<T> {
             if path == [b'/'] {
                 return true;
             }
-            if lower_path.len() + 1 == self.path.len()
-                && self.path[lower_path.len()] == b'/'
-                && lower_path[1..].eq_ignore_ascii_case(&self.path[1..lower_path.len()])
+            if lower_path.len() + 1 == self.prefix.len()
+                && self.prefix[lower_path.len()] == b'/'
+                && lower_path[1..].eq_ignore_ascii_case(&self.prefix[1..lower_path.len()])
                 && self.value.is_some()
             {
-                insensitive_path.extend_from_slice(&self.path);
+                insensitive_path.extend_from_slice(&self.prefix);
                 return true;
             }
         }
@@ -735,7 +757,7 @@ impl<T> Node<T> {
                     return true;
                 } else if fix_trailing_slash
                     && self.children.len() == 1
-                    && self.children[0].path == [b'/']
+                    && self.children[0].prefix == [b'/']
                     && self.children[0].value.is_some()
                 {
                     // No value found. Check if a value for this path + a
@@ -886,7 +908,7 @@ mod tests {
         if n.priority != prio {
             panic!(
                 "priority mismatch for node '{}': found '{}', expected '{}'",
-                str::from_utf8(&n.path).unwrap(),
+                str::from_utf8(&n.prefix).unwrap(),
                 n.priority,
                 prio
             )
