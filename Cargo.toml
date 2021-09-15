@@ -1,6 +1,6 @@
 [package]
 name = "matchit"
-version = "0.4.2"
+version = "0.4.3"
 license = "MIT"
 authors = ["ibraheem <ibrah1440@gmail.com>"]
 edition = "2018"
