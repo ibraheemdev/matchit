@@ -47,6 +47,27 @@ pub struct Node<T> {
 unsafe impl<T: Send> Send for Node<T> {}
 unsafe impl<T: Sync> Sync for Node<T> {}
 
+impl<T> Clone for Node<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            prefix: self.prefix.clone(),
+            wild_child: self.wild_child,
+            node_type: self.node_type,
+            indices: self.indices.clone(),
+            children: self.children.clone(),
+            // SAFETY: We only expose &mut T through &mut self
+            value: self
+                .value
+                .as_ref()
+                .map(|val| UnsafeCell::new(unsafe { &*val.get() }.clone())),
+            priority: self.priority,
+        }
+    }
+}
+
 impl<T> Default for Node<T> {
     fn default() -> Self {
         Self {
@@ -367,8 +388,7 @@ impl<T> Node<T> {
     pub fn at<'n, 'p>(&'n self, path: &'p str) -> Result<Match<'n, 'p, &'n T>, MatchError> {
         match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
-                // SAFETY: We only expose unique references to value through &mut self
-                // and pointer is always non-null
+                // SAFETY: We only expose &mut T through &mut self
                 value: unsafe { &*v.value.get() },
                 params: v.params,
             }),
@@ -385,7 +405,7 @@ impl<T> Node<T> {
     ) -> Result<Match<'n, 'p, &'n mut T>, MatchError> {
         match self.at_inner(path.as_bytes()) {
             Ok(v) => Ok(Match {
-                // SAFETY: We have a unique reference to self
+                // SAFETY: We have &mut self
                 value: unsafe { &mut *v.value.get() },
                 params: v.params,
             }),
