@@ -33,14 +33,14 @@ enum NodeType {
 /// Priority is just the number of values registered in sub nodes
 /// (children, grandchildren, and so on..).
 pub struct Node<T> {
-    prefix: Vec<u8>,
+    priority: u32,
     wild_child: bool,
-    node_type: NodeType,
     indices: Vec<u8>,
-    children: Vec<Self>,
+    node_type: NodeType,
     // See `at_inner` for why an unsafe cell is needed.
     value: Option<UnsafeCell<T>>,
-    priority: u32,
+    pub(crate) prefix: Vec<u8>,
+    pub(crate) children: Vec<Self>,
 }
 
 // SAFETY: we expose `value` per rust's usual borrowing rules, so we can just delegate these traits
@@ -191,7 +191,7 @@ impl<T> Node<T> {
                         continue 'walk;
                     }
 
-                    return Err(InsertError::conflict(&route, &prefix, &current.prefix));
+                    return Err(InsertError::conflict(&route, &prefix, &current));
                 }
 
                 return current.insert_child(prefix, &route, val);
@@ -199,7 +199,7 @@ impl<T> Node<T> {
 
             // Otherwise add value to current node
             if current.value.is_some() {
-                return Err(InsertError::conflict(&route, &prefix, &current.prefix));
+                return Err(InsertError::conflict(&route, &prefix, &current));
             }
 
             current.value = Some(UnsafeCell::new(val));
@@ -318,7 +318,7 @@ impl<T> Node<T> {
             }
 
             if !current.prefix.is_empty() && current.prefix.last().copied() == Some(b'/') {
-                return Err(InsertError::conflict(&route, &prefix, &current.prefix));
+                return Err(InsertError::conflict(&route, &prefix, &current));
             }
 
             // Currently fixed width 1 for '/'
