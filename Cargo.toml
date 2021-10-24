@@ -21,6 +21,10 @@ regex = "1.5.4"
 route-recognizer = "0.3.0"
 gonzales = "0.0.3-beta"
 
+[features]
+default = []
+__test_helpers = []
+
 [[bench]]
 name = "bench"
 harness = false
