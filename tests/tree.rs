@@ -387,7 +387,7 @@ insert_tests! {
         "/:foo*bar/" => Err(InsertError::TooManyParams),
     },
     malformed_route {
-        "*x" => Err(InsertError::MalformedPath)
+        "*x" => Err(InsertError::MalformedRoute)
     },
     more_conflicts {
         "/con:tact"           => Ok(()),

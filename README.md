@@ -41,10 +41,10 @@ Syntax    Type
 
 ### Named Parameters
 
-Named parameters are dynamic path segments. They match anything until the next `/` or the path end:
+Named parameters are dynamic route segments. They match anything until the next `/` or the path end:
 
 ```text
-Pattern: /user/:user
+Route: /user/:user
 
  /user/gordon              match
  /user/you                 match
@@ -52,14 +52,12 @@ Pattern: /user/:user
  /user/                    no match
 ```
 
-**Note:** Since the tree only supports explicit matches, you can not register static routes and parameters for the same path segment. For example you can not register the patterns `/user/new` and `/user/:user` at the same time. This is a limitation that will be addressed in the future.
-
 ### Catch-All parameters
 
 The second type are *catch-all* parameters and have the form `*name`. Like the name suggests, they match everything. Therefore they must always be at the **end** of the pattern:
 
 ```text
-Pattern: /src/*filepath
+Route: /src/*filepath
 
  /src/                     match
  /src/somefile.go          match

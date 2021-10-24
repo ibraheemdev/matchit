@@ -11,14 +11,14 @@ pub enum InsertError {
         /// The existing route that the insertion is conflicting with.
         with: String,
     },
-    /// Only one parameter per path segment is allowed.
+    /// Only one parameter per route segment is allowed.
     TooManyParams,
     /// Parameters must be registered with a name.
     UnnamedParam,
-    /// Catch-all parameters are only allowed at the end of a path.
+    /// Catch-all parameters are only allowed at the end of a route.
     InvalidCatchAll,
-    /// Invalid tokens in the inserted path.
-    MalformedPath,
+    /// Invalid tokens in the inserted route.
+    MalformedRoute,
 }
 
 impl fmt::Display for InsertError {
@@ -31,13 +31,13 @@ impl fmt::Display for InsertError {
                     with
                 )
             }
-            Self::TooManyParams => write!(f, "only one parameter is allowed per path segment"),
+            Self::TooManyParams => write!(f, "only one parameter is allowed per route segment"),
             Self::UnnamedParam => write!(f, "parameters must be registered with a name"),
             Self::InvalidCatchAll => write!(
                 f,
-                "catch-all parameters are only allowed at the end of a path"
+                "catch-all parameters are only allowed at the end of a route"
             ),
-            Self::MalformedPath => write!(f, "malformed path"),
+            Self::MalformedRoute => write!(f, "malformed route"),
         }
     }
 }
@@ -108,7 +108,7 @@ impl MatchError {
 
 impl fmt::Display for MatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "no route registered under the given path")
+        write!(f, "no value registered under the given route")
     }
 }
 
