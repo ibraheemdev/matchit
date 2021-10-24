@@ -88,7 +88,7 @@ impl<T> Node<T> {
         Self::default()
     }
 
-    /// Register a value in the tree under the given path.
+    /// Register a value in the tree under the given route.
     /// ```rust
     /// # use matchit::Node;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -98,15 +98,15 @@ impl<T> Node<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn insert(&mut self, path: impl Into<String>, val: T) -> Result<(), InsertError> {
-        let path = path.into().into_bytes();
-        let mut prefix = path.as_ref();
+    pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
+        let route = route.into().into_bytes();
+        let mut prefix = route.as_ref();
 
         self.priority += 1;
 
         // Empty tree
         if self.prefix.is_empty() && self.children.is_empty() {
-            self.insert_child(&prefix, &path, val)?;
+            self.insert_child(&prefix, &route, val)?;
             self.node_type = NodeType::Root;
             return Ok(());
         }
@@ -147,24 +147,6 @@ impl<T> Node<T> {
             if prefix.len() > i {
                 prefix = &prefix[i..];
 
-                if current.wild_child {
-                    current = &mut current.children[0];
-                    current.priority += 1;
-
-                    // Check if the wildcard matches
-                    if prefix.len() >= current.prefix.len()
-                    && current.prefix == prefix[..current.prefix.len()]
-                    // Adding a child to a CatchAll Node is not possible
-                    && current.node_type != NodeType::CatchAll
-                    // Check for longer wildcard, e.g. :name and :names
-                    && (current.prefix.len() >= prefix.len() || prefix[current.prefix.len()] == b'/')
-                    {
-                        continue 'walk;
-                    } else {
-                        return Err(InsertError::conflict(&path, &prefix, &current.prefix));
-                    }
-                }
-
                 let idxc = prefix[0];
 
                 // `/` after param
@@ -188,20 +170,36 @@ impl<T> Node<T> {
                     }
                 }
 
-                // Otherwise insert it
-                if idxc != b':' && idxc != b'*' {
+                if idxc != b':' && idxc != b'*' && current.node_type != NodeType::CatchAll {
                     current.indices.push(idxc);
-                    current.children.push(Self::default());
+                    let child = current.add_child(Self::default());
                     current.update_child_priority(current.indices.len() - 1);
+                    current = &mut current.children[child];
+                } else if current.wild_child {
+                    // inserting a wildcard node, need to check if it conflicts with the existing wildcard
                     current = current.children.last_mut().unwrap();
+                    current.priority += 1;
+
+                    // Check if the wildcard matches
+                    if prefix.len() >= current.prefix.len()
+                    && current.prefix == prefix[..current.prefix.len()]
+                    // Adding a child to a CatchAll Node is not possible
+                    && current.node_type != NodeType::CatchAll
+                    // Check for longer wildcard, e.g. :name and :names
+                    && (current.prefix.len() >= prefix.len() || prefix[current.prefix.len()] == b'/')
+                    {
+                        continue 'walk;
+                    }
+
+                    return Err(InsertError::conflict(&route, &prefix, &current.prefix));
                 }
 
-                return current.insert_child(prefix, &path, val);
+                return current.insert_child(prefix, &route, val);
             }
 
             // Otherwise add value to current node
             if current.value.is_some() {
-                return Err(InsertError::conflict(&path, &prefix, &current.prefix));
+                return Err(InsertError::conflict(&route, &prefix, &current.prefix));
             }
 
             current.value = Some(UnsafeCell::new(val));
@@ -211,15 +209,17 @@ impl<T> Node<T> {
     }
 
     // add a child node, keeping wildcards at the end
-    //fn add_child(&mut self, child: Node<T>) {
-    //    let len = self.children.len();
+    fn add_child(&mut self, child: Node<T>) -> usize {
+        let len = self.children.len();
 
-    //    if self.wild_child && len > 0 {
-    //        self.children.insert(len - 1, child);
-    //    } else {
-    //        self.children.push(child);
-    //    }
-    //}
+        if self.wild_child && len > 0 {
+            self.children.insert(len - 1, child);
+            return len - 1;
+        } else {
+            self.children.push(child);
+            return len;
+        }
+    }
 
     // Increments priority of the given child and reorders if necessary
     // returns the new position (index) of the child
@@ -249,12 +249,7 @@ impl<T> Node<T> {
         new_pos
     }
 
-    fn insert_child(
-        &mut self,
-        mut prefix: &[u8],
-        full_path: &[u8],
-        val: T,
-    ) -> Result<(), InsertError> {
+    fn insert_child(&mut self, mut prefix: &[u8], route: &[u8], val: T) -> Result<(), InsertError> {
         let mut current = self;
 
         loop {
@@ -279,12 +274,6 @@ impl<T> Node<T> {
                 return Err(InsertError::UnnamedParam);
             }
 
-            // check if this Node existing children which would be
-            // unreachable if we insert the wildcard here
-            if !current.children.is_empty() {
-                return Err(InsertError::conflict(&full_path, &prefix, &current.prefix));
-            }
-
             // Param
             if wildcard[0] == b':' {
                 // Insert prefix before the current wildcard
@@ -299,14 +288,13 @@ impl<T> Node<T> {
                     ..Self::default()
                 };
 
+                let child = current.add_child(child);
                 current.wild_child = true;
-                current.children = vec![child];
-
-                current = &mut current.children[0];
+                current = &mut current.children[child];
                 current.priority += 1;
 
-                // If the path doesn't end with the wildcard, then there
-                // will be another non-wildcard subpath starting with '/'
+                // If the route doesn't end with the wildcard, then there
+                // will be another non-wildcard subroute starting with '/'
                 if wildcard.len() < prefix.len() {
                     prefix = &prefix[wildcard.len()..];
                     let child = Self {
@@ -314,8 +302,8 @@ impl<T> Node<T> {
                         ..Self::default()
                     };
 
-                    current.children = vec![child];
-                    current = &mut current.children[0];
+                    let child = current.add_child(child);
+                    current = &mut current.children[child];
                     continue;
                 }
 
@@ -329,8 +317,8 @@ impl<T> Node<T> {
                 return Err(InsertError::InvalidCatchAll);
             }
 
-            if !current.prefix.is_empty() && current.prefix[current.prefix.len() - 1] == b'/' {
-                return Err(InsertError::conflict(&full_path, &prefix, &current.prefix));
+            if !current.prefix.is_empty() && current.prefix.last().copied() == Some(b'/') {
+                return Err(InsertError::conflict(&route, &prefix, &current.prefix));
             }
 
             // Currently fixed width 1 for '/'
@@ -345,16 +333,15 @@ impl<T> Node<T> {
             current.prefix = prefix[..wildcard_index].to_owned();
             current.indices = vec![b'/'];
 
-            // first node: CatchAll Node with empty path
+            // first node: CatchAll Node with empty route
             let child = Self {
                 wild_child: true,
                 node_type: NodeType::CatchAll,
                 ..Self::default()
             };
 
-            current.children = vec![child];
-
-            current = &mut current.children[0];
+            let child = current.add_child(child);
+            current = &mut current.children[child];
             current.priority += 1;
 
             // Second node: node holding the variable
@@ -412,36 +399,84 @@ impl<T> Node<T> {
             Err(e) => Err(e),
         }
     }
+}
 
+struct Skipped<'n, 'p, T> {
+    path: &'p [u8],
+    node: &'n Node<T>,
+    params: usize,
+}
+
+#[rustfmt::skip]
+macro_rules! backtracker {
+    ($skipped_nodes:ident, $path:ident, $current:ident, $params:ident, $backtracking:ident, $walk:lifetime) => {
+        macro_rules! backtrack {
+            () => {
+                while let Some(skipped) = $skipped_nodes.pop() {
+                    if skipped.path.ends_with($path) {
+                        $path = skipped.path;
+                        $current = &skipped.node;
+                        $params.truncate(skipped.params);
+
+                        $backtracking = true;
+                        continue $walk;
+                    }
+                }
+            };
+        }
+    };
+}
+
+impl<T> Node<T> {
     // It's a bit sad that we have to introduce unsafe here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
-    #[inline(always)]
     fn at_inner<'n, 'p>(
         &'n self,
         path: &'p [u8],
     ) -> Result<Match<'n, 'p, &'n UnsafeCell<T>>, MatchError> {
+        let full_path = path;
+
         let mut current = self;
-        let mut path = path;
+        let mut path = full_path;
+        let mut backtracking = false;
         let mut params = Params::new();
+        let mut skipped_nodes: Vec<Skipped<'_, '_, _>> = Vec::new();
 
-        // outer loop for walking the tree to get a path's value
         'walk: loop {
-            let prefix = &current.prefix;
-            if path.len() > prefix.len() {
-                if prefix == &path[..prefix.len()] {
-                    path = &path[prefix.len()..];
+            backtracker!(skipped_nodes, path, current, params, backtracking, 'walk);
 
-                    // If this node does not have a wildcard (Param or CatchAll)
-                    // child, we can just look up the next child node and continue
-                    // to walk down the tree
-                    if !current.wild_child {
-                        let idxc = path[0];
-                        if let Some(i) = current.indices.iter().position(|&c| c == idxc) {
+            if path.len() > current.prefix.len() {
+                if current.prefix == &path[..current.prefix.len()] {
+                    path = &path[current.prefix.len()..];
+
+                    let idx = path[0];
+
+                    // Try all the non-wildcard children first by matching the indices
+                    // unless we are currently backtracking
+                    if !backtracking {
+                        if let Some(i) = current.indices.iter().position(|&c| c == idx) {
+                            if current.wild_child {
+                                skipped_nodes.push(Skipped {
+                                    path: &full_path
+                                        [full_path.len() - (current.prefix.len() + path.len())..],
+                                    node: &current,
+                                    params: params.len(),
+                                });
+                            }
                             current = &current.children[i];
                             continue 'walk;
                         }
+                    }
 
+                    // If the path at the end of the loop is not '/', and the
+                    // current node has no child nodes, we need to backtrack
+                    if path != b"/" && !current.wild_child {
+                        backtrack!();
+                    }
+
+                    // If there is no wildcard pattern, recommend a redirection
+                    if !current.wild_child {
                         // Nothing found.
                         // We can recommend to redirect to the same URL without a
                         // trailing slash if a leaf exists for that path.
@@ -449,7 +484,9 @@ impl<T> Node<T> {
                         return Err(MatchError::new(tsr));
                     }
 
-                    current = &current.children[0];
+                    // Handle wildcard child, which is always at the end of the array
+                    current = current.children.last().unwrap();
+
                     match current.node_type {
                         NodeType::Param => {
                             // find param end (either '/' or path end)
@@ -467,6 +504,8 @@ impl<T> Node<T> {
 
                                 path = &path[end..];
                                 current = &current.children[0];
+
+                                backtracking = false;
                                 continue 'walk;
                             }
 
@@ -478,7 +517,7 @@ impl<T> Node<T> {
                                 // No value found. Check if a value for this path + a
                                 // trailing slash exists for TSR recommendation
                                 let tsr = (current.prefix == b"/" && current.value.is_some())
-                                    || (current.prefix.is_empty() && current.indices == b"/");
+                                    || (current.prefix.is_empty() && (current.indices == b"/"));
                                 return Err(MatchError::new(tsr));
                             }
 
@@ -495,7 +534,16 @@ impl<T> Node<T> {
                         _ => unreachable!(),
                     }
                 }
-            } else if path == prefix {
+            }
+
+            if path == current.prefix {
+                // If the current path is not '/', the node does not have a value,
+                // and the most recently matched node has a child node, we need
+                // to backtrack
+                if current.value.is_none() && path != b"/" {
+                    backtrack!();
+                }
+
                 // We should have reached the node containing the value.
                 // Check if this node has a value registered.
                 if let Some(value) = current.value.as_ref() {
@@ -511,25 +559,28 @@ impl<T> Node<T> {
 
                 // No value found. Check if a value for this path + a
                 // trailing slash exists for trailing slash recommendation
-                if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
-                    current = &current.children[i];
-                    let tsr = (current.prefix.len() == 1 && current.value.is_some())
-                        || (current.node_type == NodeType::CatchAll
-                            && current.children[0].value.is_some());
-                    return Err(MatchError::new(tsr));
+                if !backtracking {
+                    if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
+                        current = &current.children[i];
+                        let tsr = (current.prefix.len() == 1 && current.value.is_some())
+                            || (current.node_type == NodeType::CatchAll
+                                && current.children[0].value.is_some());
+                        return Err(MatchError::new(tsr));
+                    }
                 }
 
                 return Err(MatchError::new(false));
             }
 
+            // Try backtracking.
+            if path != b"/" {
+                backtrack!();
+            }
+
             // Nothing found. We can recommend to redirect to the same URL with an
             // extra trailing slash if a leaf exists for that path
             let tsr = (path == b"/")
-                || (prefix.len() == path.len() + 1
-                    && prefix[path.len()] == b'/'
-                    && path == &prefix[..prefix.len() - 1]
-                    && current.value.is_some());
-
+                || (current.prefix.len() == path.len() + 1 && current.value.is_some());
             return Err(MatchError::new(tsr));
         }
     }
@@ -805,10 +856,7 @@ pub const fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
     }
 }
 
-// This function is ported from go.
-// Reports whether the byte could be the first byte of an encoded,
-// possibly invalid char. Second and subsequent bytes always have
-// the top two bits set to 10.
+// Reports whether the byte could be the first byte of a `char`.
 const fn char_start(b: u8) -> bool {
     b & 0xC0 != 0x80
 }
@@ -832,6 +880,7 @@ fn find_wildcard(path: &[u8]) -> (Option<&[u8]>, Option<usize>, bool) {
                 _ => (),
             };
         }
+
         return (Some(&path[start..]), Some(start), valid);
     }
     (None, None, false)
