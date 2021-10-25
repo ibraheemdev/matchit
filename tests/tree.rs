@@ -450,8 +450,7 @@ tsr_tests! {
         "/admin/static/"     => true,
         "/admin/cfg/"        => true,
         "/admin/cfg/users/"  => true,
-        // TODO: fix
-        // "/api/hello/x/bar"   => true,
+        "/api/hello/x/bar"   => true,
         "/api/baz/foo/"      => true,
         "/api/baz/bax/"      => true,
         "/api/bar/huh/"      => true,
@@ -468,6 +467,17 @@ tsr_tests! {
         "/api/hello/x/foo"   => false,
         "/api/baz/foo/bad"   => false,
         "/foo/p/p"           => false,
+    },
+    backtracking_tsr {
+        routes = [
+            "/a/:b/:c",
+            "/a/b/:c/d/",
+        ],
+        "/a/b/c/d"   => true,
+    },
+    same_len {
+        routes = ["/foo", "/bar/"],
+        "/baz" => false,
     },
     root_tsr_wildcard {
         routes = ["/:foo"],

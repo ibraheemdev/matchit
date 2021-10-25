@@ -469,14 +469,13 @@ impl<T> Node<T> {
                         }
                     }
 
-                    // If the path at the end of the loop is not '/', and the
-                    // current node has no child nodes, we need to backtrack
-                    if path != b"/" && !current.wild_child {
-                        backtrack!();
-                    }
-
-                    // If there is no wildcard pattern, recommend a redirection
                     if !current.wild_child {
+                        // If the path at the end of the loop is not '/', and the
+                        // current node has no child nodes, we need to backtrack
+                        if path != b"/" {
+                            backtrack!();
+                        }
+
                         // Nothing found.
                         // We can recommend to redirect to the same URL without a
                         // trailing slash if a leaf exists for that path.
@@ -572,15 +571,19 @@ impl<T> Node<T> {
                 return Err(MatchError::new(false));
             }
 
-            // Try backtracking.
-            if path != b"/" {
-                backtrack!();
-            }
-
             // Nothing found. We can recommend to redirect to the same URL with an
             // extra trailing slash if a leaf exists for that path
             let tsr = (path == b"/" && full_path != b"/")
-                || (current.prefix.len() == path.len() + 1 && current.value.is_some());
+                || (current.prefix.len() == path.len() + 1
+                    && current.prefix[path.len()] == b'/'
+                    && path == &current.prefix[..current.prefix.len() - 1]
+                    && current.value.is_some());
+
+            // If there is no tsr, try backtracking.
+            if !tsr && path != b"/" {
+                backtrack!();
+            }
+
             return Err(MatchError::new(tsr));
         }
     }
