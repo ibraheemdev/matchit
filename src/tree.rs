@@ -323,7 +323,7 @@ impl<T> Node<T> {
             // Currently fixed width 1 for '/'
             wildcard_index = wildcard_index
                 .checked_sub(1)
-                .ok_or(InsertError::MalformedRoute)?;
+                .ok_or(InsertError::MalformedPath)?;
 
             if prefix[wildcard_index] != b'/' {
                 return Err(InsertError::InvalidCatchAll);

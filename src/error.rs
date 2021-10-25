@@ -6,7 +6,7 @@ use std::fmt;
 #[non_exhaustive]
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum InsertError {
-    /// Attempted to insert a route that conflicts with an existing route.
+    /// Attempted to insert a path that conflicts with an existing route.
     Conflict {
         /// The existing route that the insertion is conflicting with.
         with: String,
@@ -15,10 +15,10 @@ pub enum InsertError {
     TooManyParams,
     /// Parameters must be registered with a name.
     UnnamedParam,
-    /// Catch-all parameters are only allowed at the end of a route.
+    /// Catch-all parameters are only allowed at the end of a path.
     InvalidCatchAll,
-    /// Invalid tokens in the inserted route.
-    MalformedRoute,
+    /// Invalid tokens in the inserted path.
+    MalformedPath,
 }
 
 impl fmt::Display for InsertError {
@@ -31,13 +31,13 @@ impl fmt::Display for InsertError {
                     with
                 )
             }
-            Self::TooManyParams => write!(f, "only one parameter is allowed per route segment"),
+            Self::TooManyParams => write!(f, "only one parameter is allowed per path segment"),
             Self::UnnamedParam => write!(f, "parameters must be registered with a name"),
             Self::InvalidCatchAll => write!(
                 f,
                 "catch-all parameters are only allowed at the end of a route"
             ),
-            Self::MalformedRoute => write!(f, "malformed route"),
+            Self::MalformedPath => write!(f, "malformed path"),
         }
     }
 }
@@ -108,7 +108,7 @@ impl MatchError {
 
 impl fmt::Display for MatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "no value registered under the given route")
+        write!(f, "no value registered under the given path")
     }
 }
 
