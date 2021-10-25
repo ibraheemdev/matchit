@@ -13,7 +13,8 @@ macro_rules! match_tests {
             let mut tree = Node::new();
 
             for route in $routes {
-                tree.insert(route, route.to_owned()).unwrap();
+                tree.insert(route, route.to_owned())
+                    .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
             }
 
             $(match tree.at($path) {
@@ -93,7 +94,8 @@ macro_rules! tsr_tests {
             let mut tree = Node::new();
 
             for route in $routes {
-                tree.insert(route, route.to_owned()).unwrap();
+                tree.insert(route, route.to_owned())
+                    .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
             }
 
             $(
@@ -306,6 +308,22 @@ match_tests! {
         "/get/abc/123abg/test"                  :: "/get/abc/123abg/:param"                => { "param" => "test" },
         "/get/abc/123abf/testss"                :: "/get/abc/123abf/:param"                => { "param" => "testss" },
         "/get/abc/123abfff/te"                  :: "/get/abc/123abfff/:param"              => { "param" => "te" },
+    },
+    blog {
+        routes = [
+            "/:page",
+            "/posts/:year/:month/:post",
+            "/posts/:year/:month/index",
+            "/posts/:year/top",
+            "/static/*path",
+            "/favicon.ico",
+        ],
+        "/about"                 :: "/:page"                   => { "page" => "about" },
+        "/posts/2021/01/rust"   :: "/posts/:year/:month/:post" => { "year" => "2021", "month" => "01", "post" => "rust" },
+        "/posts/2021/01/index"  :: "/posts/:year/:month/index" => { "year" => "2021", "month" => "01" },
+        "/posts/2021/top"       :: "/posts/:year/top"          => { "year" => "2021" },
+        "/static/foo.png"       :: "/static/*path"             => { "path" => "/foo.png" },
+        "/favicon.ico"          :: "/favicon.ico"              => {},
     }
 }
 

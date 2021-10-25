@@ -47,8 +47,8 @@
 //! ```text
 //! Route: /user/:user
 //!
-//!  /user/gordon              match
-//!  /user/you                 match
+//!  /user/gordon              match: user = "gordon"
+//!  /user/you                 match: user = "you"
 //!  /user/gordon/profile      no match
 //!  /user/                    no match
 //! ```
@@ -60,9 +60,31 @@
 //! ```text
 //! Route: /src/*filepath
 //!
-//!  /src/                     match
-//!  /src/somefile.go          match
-//!  /src/subdir/somefile.go   match
+//!  /src/                       match: filepath = "/"
+//!  /src/somefile.html          match: filepath = "/somefile.html"
+//!  /src/subdir/somefile.html   match: filepath = "/subdir/somefile.html"
+//! ```
+//!
+//! ### Priority
+//!
+//! Static and dynamic route segments are allowed to overlap. If they do, static segments will be given higher priority:
+//! ```text
+//! /:page
+//! /posts/:year/:month/:post
+//! /posts/:year/:month/index
+//! /posts/:year/:month
+//! /static/*path
+//! /favicon.ico
+//! ```
+//!
+//! The following routes will be matched:
+//! ```text
+//! /about                => /:page
+//! /posts/2021/01/rust   => /posts/:year/:month/:post
+//! /posts/2021/01/index  => /posts/:year/:month/index
+//! /posts/2021/top       => /posts/:year/top
+//! /static/foo.png       => /static/*path
+//! /favicon.ico          => /favicon.ico
 //! ```
 //!
 //! ## How does it work?

@@ -28,10 +28,9 @@ enum NodeType {
     Static,
 }
 
-/// A node in a radix tree ordered by priority.
+/// A radix tree used for URL path matching.
 ///
-/// Priority is just the number of values registered in sub nodes
-/// (children, grandchildren, and so on..).
+/// See [the crate documentation](crate) for details.
 pub struct Node<T> {
     priority: u32,
     wild_child: bool,
