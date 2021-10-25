@@ -1,6 +1,6 @@
 # MatchIt
 
-[![Documentation](https://img.shields.io/badge/docs-0.4.3-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
+[![Documentation](https://img.shields.io/badge/docs-0.4.4-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
 [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/matchit/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/matchit/actions)
@@ -29,7 +29,7 @@ The tree is optimized for high performance and a small memory footprint. It scal
 
 ### Parameters
 
-As you can see, `:id` is a *named parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/0.2.0/matchit/tree/struct.Params.html), which stores a list of keys and values. You can get the value of a parameter by name, `params.get("id")`, or by iterating through the list.
+As you can see, `:id` is a *named parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/*/matchit/tree/struct.Params.html), which stores a list of keys and values. You can get the value of a parameter by name, `params.get("id")`, or by iterating through the list.
 
 The registered path can contain two types of parameters:
 
