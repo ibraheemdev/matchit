@@ -103,7 +103,7 @@ macro_rules! tsr_tests {
                         $tsr,
                         "wrong tsr value for '{}', expected {}, found {}", $path, $tsr, m.tsr()
                     ),
-                    _ => panic!("expected match for '{}'", $path)
+                    res => panic!("unexpected result for '{}': {:?}", $path, res)
                 }
             )*
         }
@@ -420,6 +420,7 @@ tsr_tests! {
             "/aa",
             "/a/",
             "/admin",
+            "/admin/static",
             "/admin/:category",
             "/admin/:category/:page",
             "/doc",
@@ -427,7 +428,12 @@ tsr_tests! {
             "/doc/rust1.26.html",
             "/no/a",
             "/no/b",
-            "/api/hello/:name",
+            "/api/:page/:name",
+            "/api/hello/:name/bar/",
+            "/api/bar/:name",
+            "/api/baz/foo",
+            "/api/baz/foo/bar",
+            "/foo/:p",
         ],
         "/hi/"               => true,
         "/b"                 => true,
@@ -441,18 +447,43 @@ tsr_tests! {
         "/a"                 => true,
         "/admin/"            => true,
         "/doc/"              => true,
+        "/admin/static/"     => true,
         "/admin/cfg/"        => true,
         "/admin/cfg/users/"  => true,
+        // TODO: fix
+        // "/api/hello/x/bar"   => true,
+        "/api/baz/foo/"      => true,
+        "/api/baz/bax/"      => true,
+        "/api/bar/huh/"      => true,
+        "/api/baz/foo/bar/"  => true,
+        "/api/world/abc/"    => true,
+        "/foo/pp/"           => true,
         "/"                  => false,
         "/no"                => false,
         "/no/"               => false,
         "/_"                 => false,
         "/_/"                => false,
-        "/api/world/abc"     => false,
+        "/api"               => false,
+        "/api/"              => false,
+        "/api/hello/x/foo"   => false,
+        "/api/baz/foo/bad"   => false,
+        "/foo/p/p"           => false,
+    },
+    root_tsr_wildcard {
+        routes = ["/:foo"],
+        "/" => false,
+    },
+    root_tsr_static {
+        routes = ["/foo"],
+        "/" => false,
     },
     root_tsr {
-        routes = ["/:test"],
-        "/" => false
+        routes = [
+            "/foo",
+            "/bar",
+            "/:baz"
+        ],
+        "/" => false,
     }
 }
 

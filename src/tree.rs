@@ -579,7 +579,7 @@ impl<T> Node<T> {
 
             // Nothing found. We can recommend to redirect to the same URL with an
             // extra trailing slash if a leaf exists for that path
-            let tsr = (path == b"/")
+            let tsr = (path == b"/" && full_path != b"/")
                 || (current.prefix.len() == path.len() + 1 && current.value.is_some());
             return Err(MatchError::new(tsr));
         }
