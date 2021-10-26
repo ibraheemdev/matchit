@@ -147,6 +147,7 @@ match_tests! {
             "/cmd/whoami",
             "/cmd/whoami/root",
             "/cmd/whoami/root/",
+            "/src",
             "/src/*filepath",
             "/search/",
             "/search/:query",
@@ -207,6 +208,7 @@ match_tests! {
         "/cmd/whoami/r/"                        :: "/cmd/:tool/:sub"                       => None,
         "/cmd/whoami/root"                      :: "/cmd/whoami/root"                      => {},
         "/cmd/whoami/root/"                     :: "/cmd/whoami/root/"                     => {},
+        "/src"                                  :: "/src"                                  => {},
         "/src/"                                 :: "/src/*filepath"                        => { "filepath" => "/" },
         "/src/some/file.png"                    :: "/src/*filepath"                        => { "filepath" => "/some/file.png" },
         "/search/"                              :: "/search/"                              => {},
@@ -348,6 +350,8 @@ insert_tests! {
         "/src1/*filepath"     => Err(InsertError::Conflict { with: "/src1/".into() }),
         "/src2*filepath"      => Err(InsertError::InvalidCatchAll),
         "/src2/*filepath"     => Ok(()),
+        "/src2/"              => Err(InsertError::Conflict { with: "/src2/*filepath".into() }),
+        "/src2"               => Ok(()),
         "/search/:query"      => Ok(()),
         "/search/valid"       => Ok(()),
         "/user_:name"         => Ok(()),
@@ -512,7 +516,7 @@ tsr_tests! {
             "/:baz"
         ],
         "/" => false,
-    }
+    },
 }
 
 #[test]
