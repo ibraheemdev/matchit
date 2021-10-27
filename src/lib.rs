@@ -1,4 +1,3 @@
-#![deny(rust_2018_idioms)]
 //! # MatchIt
 //!
 //! [![Documentation](https://img.shields.io/badge/docs-0.4.4-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
@@ -120,6 +119,8 @@
 //! ├--
 //! └-
 //! ```
+
+#![deny(rust_2018_idioms, clippy::all)]
 
 mod error;
 mod params;

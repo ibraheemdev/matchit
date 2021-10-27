@@ -83,17 +83,19 @@ impl<'k, 'v> Params<'k, 'v> {
 
     /// Returns the value of the first parameter registered under the given key.
     pub fn get(&self, key: impl AsRef<str>) -> Option<&'v str> {
+        let key = key.as_ref().as_bytes();
+
         match &self.kind {
             ParamsKind::None => None,
             ParamsKind::Small(arr, len) => arr
                 .iter()
                 .take(*len)
-                .find(|param| param.key == key.as_ref().as_bytes())
-                .map(|param| param.value_str()),
+                .find(|param| param.key == key)
+                .map(Param::value_str),
             ParamsKind::Large(vec) => vec
                 .iter()
-                .find(|param| param.key == key.as_ref().as_bytes())
-                .map(|param| param.value_str()),
+                .find(|param| param.key == key)
+                .map(Param::value_str),
         }
     }
 
@@ -124,7 +126,7 @@ impl<'k, 'v> Params<'k, 'v> {
         let param = Param { key, value };
         match &mut self.kind {
             ParamsKind::None => {
-                self.kind = ParamsKind::Small([param, Default::default(), Default::default()], 1);
+                self.kind = ParamsKind::Small([param, Param::default(), Param::default()], 1);
             }
             ParamsKind::Small(arr, len) => {
                 if *len == SMALL {

@@ -105,7 +105,7 @@ impl<T> Node<T> {
 
         // Empty tree
         if self.prefix.is_empty() && self.children.is_empty() {
-            self.insert_child(&prefix, &route, val)?;
+            self.insert_child(prefix, &route, val)?;
             self.node_type = NodeType::Root;
             return Ok(());
         }
@@ -128,7 +128,7 @@ impl<T> Node<T> {
                 let mut child = Self {
                     prefix: current.prefix[i..].to_owned(),
                     wild_child: current.wild_child,
-                    indices: current.indices.to_owned(),
+                    indices: current.indices.clone(),
                     value: current.value.take(),
                     priority: current.priority - 1,
                     ..Self::default()
@@ -190,7 +190,7 @@ impl<T> Node<T> {
                         continue 'walk;
                     }
 
-                    return Err(InsertError::conflict(&route, &prefix, &current));
+                    return Err(InsertError::conflict(&route, prefix, current));
                 }
 
                 return current.insert_child(prefix, &route, val);
@@ -198,7 +198,7 @@ impl<T> Node<T> {
 
             // Otherwise add value to current node
             if current.value.is_some() {
-                return Err(InsertError::conflict(&route, &prefix, &current));
+                return Err(InsertError::conflict(&route, prefix, current));
             }
 
             current.value = Some(UnsafeCell::new(val));
@@ -213,10 +213,10 @@ impl<T> Node<T> {
 
         if self.wild_child && len > 0 {
             self.children.insert(len - 1, child);
-            return len - 1;
+            len - 1
         } else {
             self.children.push(child);
-            return len;
+            len
         }
     }
 
@@ -252,7 +252,7 @@ impl<T> Node<T> {
         let mut current = self;
 
         loop {
-            let (wildcard, wildcard_index, valid) = find_wildcard(&prefix);
+            let (wildcard, wildcard_index, valid) = find_wildcard(prefix);
 
             if wildcard_index.is_none() {
                 current.value = Some(UnsafeCell::new(val));
@@ -317,7 +317,7 @@ impl<T> Node<T> {
             }
 
             if !current.prefix.is_empty() && current.prefix.last().copied() == Some(b'/') {
-                return Err(InsertError::conflict(&route, &prefix, &current));
+                return Err(InsertError::conflict(route, prefix, current));
             }
 
             // Currently fixed width 1 for '/'
@@ -446,8 +446,10 @@ impl<T> Node<T> {
             backtracker!(skipped_nodes, path, current, params, backtracking, 'walk);
 
             if path.len() > current.prefix.len() {
-                if current.prefix == &path[..current.prefix.len()] {
-                    path = &path[current.prefix.len()..];
+                let (prefix, rest) = path.split_at(current.prefix.len());
+
+                if prefix == current.prefix {
+                    path = rest;
 
                     let idx = path[0];
 
@@ -459,10 +461,11 @@ impl<T> Node<T> {
                                 skipped_nodes.push(Skipped {
                                     path: &full_path
                                         [full_path.len() - (current.prefix.len() + path.len())..],
-                                    node: &current,
+                                    node: current,
                                     params: params.len(),
                                 });
                             }
+
                             current = &current.children[i];
                             continue 'walk;
                         }
@@ -487,35 +490,38 @@ impl<T> Node<T> {
 
                     match current.node_type {
                         NodeType::Param => {
-                            // find param end (either '/' or path end)
-                            let end = path.iter().position(|&c| c == b'/').unwrap_or(path.len());
+                            match path.iter().position(|&c| c == b'/') {
+                                Some(param_idx) => {
+                                    let (param, rest) = path.split_at(param_idx);
+                                    params.push(&current.prefix[1..], param);
 
-                            params.push(&current.prefix[1..], &path[..end]);
+                                    if current.children.is_empty() {
+                                        let tsr = path.len() == param_idx + 1;
+                                        return Err(MatchError::new(tsr));
+                                    }
 
-                            // we need to go deeper!
-                            if end < path.len() {
-                                // ... but we can't
-                                if current.children.is_empty() {
-                                    let tsr = path.len() == end + 1;
-                                    return Err(MatchError::new(tsr));
+                                    path = rest;
+                                    current = &current.children[0];
+
+                                    backtracking = false;
+                                    continue 'walk;
                                 }
-
-                                path = &path[end..];
-                                current = &current.children[0];
-
-                                backtracking = false;
-                                continue 'walk;
+                                None => {
+                                    params.push(&current.prefix[1..], path);
+                                }
                             }
 
                             if let Some(value) = current.value.as_ref() {
                                 return Ok(Match { value, params });
-                            } else if current.children.len() == 1 {
-                                current = &current.children[0];
+                            }
+
+                            if let [only_child] = current.children.as_slice() {
+                                current = only_child;
 
                                 // No value found. Check if a value for this path + a
                                 // trailing slash exists for TSR recommendation
                                 let tsr = (current.prefix == b"/" && current.value.is_some())
-                                    || (current.prefix.is_empty() && (current.indices == b"/"));
+                                    || (current.prefix.is_empty() && current.indices == b"/");
                                 return Err(MatchError::new(tsr));
                             }
 
@@ -573,10 +579,7 @@ impl<T> Node<T> {
             // Nothing found. We can recommend to redirect to the same URL with an
             // extra trailing slash if a leaf exists for that path
             let tsr = (path == b"/" && full_path != b"/")
-                || (current.prefix.len() == path.len() + 1
-                    && current.prefix[path.len()] == b'/'
-                    && path == &current.prefix[..current.prefix.len() - 1]
-                    && current.value.is_some());
+                || (current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some());
 
             // If there is no tsr, try backtracking.
             if !tsr && path != b"/" {
@@ -743,32 +746,31 @@ impl<T> Node<T> {
                     buf,
                     fix_trailing_slash,
                 );
-            } else {
-                // We should have reached the node containing the value.
-                // Check if this node has a value registered.
-                if self.value.is_some() {
-                    return true;
-                }
+            }
 
-                // No value found.
-                // Try to fix the path by adding a trailing slash
-                if fix_trailing_slash {
-                    for i in 0..self.indices.len() {
-                        if self.indices[i] == b'/' {
-                            if (self.children[i].prefix.len() == 1
-                                && self.children[i].value.is_some())
-                                || (self.children[i].node_type == NodeType::CatchAll
-                                    && self.children[i].children[0].value.is_some())
-                            {
-                                insensitive_path.push(b'/');
-                                return true;
-                            }
-                            return false;
+            // We should have reached the node containing the value.
+            // Check if this node has a value registered.
+            if self.value.is_some() {
+                return true;
+            }
+
+            // No value found.
+            // Try to fix the path by adding a trailing slash
+            if fix_trailing_slash {
+                for i in 0..self.indices.len() {
+                    if self.indices[i] == b'/' {
+                        if (self.children[i].prefix.len() == 1 && self.children[i].value.is_some())
+                            || (self.children[i].node_type == NodeType::CatchAll
+                                && self.children[i].children[0].value.is_some())
+                        {
+                            insensitive_path.push(b'/');
+                            return true;
                         }
+                        return false;
                     }
                 }
-                return false;
             }
+            return false;
         }
 
         // Nothing found.
