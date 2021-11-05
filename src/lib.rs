@@ -23,102 +23,104 @@
 //! }
 //! ```
 //!
-//! `matchit` relies on a tree structure which makes heavy use of *common prefixes*, effectively a [radix tree](https://en.wikipedia.org/wiki/Radix_tree). This makes lookups extremely fast. [See below for technical details](#how-does-it-work).
 //!
-//! The tree is optimized for high performance and a small memory footprint. It scales well even with very long paths and a large number of routes. A compressing dynamic trie (radix tree) structure is used for efficient matching.
+//! ## Parameters
 //!
-//! ### Parameters
+//! The matcher supports dynamic route segments. These are accessible by-name through the [`Params`](https://docs.rs/matchit/*/matchit/struct.Params.html) struct,
+//! which is returned on a successful match attempt.
 //!
-//! As you can see, `:id` is a *named parameter*. The values are accessible via [`Params`](https://docs.rs/matchit/*/matchit/tree/struct.Params.html), which stores a list of keys and values. You can get the value of a parameter by name, `params.get("id")`, or by iterating through the list.
-//!
-//! The registered path can contain two types of parameters:
-//!
-//! ```text
-//! Syntax    Type
-//! :name     named parameter
-//! *name     catch-all parameter
-//! ```
+//! A registered route can contain named or catch-all parameters.
 //!
 //! ### Named Parameters
 //!
-//! Named parameters are dynamic route segments. They match anything until the next `/` or the path end:
+//! Named parameters like `/:id` match anything until the next `/` or the path end:
 //!
-//! ```text
-//! Route: /user/:user
+//! ```rust
+//! # use matchit::Node;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut m = Node::new();
+//! m.insert("/users/:id", true)?;
 //!
-//!  /user/gordon              match: user = "gordon"
-//!  /user/you                 match: user = "you"
-//!  /user/gordon/profile      no match
-//!  /user/                    no match
+//! assert_eq!(m.at("/users/1")?.params.get("id"), Some("1"));
+//! assert_eq!(m.at("/users/23")?.params.get("id"), Some("23"));
+//! assert!(m.at("/users").is_err());
+//!
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! ### Catch-All parameters
+//! ### Catch-all Parameters
 //!
-//! The second type are *catch-all* parameters and have the form `*name`. Like the name suggests, they match everything. Therefore they must always be at the **end** of the pattern:
+//! Catch-all parameters start with `*` and match everything including the trailing slash. They must always be at the **end** of the route:
 //!
-//! ```text
-//! Route: /src/*filepath
+//! ```rust
+//! # use matchit::Node;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut m = Node::new();
+//! m.insert("/*p", true)?;
 //!
-//!  /src/                       match: filepath = "/"
-//!  /src/somefile.html          match: filepath = "/somefile.html"
-//!  /src/subdir/somefile.html   match: filepath = "/subdir/somefile.html"
+//! assert_eq!(m.at("/")?.params.get("p"), Some("/"));
+//! assert_eq!(m.at("/foo.js")?.params.get("p"), Some("/foo.js"));
+//! assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("/c/bar.css"));
+//!
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! ### Priority
+//! ## Routing Priority
 //!
 //! Static and dynamic route segments are allowed to overlap. If they do, static segments will be given higher priority:
-//! ```text
-//! /:page
-//! /posts/:year/:month/:post
-//! /posts/:year/:month/index
-//! /posts/:year/:month
-//! /static/*path
-//! /favicon.ico
+//! ```rust
+//! # use matchit::Node;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut m = Node::new();
+//! m.insert("/home", "Welcome!").unwrap();  // priority: 1
+//! m.insert("/about", "About Me").unwrap(); // priority: 1
+//! m.insert("/:other", "...").unwrap();     // priority: 2
+//!
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! The following routes will be matched:
-//! ```text
-//! /about                => /:page
-//! /posts/2021/01/rust   => /posts/:year/:month/:post
-//! /posts/2021/01/index  => /posts/:year/:month/index
-//! /posts/2021/top       => /posts/:year/top
-//! /static/foo.png       => /static/*path
-//! /favicon.ico          => /favicon.ico
+//! Catch-all parameters however are not allowed to overlap with other path segments. Attempting to insert a conflicting route will result
+//! in an error:
+//! ```rust
+//! # use matchit::{InsertError, Node};
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut m = Node::new();
+//! m.insert("/home", "Welcome!").unwrap();
+//!
+//! assert_eq!(
+//!     m.insert("/*filepath", "..."),
+//!     Err(InsertError::Conflict {
+//!         with: "/home".into()
+//!     })
+//! );
+//!
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## How does it work?
 //!
-//! The matcher relies on a tree structure which makes heavy use of *common prefixes*, it is basically a *compact* [*prefix tree*](https://en.wikipedia.org/wiki/Trie) (or [*Radix tree*](https://en.wikipedia.org/wiki/Radix_tree)). Nodes with a common prefix share a parent. Here is a short example what the routing tree for the `GET` request method could look like:
+//! Because URL paths follow a hierarchical structure, the matcher relies on a radix tree structure that makes heavy use of common prefixes:
 //!
 //! ```text
-//! Priority   Path             Handle
-//! 9          \                *<1>
+//! Priority   Path             Value
+//! 9          \                1
 //! 3          ├s               None
-//! 2          |├earch\         *<2>
-//! 1          |└upport\        *<3>
-//! 2          ├blog\           *<4>
+//! 2          |├earch\         2
+//! 1          |└upport\        3
+//! 2          ├blog\           4
 //! 1          |    └:post      None
-//! 1          |         └\     *<5>
-//! 2          ├about-us\       *<6>
-//! 1          |        └team\  *<7>
-//! 1          └contact\        *<8>
+//! 1          |         └\     5
+//! 2          ├about-us\       6
+//! 1          |        └team\  7
+//! 1          └contact\        8
 //! ```
 //!
-//! Every `*<num>` represents the memory address of a handler function (a pointer). If you follow a path trough the tree from the root to the leaf, you get the complete route path, e.g `/blog/:post`, where `:post` is just a placeholder ([*parameter*](#named-parameters)) for an actual post name. Unlike hash-maps, a tree structure also allows us to use dynamic parts like the `:post` parameter, since we actually match against the routing patterns instead of just comparing hashes. This works very efficiently.
-//!
-//! Because URL paths have a hierarchical structure and make use only of a limited set of characters (byte values), it is very likely that there are a lot of common prefixes. Storing the routes in this structure allows us to easily reduce the routing into a very small number of branches.
-//!
-//! For even better scalability, the child nodes on each tree level are ordered by priority, where the priority is just the number of handles registered in child nodes. This means that nodes that are part of the most routing paths are always evaluated first, increasing the chance of reaching the correct route on our first try.
-//!
-//! ```test
-//! ├------------
-//! ├---------
-//! ├-----
-//! ├----
-//! ├--
-//! ├--
-//! └-
-//! ```
+//! This allows us to reduce the route search to a small number of branches. Child nodes on the same level of the tree are also prioritized
+//! by the number of children with registered values, increasing the chance of choosing the correct branch of the first try.
 
 #![deny(rust_2018_idioms, clippy::all)]
 
