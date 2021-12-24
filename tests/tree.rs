@@ -691,3 +691,24 @@ fn test_tree_find_case_insensitive_path() {
         };
     }
 }
+
+// https://github.com/ibraheemdev/matchit/issues/12
+#[test]
+fn foo() {
+    let mut matcher = Node::new();
+
+    matcher.insert("/:object/:id", "object with id").unwrap();
+    matcher
+        .insert("/secret/:id/path", "secret with id and path")
+        .unwrap();
+
+    let matched = matcher.at("/secret/978/path").unwrap();
+    assert_eq!(matched.params.get("id"), Some("978"));
+
+    let matched = matcher.at("/something/978").unwrap();
+    assert_eq!(matched.params.get("id"), Some("978"));
+    assert_eq!(matched.params.get("object"), Some("something"));
+
+    let matched = matcher.at("/secret/978").unwrap();
+    assert_eq!(matched.params.get("id"), Some("978"));
+}

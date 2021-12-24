@@ -181,11 +181,12 @@ impl<T> Node<T> {
 
                     // Check if the wildcard matches
                     if prefix.len() >= current.prefix.len()
-                    && current.prefix == prefix[..current.prefix.len()]
-                    // Adding a child to a CatchAll Node is not possible
-                    && current.node_type != NodeType::CatchAll
-                    // Check for longer wildcard, e.g. :name and :names
-                    && (current.prefix.len() >= prefix.len() || prefix[current.prefix.len()] == b'/')
+                        && current.prefix == prefix[..current.prefix.len()]
+                        // Adding a child to a CatchAll Node is not possible
+                        && current.node_type != NodeType::CatchAll
+                        // Check for longer wildcard, e.g. :name and :names
+                        && (current.prefix.len() >= prefix.len()
+                            || prefix[current.prefix.len()] == b'/')
                     {
                         continue 'walk;
                     }
@@ -522,7 +523,18 @@ impl<T> Node<T> {
                                 // trailing slash exists for TSR recommendation
                                 let tsr = (current.prefix == b"/" && current.value.is_some())
                                     || (current.prefix.is_empty() && current.indices == b"/");
+
+                                // If there is no TSR, try backtracking
+                                if !tsr && path != b"/" {
+                                    backtrack!();
+                                }
+
                                 return Err(MatchError::new(tsr));
+                            }
+
+                            // Try backtracking
+                            if path != b"/" {
+                                backtrack!();
                             }
 
                             return Err(MatchError::new(false));
