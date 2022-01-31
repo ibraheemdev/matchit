@@ -320,13 +320,54 @@ match_tests! {
             "/static/*path",
             "/favicon.ico",
         ],
-        "/about"                 :: "/:page"                   => { "page" => "about" },
+        "/about"                :: "/:page"                    => { "page" => "about" },
         "/posts/2021/01/rust"   :: "/posts/:year/:month/:post" => { "year" => "2021", "month" => "01", "post" => "rust" },
         "/posts/2021/01/index"  :: "/posts/:year/:month/index" => { "year" => "2021", "month" => "01" },
         "/posts/2021/top"       :: "/posts/:year/top"          => { "year" => "2021" },
         "/static/foo.png"       :: "/static/*path"             => { "path" => "/foo.png" },
         "/favicon.ico"          :: "/favicon.ico"              => {},
+    },
+    double_overlap {
+        routes = [
+            "/:object/:id",
+            "/secret/:id/path",
+            "/secret/978",
+            "/other/:object/:id/",
+            "/other/an_object/:id",
+            "/other/static/path",
+            "/other/long/static/path/"
+        ],
+        "/secret/978/path"                :: "/secret/:id/path"                    => { "id" => "978" },
+        "/some_object/978"                :: "/:object/:id"                        => { "object" => "some_object", "id" => "978" },
+        "/secret/978"                     :: "/secret/978"                         => {},
+        "/super_secret/978/"              :: "/:object/:id"                        => None,
+        "/other/object/1/"                :: "/other/:object/:id/"                 => { "object" => "object", "id" => "1" },
+        "/other/object/1/2"               :: "/other/:object/:id"                  => None,
+        "/other/an_object/1"              :: "/other/an_object/:id"                => { "id" => "1" },
+        "/other/static/path"              :: "/other/static/path"                  => {},
+        "/other/long/static/path/"        :: "/other/long/static/path/"            => {},
     }
+}
+
+// https://github.com/ibraheemdev/matchit/issues/12
+#[test]
+fn foo() {
+    let mut matcher = Node::new();
+
+    matcher.insert("/:object/:id", "object with id").unwrap();
+    matcher
+        .insert("/secret/:id/path", "secret with id and path")
+        .unwrap();
+
+    let matched = matcher.at("/secret/978/path").unwrap();
+    assert_eq!(matched.params.get("id"), Some("978"));
+
+    let matched = matcher.at("/something/978").unwrap();
+    assert_eq!(matched.params.get("id"), Some("978"));
+    assert_eq!(matched.params.get("object"), Some("something"));
+
+    let matched = matcher.at("/secret/978").unwrap();
+    assert_eq!(matched.params.get("id"), Some("978"));
 }
 
 insert_tests! {
@@ -517,6 +558,27 @@ tsr_tests! {
         ],
         "/" => false,
     },
+    double_overlap_tsr {
+        routes = [
+            "/:object/:id",
+            "/secret/:id/path",
+            "/secret/978/",
+            "/other/:object/:id/",
+            "/other/an_object/:id",
+            "/other/static/path",
+            "/other/long/static/path/"
+        ],
+        "/secret/978/path/"          => true,
+        "/object/id/"                => true,
+        "/object/id/path"            => false,
+        "/secret/978"                => true,
+        "/other/object/1"            => true,
+        "/other/object/1/2"          => false,
+        "/other/an_object/1/"        => true,
+        "/other/static/path/"        => true,
+        "/other/long/static/path"    => true,
+        "/other/object/static/path"  => false,
+    }
 }
 
 #[test]
@@ -690,25 +752,4 @@ fn test_tree_find_case_insensitive_path() {
             }
         };
     }
-}
-
-// https://github.com/ibraheemdev/matchit/issues/12
-#[test]
-fn foo() {
-    let mut matcher = Node::new();
-
-    matcher.insert("/:object/:id", "object with id").unwrap();
-    matcher
-        .insert("/secret/:id/path", "secret with id and path")
-        .unwrap();
-
-    let matched = matcher.at("/secret/978/path").unwrap();
-    assert_eq!(matched.params.get("id"), Some("978"));
-
-    let matched = matcher.at("/something/978").unwrap();
-    assert_eq!(matched.params.get("id"), Some("978"));
-    assert_eq!(matched.params.get("object"), Some("something"));
-
-    let matched = matcher.at("/secret/978").unwrap();
-    assert_eq!(matched.params.get("id"), Some("978"));
 }

@@ -532,11 +532,6 @@ impl<T> Node<T> {
                                 return Err(MatchError::new(tsr));
                             }
 
-                            // Try backtracking
-                            if path != b"/" {
-                                backtrack!();
-                            }
-
                             return Err(MatchError::new(false));
                         }
                         NodeType::CatchAll => {
