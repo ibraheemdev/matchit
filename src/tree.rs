@@ -5,16 +5,6 @@ use std::cmp::min;
 use std::mem;
 use std::str;
 
-/// A successful match consisting of the registered value and the URL parameters, returned by
-/// [`Node::at`](crate::Node::at).
-#[derive(Debug)]
-pub struct Match<'k, 'v, V> {
-    /// The value stored under the matched node.
-    pub value: V,
-    /// The route parameters. See [parameters](crate#parameters) for more details.
-    pub params: Params<'k, 'v>,
-}
-
 /// The types of nodes the tree can hold
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
 enum NodeType {
@@ -82,21 +72,6 @@ impl<T> Default for Node<T> {
 }
 
 impl<T> Node<T> {
-    /// Construct a new `Node`.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Register a value in the tree under the given route.
-    /// ```rust
-    /// # use matchit::Node;
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut matcher = Node::new();
-    /// matcher.insert("/home", "Welcome!")?;
-    /// matcher.insert("/users/:id", "A User")?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into().into_bytes();
         let mut prefix = route.as_ref();
@@ -358,47 +333,6 @@ impl<T> Node<T> {
             return Ok(());
         }
     }
-
-    /// Tries to find a value in the router matching the given path.
-    /// If no value can be found it returns a trailing slash redirect recommendation, see [`tsr`](crate::MatchError::tsr).
-    /// ```rust
-    /// # use matchit::Node;
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut matcher = Node::new();
-    /// matcher.insert("/home", "Welcome!")?;
-    ///
-    /// let matched = matcher.at("/home").unwrap();
-    /// assert_eq!(*matched.value, "Welcome!");
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn at<'n, 'p>(&'n self, path: &'p str) -> Result<Match<'n, 'p, &'n T>, MatchError> {
-        match self.at_inner(path.as_bytes()) {
-            Ok(v) => Ok(Match {
-                // SAFETY: We only expose &mut T through &mut self
-                value: unsafe { &*v.value.get() },
-                params: v.params,
-            }),
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Tries to find a value in the router matching the given path, and returns a mutable
-    /// reference to it. If no value can be found it returns a trailing slash redirect
-    /// recommendation, see [`tsr`](crate::MatchError::tsr).
-    pub fn at_mut<'n, 'p>(
-        &'n mut self,
-        path: &'p str,
-    ) -> Result<Match<'n, 'p, &'n mut T>, MatchError> {
-        match self.at_inner(path.as_bytes()) {
-            Ok(v) => Ok(Match {
-                // SAFETY: We have &mut self
-                value: unsafe { &mut *v.value.get() },
-                params: v.params,
-            }),
-            Err(e) => Err(e),
-        }
-    }
 }
 
 struct Skipped<'n, 'p, T> {
@@ -410,7 +344,7 @@ struct Skipped<'n, 'p, T> {
 #[rustfmt::skip]
 macro_rules! backtracker {
     ($skipped_nodes:ident, $path:ident, $current:ident, $params:ident, $backtracking:ident, $walk:lifetime) => {
-        macro_rules! backtrack {
+        macro_rules! try_backtrack {
             () => {
                 while let Some(skipped) = $skipped_nodes.pop() {
                     if skipped.path.ends_with($path) {
@@ -431,10 +365,10 @@ impl<T> Node<T> {
     // It's a bit sad that we have to introduce unsafe here, but rust doesn't really have a way
     // to abstract over mutability, so it avoids having to duplicate logic between `at` and
     // `at_mut`.
-    fn at_inner<'n, 'p>(
+    pub fn at<'n, 'p>(
         &'n self,
         path: &'p [u8],
-    ) -> Result<Match<'n, 'p, &'n UnsafeCell<T>>, MatchError> {
+    ) -> Result<(&'n UnsafeCell<T>, Params<'n, 'p>), MatchError> {
         let full_path = path;
 
         let mut current = self;
@@ -451,13 +385,12 @@ impl<T> Node<T> {
 
                 if prefix == current.prefix {
                     path = rest;
-
-                    let idx = path[0];
+                    let index = path[0];
 
                     // Try all the non-wildcard children first by matching the indices
                     // unless we are currently backtracking
                     if !backtracking {
-                        if let Some(i) = current.indices.iter().position(|&c| c == idx) {
+                        if let Some(i) = current.indices.iter().position(|&c| c == index) {
                             if current.wild_child {
                                 skipped_nodes.push(Skipped {
                                     path: &full_path
@@ -473,17 +406,17 @@ impl<T> Node<T> {
                     }
 
                     if !current.wild_child {
-                        // If the path at the end of the loop is not '/', and the
-                        // current node has no child nodes, we need to backtrack
+                        if path == b"/" && current.value.is_some() {
+                            return Err(MatchError::ExtraTrailingSlash);
+                        }
+
+                        // Try backtracking.
                         if path != b"/" {
-                            backtrack!();
+                            try_backtrack!();
                         }
 
                         // Nothing found.
-                        // We can recommend to redirect to the same URL without a
-                        // trailing slash if a leaf exists for that path.
-                        let tsr = path == b"/" && current.value.is_some();
-                        return Err(MatchError::new(tsr));
+                        return Err(MatchError::NotFound);
                     }
 
                     // Handle wildcard child, which is always at the end of the array
@@ -497,8 +430,11 @@ impl<T> Node<T> {
                                     params.push(&current.prefix[1..], param);
 
                                     if current.children.is_empty() {
-                                        let tsr = path.len() == param_idx + 1;
-                                        return Err(MatchError::new(tsr));
+                                        if path.len() == param_idx + 1 {
+                                            return Err(MatchError::ExtraTrailingSlash);
+                                        }
+
+                                        return Err(MatchError::NotFound);
                                     }
 
                                     path = rest;
@@ -513,33 +449,31 @@ impl<T> Node<T> {
                             }
 
                             if let Some(value) = current.value.as_ref() {
-                                return Ok(Match { value, params });
+                                return Ok((value, params));
                             }
 
                             if let [only_child] = current.children.as_slice() {
                                 current = only_child;
 
-                                // No value found. Check if a value for this path + a
-                                // trailing slash exists for TSR recommendation
-                                let tsr = (current.prefix == b"/" && current.value.is_some())
-                                    || (current.prefix.is_empty() && current.indices == b"/");
-
-                                // If there is no TSR, try backtracking
-                                if !tsr && path != b"/" {
-                                    backtrack!();
+                                if (current.prefix == b"/" && current.value.is_some())
+                                    || (current.prefix.is_empty() && current.indices == b"/")
+                                {
+                                    return Err(MatchError::MissingTrailingSlash);
                                 }
 
-                                return Err(MatchError::new(tsr));
+                                if path != b"/" {
+                                    try_backtrack!();
+                                }
                             }
 
-                            return Err(MatchError::new(false));
+                            return Err(MatchError::NotFound);
                         }
                         NodeType::CatchAll => {
                             params.push(&current.prefix[2..], path);
 
                             return match current.value.as_ref() {
-                                Some(value) => Ok(Match { value, params }),
-                                None => Err(MatchError::new(false)),
+                                Some(value) => Ok((value, params)),
+                                None => Err(MatchError::NotFound),
                             };
                         }
                         _ => unreachable!(),
@@ -548,83 +482,62 @@ impl<T> Node<T> {
             }
 
             if path == current.prefix {
-                // If the current path is not '/', the node does not have a value,
-                // and the most recently matched node has a child node, we need
-                // to backtrack
-                if current.value.is_none() && path != b"/" {
-                    backtrack!();
+                // We should have reached the node containing the value.
+                if let Some(value) = current.value.as_ref() {
+                    return Ok((value, params));
                 }
 
-                // We should have reached the node containing the value.
-                // Check if this node has a value registered.
-                if let Some(value) = current.value.as_ref() {
-                    return Ok(Match { value, params });
+                // Otherwise try backtracking.
+                if path != b"/" {
+                    try_backtrack!();
                 }
 
                 // If there is no value for this route, but this route has a
-                // wildcard child, there must be a value for this path with an
+                // wildcard child, there must be a handle for this path with an
                 // additional trailing slash
                 if path == b"/" && current.wild_child && current.node_type != NodeType::Root {
-                    return Err(MatchError::new(true));
+                    // TODO: This case is also being triggered when there is an overlap
+                    // of dynamic and static route segments and an *extra* trailing slash.
+                    return Err(MatchError::unsure(full_path));
                 }
 
-                // No value found. Check if a value for this path + a
-                // trailing slash exists for trailing slash recommendation
+                // Check if the path is missing a trailing '/'.
                 if !backtracking {
                     if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
                         current = &current.children[i];
-                        let tsr = (current.prefix.len() == 1 && current.value.is_some())
+
+                        if (current.prefix.len() == 1 && current.value.is_some())
                             || (current.node_type == NodeType::CatchAll
-                                && current.children[0].value.is_some());
-                        return Err(MatchError::new(tsr));
+                                && current.children[0].value.is_some())
+                        {
+                            return Err(MatchError::MissingTrailingSlash);
+                        }
                     }
                 }
 
-                return Err(MatchError::new(false));
+                return Err(MatchError::NotFound);
             }
 
-            // Nothing found. We can recommend to redirect to the same URL with an
-            // extra trailing slash if a leaf exists for that path
-            let tsr = (path == b"/" && full_path != b"/")
-                || (current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some());
+            if path == b"/" && full_path != b"/" {
+                return Err(MatchError::ExtraTrailingSlash);
+            }
+
+            if current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some() {
+                return Err(MatchError::MissingTrailingSlash);
+            }
 
             // If there is no tsr, try backtracking.
-            if !tsr && path != b"/" {
-                backtrack!();
+            if path != b"/" {
+                try_backtrack!();
             }
 
-            return Err(MatchError::new(tsr));
+            return Err(MatchError::NotFound);
         }
     }
 
-    /// Makes a case-insensitive match of the given path and tries to find a handler.
-    /// It can optionally also fix trailing slashes.
-    /// If the match is successful, it returns the case corrected path.
-    /// ```rust
-    /// # use matchit::Node;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut matcher = Node::new();
-    /// matcher.insert("/home", "Welcome!")?;
-    ///
-    /// let path = matcher.path_ignore_case("/HoMe/", true).unwrap();
-    /// assert_eq!(path, "/home");
-    /// # Ok(())
-    /// # }
-    /// ````
-    pub fn path_ignore_case(
-        &self,
-        path: impl AsRef<str>,
-        fix_trailing_slash: bool,
-    ) -> Option<String> {
-        let path = path.as_ref();
+    pub fn fix_path(&self, path: &str) -> Option<String> {
         let mut insensitive_path = Vec::with_capacity(path.len() + 1);
-        let found = self.path_ignore_case_helper(
-            path.as_bytes(),
-            &mut insensitive_path,
-            [0; 4],
-            fix_trailing_slash,
-        );
+        let found = self.fix_path_helper(path.as_bytes(), &mut insensitive_path, [0; 4]);
         if found {
             Some(String::from_utf8(insensitive_path).unwrap())
         } else {
@@ -632,12 +545,11 @@ impl<T> Node<T> {
         }
     }
 
-    fn path_ignore_case_helper(
+    fn fix_path_helper(
         &self,
         mut path: &[u8],
         insensitive_path: &mut Vec<u8>,
         mut buf: [u8; 4],
-        fix_trailing_slash: bool,
     ) -> bool {
         let lower_path: &[u8] = &path.to_ascii_lowercase();
         if lower_path.len() >= self.prefix.len()
@@ -691,12 +603,7 @@ impl<T> Node<T> {
                                 // must use a recursive approach since both the
                                 // uppercase byte and the lowercase byte might exist
                                 // as an index
-                                if self.children[i].path_ignore_case_helper(
-                                    path,
-                                    insensitive_path,
-                                    buf,
-                                    fix_trailing_slash,
-                                ) {
+                                if self.children[i].fix_path_helper(path, insensitive_path, buf) {
                                     return true;
                                 }
 
@@ -718,11 +625,10 @@ impl<T> Node<T> {
 
                             for i in 0..self.indices.len() {
                                 if self.indices[i] == buf[0] {
-                                    return self.children[i].path_ignore_case_helper(
+                                    return self.children[i].fix_path_helper(
                                         path,
                                         insensitive_path,
                                         buf,
-                                        fix_trailing_slash,
                                     );
                                 }
                             }
@@ -732,11 +638,10 @@ impl<T> Node<T> {
                         for i in 0..self.indices.len() {
                             if self.indices[i] == buf[0] {
                                 // continue with child node
-                                return self.children[i].path_ignore_case_helper(
+                                return self.children[i].fix_path_helper(
                                     path,
                                     insensitive_path,
                                     buf,
-                                    fix_trailing_slash,
                                 );
                             }
                         }
@@ -744,15 +649,10 @@ impl<T> Node<T> {
 
                     // Nothing found. We can recommend to redirect to the same URL
                     // without a trailing slash if a leaf exists for that path
-                    return fix_trailing_slash && path == [b'/'] && self.value.is_some();
+                    return path == [b'/'] && self.value.is_some();
                 }
 
-                return self.children[0].path_ignore_case_match_helper(
-                    path,
-                    insensitive_path,
-                    buf,
-                    fix_trailing_slash,
-                );
+                return self.children[0].fix_path_match_helper(path, insensitive_path, buf);
             }
 
             // We should have reached the node containing the value.
@@ -763,48 +663,44 @@ impl<T> Node<T> {
 
             // No value found.
             // Try to fix the path by adding a trailing slash
-            if fix_trailing_slash {
-                for i in 0..self.indices.len() {
-                    if self.indices[i] == b'/' {
-                        if (self.children[i].prefix.len() == 1 && self.children[i].value.is_some())
-                            || (self.children[i].node_type == NodeType::CatchAll
-                                && self.children[i].children[0].value.is_some())
-                        {
-                            insensitive_path.push(b'/');
-                            return true;
-                        }
-                        return false;
+            for i in 0..self.indices.len() {
+                if self.indices[i] == b'/' {
+                    if (self.children[i].prefix.len() == 1 && self.children[i].value.is_some())
+                        || (self.children[i].node_type == NodeType::CatchAll
+                            && self.children[i].children[0].value.is_some())
+                    {
+                        insensitive_path.push(b'/');
+                        return true;
                     }
+                    return false;
                 }
             }
+
             return false;
         }
 
         // Nothing found.
         // Try to fix the path by adding / removing a trailing slash
-        if fix_trailing_slash {
-            if path == [b'/'] {
-                return true;
-            }
-            if lower_path.len() + 1 == self.prefix.len()
-                && self.prefix[lower_path.len()] == b'/'
-                && lower_path[1..].eq_ignore_ascii_case(&self.prefix[1..lower_path.len()])
-                && self.value.is_some()
-            {
-                insensitive_path.extend_from_slice(&self.prefix);
-                return true;
-            }
+        if path == [b'/'] {
+            return true;
+        }
+        if lower_path.len() + 1 == self.prefix.len()
+            && self.prefix[lower_path.len()] == b'/'
+            && lower_path[1..].eq_ignore_ascii_case(&self.prefix[1..lower_path.len()])
+            && self.value.is_some()
+        {
+            insensitive_path.extend_from_slice(&self.prefix);
+            return true;
         }
 
         false
     }
 
-    fn path_ignore_case_match_helper(
+    fn fix_path_match_helper(
         &self,
         mut path: &[u8],
         insensitive_path: &mut Vec<u8>,
         buf: [u8; 4],
-        fix_trailing_slash: bool,
     ) -> bool {
         match self.node_type {
             NodeType::Param => {
@@ -820,16 +716,11 @@ impl<T> Node<T> {
                     if !self.children.is_empty() {
                         path = &path[end..];
 
-                        return self.children[0].path_ignore_case_helper(
-                            path,
-                            insensitive_path,
-                            buf,
-                            fix_trailing_slash,
-                        );
+                        return self.children[0].fix_path_helper(path, insensitive_path, buf);
                     }
 
                     // ... but we can't
-                    if fix_trailing_slash && path.len() == end + 1 {
+                    if path.len() == end + 1 {
                         return true;
                     }
                     return false;
@@ -837,8 +728,7 @@ impl<T> Node<T> {
 
                 if self.value.is_some() {
                     return true;
-                } else if fix_trailing_slash
-                    && self.children.len() == 1
+                } else if self.children.len() == 1
                     && self.children[0].prefix == [b'/']
                     && self.children[0].value.is_some()
                 {

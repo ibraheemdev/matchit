@@ -1,4 +1,4 @@
-use crate::Node;
+use crate::tree::Node;
 
 use std::fmt;
 
@@ -64,51 +64,33 @@ impl InsertError {
     }
 }
 
-/// A failed match attempt, with trailing slash redirect information.
+/// A failed match attempt.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct MatchError {
-    tsr: bool,
+pub enum MatchError {
+    MissingTrailingSlash,
+    ExtraTrailingSlash,
+    NotFound,
 }
 
 impl MatchError {
-    /// Indicates whether a route exists at the same path with/without a trailing slash.
-    /// ```rust
-    /// # use matchit::Node;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut matcher = Node::new();
-    /// matcher.insert("/home", "Welcome!")?;
-    /// matcher.insert("/blog/", "Our blog.")?;
-    ///
-    /// // a route exists without the trailing slash
-    /// if let Err(err) = matcher.at("/home/") {
-    ///     assert!(err.tsr());
-    /// }
-    ///
-    /// // a route exists with a trailing slash
-    /// if let Err(err) = matcher.at("/blog") {
-    ///     assert!(err.tsr());
-    /// }
-    ///
-    /// // no routes match, with or without a trailing slash
-    /// if let Err(err) = matcher.at("/foobar") {
-    ///     assert!(!err.tsr());
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn tsr(self) -> bool {
-        self.tsr
-    }
-
-    pub(crate) fn new(tsr: bool) -> Self {
-        Self { tsr }
+    pub(crate) fn unsure(full_path: &[u8]) -> Self {
+        if full_path[full_path.len() - 1] == b'/' {
+            MatchError::ExtraTrailingSlash
+        } else {
+            MatchError::MissingTrailingSlash
+        }
     }
 }
 
 impl fmt::Display for MatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "no value registered under the given path")
+        let msg = match self {
+            MatchError::MissingTrailingSlash => "match error: expected trailing slash",
+            MatchError::ExtraTrailingSlash => "match error: found extra trailing slash",
+            MatchError::NotFound => "match error: route not found",
+        };
+
+        write!(f, "{}", msg)
     }
 }
 

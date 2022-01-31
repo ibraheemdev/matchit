@@ -160,7 +160,7 @@ fn call() -> impl Iterator<Item = &'static str> {
 fn compare_routers(c: &mut Criterion) {
     let mut group = c.benchmark_group("Compare Routers");
 
-    let mut matchit = matchit::Node::new();
+    let mut matchit = matchit::Router::new();
     for route in register!(colon) {
         matchit.insert(route, true).unwrap();
     }

@@ -125,12 +125,13 @@
 #![deny(rust_2018_idioms, clippy::all)]
 
 mod error;
+mod matcher;
 mod params;
 mod tree;
 
 pub use error::{InsertError, MatchError};
+pub use matcher::{Match, Router};
 pub use params::{Params, ParamsIter};
-pub use tree::{Match, Node};
 
 #[cfg(doctest)]
 mod test_readme {

@@ -1,4 +1,4 @@
-use matchit::{InsertError, MatchError, Node};
+use matchit::{InsertError, MatchError, Router};
 
 macro_rules! match_tests {
     ($($name:ident {
@@ -10,14 +10,14 @@ macro_rules! match_tests {
     }),* $(,)?) => { $(
         #[test]
         fn $name() {
-            let mut tree = Node::new();
+            let mut router = Router::new();
 
             for route in $routes {
-                tree.insert(route, route.to_owned())
+                router.insert(route, route.to_owned())
                     .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
             }
 
-            $(match tree.at($path) {
+            $(match router.at($path) {
                 Err(_) => {
                     $($( @$some )?
                         panic!("Expected value for route '{}'", $path)
@@ -41,10 +41,10 @@ macro_rules! match_tests {
                             $path
                         );
 
-                        tree.at_mut($path).unwrap().value.push_str("CHECKED");
-                        assert!(tree.at($path).unwrap().value.contains("CHECKED"));
+                        router.at_mut($path).unwrap().value.push_str("CHECKED");
+                        assert!(router.at($path).unwrap().value.contains("CHECKED"));
 
-                        let val = tree.at_mut($path).unwrap().value;
+                        let val = router.at_mut($path).unwrap().value;
                         *val = val.replace("CHECKED", "");
                     )?
 
@@ -58,7 +58,7 @@ macro_rules! match_tests {
                 }
             })*
 
-            if let Err((got, expected)) = tree.check_priorities() {
+            if let Err((got, expected)) = router.check_priorities() {
                 panic!(
                     "priority mismatch for node: got '{}', expected '{}'",
                     got, expected
@@ -74,10 +74,10 @@ macro_rules! insert_tests {
     }),* $(,)?) => { $(
         #[test]
         fn $name() {
-            let mut tree = Node::new();
+            let mut router = Router::new();
 
             $(
-                let res = tree.insert($route, $route.to_owned());
+                let res = router.insert($route, $route.to_owned());
                 assert_eq!(res, $res, "unexpected result for path '{}'", $route);
             )*
         }
@@ -87,35 +87,36 @@ macro_rules! insert_tests {
 macro_rules! tsr_tests {
     ($($name:ident {
         routes = $routes:expr,
-        $($path:literal => $tsr:expr),* $(,)?
+        $($path:literal => $tsr:ident),* $(,)?
     }),* $(,)?) => { $(
         #[test]
         fn $name() {
-            let mut tree = Node::new();
+            let mut router = Router::new();
 
             for route in $routes {
-                tree.insert(route, route.to_owned())
+                router.insert(route, route.to_owned())
                     .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
             }
 
             $(
-                match tree.at($path) {
-                    Err(m @ MatchError { .. }) => {
-                        assert_eq!(
-                            m.tsr(),
-                            $tsr,
-                            "wrong tsr value for '{}', expected {}, found {}", $path, $tsr, m.tsr()
-                        );
+                match router.at($path) {
+                    Err(MatchError::$tsr) => {
+                        // assert_eq!(
+                        //     m.tsr(),
+                        //     $tsr,
+                        //     "wrong tsr value for '{}', expected {}, found {}", $path, $tsr, m.tsr()
+                        // );
 
-                        if $tsr {
-                            let correct_path = match $path.strip_suffix('/') {
-                                Some(path) => path.to_owned(),
-                                None => format!("{}/", $path),
-                            };
+                        // if $tsr {
+                        //     let correct_path = match $path.strip_suffix('/') {
+                        //         Some(path) => path.to_owned(),
+                        //         None => format!("{}/", $path),
+                        //     };
 
-                            assert!(tree.at(&correct_path).is_ok());
-                        }
+                        //     assert!(router.at(&correct_path).is_ok());
+                        // }
                     },
+                    Err(e) => panic!("wrong tsr value for '{}', expected {}, found {}", $path, MatchError::$tsr, e),
                     res => panic!("unexpected result for '{}': {:?}", $path, res)
                 }
             )*
@@ -363,7 +364,7 @@ match_tests! {
 // https://github.com/ibraheemdev/matchit/issues/12
 #[test]
 fn foo() {
-    let mut matcher = Node::new();
+    let mut matcher = Router::new();
 
     matcher.insert("/:object/:id", "object with id").unwrap();
     matcher
@@ -502,6 +503,7 @@ tsr_tests! {
             "/doc/rust1.26.html",
             "/no/a",
             "/no/b",
+            "/no/a/b/*other",
             "/api/:page/:name",
             "/api/hello/:name/bar/",
             "/api/bar/:name",
@@ -509,57 +511,58 @@ tsr_tests! {
             "/api/baz/foo/bar",
             "/foo/:p",
         ],
-        "/hi/"               => true,
-        "/b"                 => true,
-        "/search/rustacean/" => true,
-        "/cmd/vet"           => true,
-        "/src"               => true,
-        "/x/"                => true,
-        "/y"                 => true,
-        "/0/rust/"           => true,
-        "/1/rust"            => true,
-        "/a"                 => true,
-        "/admin/"            => true,
-        "/doc/"              => true,
-        "/admin/static/"     => true,
-        "/admin/cfg/"        => true,
-        "/admin/cfg/users/"  => true,
-        "/api/hello/x/bar"   => true,
-        "/api/baz/foo/"      => true,
-        "/api/baz/bax/"      => true,
-        "/api/bar/huh/"      => true,
-        "/api/baz/foo/bar/"  => true,
-        "/api/world/abc/"    => true,
-        "/foo/pp/"           => true,
-        "/"                  => false,
-        "/no"                => false,
-        "/no/"               => false,
-        "/_"                 => false,
-        "/_/"                => false,
-        "/api"               => false,
-        "/api/"              => false,
-        "/api/hello/x/foo"   => false,
-        "/api/baz/foo/bad"   => false,
-        "/foo/p/p"           => false,
+        "/hi/"               => ExtraTrailingSlash,
+        "/b"                 => MissingTrailingSlash,
+        "/search/rustacean/" => ExtraTrailingSlash,
+        "/cmd/vet"           => MissingTrailingSlash,
+        "/src"               => MissingTrailingSlash,
+        "/x/"                => ExtraTrailingSlash,
+        "/y"                 => MissingTrailingSlash,
+        "/0/rust/"           => ExtraTrailingSlash,
+        "/1/rust"            => MissingTrailingSlash,
+        "/a"                 => MissingTrailingSlash,
+        "/admin/"            => ExtraTrailingSlash,
+        "/doc/"              => ExtraTrailingSlash,
+        "/admin/static/"     => ExtraTrailingSlash,
+        "/admin/cfg/"        => ExtraTrailingSlash,
+        "/admin/cfg/users/"  => ExtraTrailingSlash,
+        "/api/hello/x/bar"   => MissingTrailingSlash,
+        "/api/baz/foo/"      => ExtraTrailingSlash,
+        "/api/baz/bax/"      => ExtraTrailingSlash,
+        "/api/bar/huh/"      => ExtraTrailingSlash,
+        "/api/baz/foo/bar/"  => ExtraTrailingSlash,
+        "/api/world/abc/"    => ExtraTrailingSlash,
+        "/foo/pp/"           => ExtraTrailingSlash,
+        "/"                  => NotFound,
+        "/no"                => NotFound,
+        "/no/"               => NotFound,
+        "/no/a/b"            => MissingTrailingSlash,
+        "/_"                 => NotFound,
+        "/_/"                => NotFound,
+        "/api"               => NotFound,
+        "/api/"              => NotFound,
+        "/api/hello/x/foo"   => NotFound,
+        "/api/baz/foo/bad"   => NotFound,
+        "/foo/p/p"           => NotFound,
     },
     backtracking_tsr {
         routes = [
             "/a/:b/:c",
             "/a/b/:c/d/",
         ],
-        "/a/b/c/d"   => true,
+        "/a/b/c/d"   => MissingTrailingSlash,
     },
     same_len {
         routes = ["/foo", "/bar/"],
-        "/baz" => false,
+        "/baz" => NotFound,
     },
     root_tsr_wildcard {
         routes = ["/:foo"],
-        "/" => false,
+        "/" => NotFound,
     },
     root_tsr_static {
         routes = ["/foo"],
-        "/" => false,
+        "/" => NotFound,
     },
     root_tsr {
         routes = [
@@ -567,7 +570,7 @@ tsr_tests! {
             "/bar",
             "/:baz"
         ],
-        "/" => false,
+        "/" => NotFound,
     },
     double_overlap_tsr {
         routes = [
@@ -579,22 +582,22 @@ tsr_tests! {
             "/other/static/path",
             "/other/long/static/path/"
         ],
-        "/secret/978/path/"          => true,
-        "/object/id/"                => true,
-        "/object/id/path"            => false,
-        "/secret/978"                => true,
-        "/other/object/1"            => true,
-        "/other/object/1/2"          => false,
-        "/other/an_object/1/"        => true,
-        "/other/static/path/"        => true,
-        "/other/long/static/path"    => true,
-        "/other/object/static/path"  => false,
+        "/secret/978/path/"          => ExtraTrailingSlash,
+        "/object/id/"                => ExtraTrailingSlash,
+        "/object/id/path"            => NotFound,
+        "/secret/978"                => MissingTrailingSlash,
+        "/other/object/1"            => MissingTrailingSlash,
+        "/other/object/1/2"          => NotFound,
+        "/other/an_object/1/"        => ExtraTrailingSlash,
+        "/other/static/path/"        => ExtraTrailingSlash,
+        "/other/long/static/path"    => MissingTrailingSlash,
+        "/other/object/static/path"  => NotFound,
     }
 }
 
 #[test]
-fn test_tree_find_case_insensitive_path() {
-    let mut tree = Node::new();
+fn test_router_find_case_insensitive_path() {
+    let mut router = Router::new();
 
     let routes = vec![
             "/hi",
@@ -633,23 +636,11 @@ fn test_tree_find_case_insensitive_path() {
     ];
 
     for route in &routes {
-        tree.insert(*route, route.to_owned()).unwrap();
+        router.insert(*route, route.to_owned()).unwrap();
     }
 
     for route in &routes {
-        let out = tree.path_ignore_case(route, true);
-        match out {
-            None => panic!("Route '{}' not found!", route),
-            Some(out) => {
-                if out != *route {
-                    panic!("Wrong result for route '{}': {}", route, out);
-                }
-            }
-        };
-    }
-
-    for route in &routes {
-        let out = tree.path_ignore_case(route, false);
+        let out = router.fix_path(route);
         match out {
             None => panic!("Route '{}' not found!", route),
             Some(out) => {
@@ -727,7 +718,7 @@ fn test_tree_find_case_insensitive_path() {
     struct Test {
         inn: &'static str,
         out: &'static str,
-        slash: bool,
+        _slash: bool,
     }
 
     let tests: Vec<Test> = tests
@@ -735,32 +726,14 @@ fn test_tree_find_case_insensitive_path() {
         .map(|test| Test {
             inn: test.0,
             out: test.1,
-            slash: test.2,
+            _slash: test.2,
         })
         .collect();
 
     for test in &tests {
-        let res = tree.path_ignore_case(test.inn, true).unwrap_or_default();
+        let res = router.fix_path(test.inn).unwrap_or_default();
         if res != test.out {
             panic!("Wrong result for route '{}': {}", res, test.out);
         }
-    }
-
-    for test in &tests {
-        let res = tree.path_ignore_case(test.inn, false);
-        match res {
-            None => (),
-            Some(res) => {
-                if test.slash {
-                    panic!(
-                        "Found without fix_trailing_slash: {}; got {}",
-                        test.inn, res
-                    );
-                }
-                if res != test.out {
-                    panic!("Wrong result for route '{}': {}", res, test.out);
-                }
-            }
-        };
     }
 }
