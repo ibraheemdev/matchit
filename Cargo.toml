@@ -1,9 +1,9 @@
 [package]
 name = "matchit"
-version = "0.4.5"
+version = "0.4.6"
 license = "MIT"
 authors = ["ibraheem <ibrah1440@gmail.com>"]
-edition = "2021"
+edition = "2018"
 description = "A blazing fast URL router."
 categories = ["network-programming", "algorithms"]
 keywords = ["router", "path", "tree", "match", "url"]
