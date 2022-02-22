@@ -166,8 +166,20 @@ fn compare_routers(c: &mut Criterion) {
     }
     group.bench_function("matchit", |b| {
         b.iter(|| {
-            for route in call() {
+            for route in black_box(call()) {
                 black_box(matchit.at(route).unwrap());
+            }
+        });
+    });
+
+    let mut path_tree = path_tree::PathTree::new();
+    for route in register!(colon) {
+        path_tree.insert(route, true);
+    }
+    group.bench_function("path-tree", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                black_box(path_tree.find(route).unwrap());
             }
         });
     });
@@ -175,7 +187,7 @@ fn compare_routers(c: &mut Criterion) {
     let gonzales = gonzales::RouterBuilder::new().build(register!(brackets));
     group.bench_function("gonzales", |b| {
         b.iter(|| {
-            for route in call() {
+            for route in black_box(call()) {
                 black_box(gonzales.route(route).unwrap());
             }
         });
@@ -188,7 +200,7 @@ fn compare_routers(c: &mut Criterion) {
     let actix = actix.finish();
     group.bench_function("actix", |b| {
         b.iter(|| {
-            for route in call() {
+            for route in black_box(call()) {
                 let mut path = actix_router::Path::new(route);
                 black_box(actix.recognize(&mut path).unwrap());
             }
@@ -198,7 +210,7 @@ fn compare_routers(c: &mut Criterion) {
     let regex_set = regex::RegexSet::new(register!(regex)).unwrap();
     group.bench_function("regex", |b| {
         b.iter(|| {
-            for route in call() {
+            for route in black_box(call()) {
                 black_box(regex_set.matches(route));
             }
         });
@@ -210,7 +222,7 @@ fn compare_routers(c: &mut Criterion) {
     }
     group.bench_function("route-recognizer", |b| {
         b.iter(|| {
-            for route in call() {
+            for route in black_box(call()) {
                 black_box(route_recognizer.recognize(route).unwrap());
             }
         });
