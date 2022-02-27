@@ -109,10 +109,13 @@ in just over 200 nanoseconds, an order of magnitude faster than most other route
 
 ```text
 Compare Routers/matchit 
-time:   [203.73 ns 204.07 ns 204.45 ns]
+time:   [219.10 ns 219.38 ns 219.70 ns]
 
 Compare Routers/actix   
 time:   [31.629 us 31.664 us 31.701 us]
+
+Compare Routers/path-tree
+time:   [468.95 ns 470.34 ns 471.65 ns]
 
 Compare Routers/regex   
 time:   [21.995 us 22.144 us 22.319 us]
