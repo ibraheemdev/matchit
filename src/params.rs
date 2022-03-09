@@ -24,9 +24,9 @@ impl<'k, 'v> Param<'k, 'v> {
 ///
 /// ```rust
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # let mut matcher = matchit::Node::new();
-/// # matcher.insert("/users/:id", true).unwrap();
-/// let matched = matcher.at("/users/1")?;
+/// # let mut router = matchit::Router::new();
+/// # router.insert("/users/:id", true).unwrap();
+/// let matched = router.at("/users/1")?;
 ///
 /// // you can iterate through the keys and values
 /// for (key, value) in matched.params.iter() {

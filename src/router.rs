@@ -23,14 +23,14 @@ impl<T> Router<T> {
         Self::default()
     }
 
-    /// Insert a new route.
+    /// Insert a route.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use matchit::Node;
+    /// # use matchit::Router;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut router = Node::new();
+    /// let mut router = Router::new();
     /// router.insert("/home", "Welcome!")?;
     /// router.insert("/users/:id", "A User")?;
     /// # Ok(())
@@ -41,9 +41,6 @@ impl<T> Router<T> {
     }
 
     /// Tries to find a value in the router matching the given path.
-    ///
-    /// If no value can be found it returns a trailing slash redirect recommendation.
-    /// See [`tsr`](crate::routerror::tsr) for details.
     ///
     /// # Examples
     ///
@@ -69,21 +66,18 @@ impl<T> Router<T> {
         }
     }
 
-    /// Tries to find a value in the router matching the given path, and returns a mutable
-    /// reference to it.
-    ///
-    /// If no value can be found it returns a trailing slash redirect recommendation.
-    /// See [`tsr`](crate::routerror::tsr) for details.
+    /// Tries to find a value in the router matching the given path,
+    /// returning a mutable reference.
     ///
     /// # Examples
     ///
     /// ```rust
-    /// # use router::Router;
+    /// # use matchit::Router;
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut router = Router::new();
-    /// router.insert("/", 0)?;
+    /// router.insert("/", 1)?;
     ///
-    /// router.at_mut("/").unwrap().value += 1;
+    /// *router.at_mut("/").unwrap().value += 1;
     /// assert_eq!(*router.at("/").unwrap().value, 2);
     /// # Ok(())
     /// # }
@@ -114,7 +108,7 @@ impl<T> Router<T> {
     /// let mut router = Router::new();
     /// router.insert("/home", "Welcome!")?;
     ///
-    /// let path = router.fix_path("/HoMe/", true).unwrap();
+    /// let path = router.fix_path("/HoMe/").unwrap();
     /// assert_eq!(path, "/home");
     /// # Ok(())
     /// # }
@@ -129,8 +123,8 @@ impl<T> Router<T> {
     }
 }
 
-/// A successful match consisting of the registered value and the URL parameters,
-/// returned by [`Router::at`](Router::at).
+/// A successful match consisting of the registered value
+/// and URL parameters, returned by [`Router::at`](Router::at).
 #[derive(Debug)]
 pub struct Match<'k, 'v, V> {
     /// The value stored under the matched node.

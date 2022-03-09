@@ -67,8 +67,11 @@ impl InsertError {
 /// A failed match attempt.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MatchError {
+    /// The path was missing a trailing slash.
     MissingTrailingSlash,
+    /// The path had an extra trailing slash.
     ExtraTrailingSlash,
+    /// No matching route was found.
     NotFound,
 }
 
