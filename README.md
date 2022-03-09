@@ -26,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Parameters
 
-Along with static routes, the router also supports *dynamic* route segments. These include named or catch-all parameters:
+Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters:
 
 ### Named Parameters
 

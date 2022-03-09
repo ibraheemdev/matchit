@@ -100,22 +100,7 @@ macro_rules! tsr_tests {
 
             $(
                 match router.at($path) {
-                    Err(MatchError::$tsr) => {
-                        // assert_eq!(
-                        //     m.tsr(),
-                        //     $tsr,
-                        //     "wrong tsr value for '{}', expected {}, found {}", $path, $tsr, m.tsr()
-                        // );
-
-                        // if $tsr {
-                        //     let correct_path = match $path.strip_suffix('/') {
-                        //         Some(path) => path.to_owned(),
-                        //         None => format!("{}/", $path),
-                        //     };
-
-                        //     assert!(router.at(&correct_path).is_ok());
-                        // }
-                    },
+                    Err(MatchError::$tsr) => {},
                     Err(e) => panic!("wrong tsr value for '{}', expected {}, found {}", $path, MatchError::$tsr, e),
                     res => panic!("unexpected result for '{}': {:?}", $path, res)
                 }
