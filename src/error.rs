@@ -65,6 +65,30 @@ impl InsertError {
 }
 
 /// A failed match attempt.
+///
+/// ```
+/// use matchit::{MatchError, Router};
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut router = Router::new();
+/// router.insert("/home", "Welcome!")?;
+/// router.insert("/blog/", "Our blog.")?;
+///
+/// // a route exists without the trailing slash
+/// if let Err(err) = router.at("/home/") {
+///     assert_eq!(err, MatchError::ExtraTrailingSlash);
+/// }
+///
+/// // a route exists with a trailing slash
+/// if let Err(err) = router.at("/blog") {
+///     assert_eq!(err, MatchError::MissingTrailingSlash);
+/// }
+///
+/// // no routes match
+/// if let Err(err) = router.at("/foobar") {
+///     assert_eq!(err, MatchError::NotFound);
+/// }
+/// # Ok(())
+/// # }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MatchError {
     /// The path was missing a trailing slash.
