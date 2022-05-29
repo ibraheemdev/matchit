@@ -10,9 +10,9 @@ use std::str;
 enum NodeType {
     /// The root path
     Root,
-    /// A URL parameter, ex: `/:id`. See `Param`
+    /// A route parameter, ex: `/:id`.
     Param,
-    /// A wilcard parameter, ex: `/*static`
+    /// A catchall parameter, ex: `/*file`
     CatchAll,
     /// Anything else
     Static,
@@ -26,7 +26,7 @@ pub struct Node<T> {
     wild_child: bool,
     indices: Vec<u8>,
     node_type: NodeType,
-    // See `at_inner` for why an unsafe cell is needed.
+    // see `at_inner` for why an unsafe cell is needed.
     value: Option<UnsafeCell<T>>,
     pub(crate) prefix: Vec<u8>,
     pub(crate) children: Vec<Self>,
@@ -47,7 +47,7 @@ where
             node_type: self.node_type,
             indices: self.indices.clone(),
             children: self.children.clone(),
-            // SAFETY: We only expose &mut T through &mut self
+            // SAFETY: we only expose &mut T through &mut self
             value: self
                 .value
                 .as_ref()
@@ -78,7 +78,7 @@ impl<T> Node<T> {
 
         self.priority += 1;
 
-        // Empty tree
+        // empty tree
         if self.prefix.is_empty() && self.children.is_empty() {
             self.insert_child(prefix, &route, val)?;
             self.node_type = NodeType::Root;
@@ -88,9 +88,11 @@ impl<T> Node<T> {
         let mut current = self;
 
         'walk: loop {
-            // Find the longest common prefix.
-            // This also implies that the common prefix contains no ':' or '*'
-            // since the existing key can't contain those chars.
+            // find the longest common prefix
+            //
+            // this also implies that the common prefix contains
+            // no ':' or '*', since the existing key can't contain
+            // those chars
             let mut i = 0;
             let max = min(prefix.len(), current.prefix.len());
 
@@ -98,7 +100,7 @@ impl<T> Node<T> {
                 i += 1;
             }
 
-            // Split edge
+            // split edge
             if i < current.prefix.len() {
                 let mut child = Self {
                     prefix: current.prefix[i..].to_owned(),
@@ -117,7 +119,7 @@ impl<T> Node<T> {
                 current.wild_child = false;
             }
 
-            // Make new node a child of this node
+            // make new node a child of this node
             if prefix.len() > i {
                 prefix = &prefix[i..];
 
@@ -134,32 +136,31 @@ impl<T> Node<T> {
                     continue 'walk;
                 }
 
-                // Check if a child with the next path byte exists
+                // check if a child with the next path byte exists
                 for mut i in 0..current.indices.len() {
                     if idxc == current.indices[i] {
                         i = current.update_child_priority(i);
                         current = &mut current.children[i];
-
                         continue 'walk;
                     }
                 }
 
                 if idxc != b':' && idxc != b'*' && current.node_type != NodeType::CatchAll {
                     current.indices.push(idxc);
-                    let child = current.add_child(Self::default());
-                    current.update_child_priority(current.indices.len() - 1);
+                    let mut child = current.add_child(Self::default());
+                    child = current.update_child_priority(child);
                     current = &mut current.children[child];
                 } else if current.wild_child {
-                    // inserting a wildcard node, need to check if it conflicts with the existing wildcard
+                    // inserting a wildcard node, check if it conflicts with the existing wildcard
                     current = current.children.last_mut().unwrap();
                     current.priority += 1;
 
-                    // Check if the wildcard matches
+                    // check if the wildcard matches
                     if prefix.len() >= current.prefix.len()
                         && current.prefix == prefix[..current.prefix.len()]
-                        // Adding a child to a CatchAll Node is not possible
+                        // adding a child to a catchall Node is not possible
                         && current.node_type != NodeType::CatchAll
-                        // Check for longer wildcard, e.g. :name and :names
+                        // check for longer wildcard, e.g. :name and :names
                         && (current.prefix.len() >= prefix.len()
                             || prefix[current.prefix.len()] == b'/')
                     {
@@ -172,7 +173,7 @@ impl<T> Node<T> {
                 return current.insert_child(prefix, &route, val);
             }
 
-            // Otherwise add value to current node
+            // otherwise add value to current node
             if current.value.is_some() {
                 return Err(InsertError::conflict(&route, prefix, current));
             }
@@ -196,7 +197,7 @@ impl<T> Node<T> {
         }
     }
 
-    // Increments priority of the given child and reorders if necessary
+    // increments priority of the given child and reorders if necessary
     // returns the new position (index) of the child
     fn update_child_priority(&mut self, pos: usize) -> usize {
         self.children[pos].priority += 1;
@@ -228,20 +229,17 @@ impl<T> Node<T> {
         let mut current = self;
 
         loop {
-            let (wildcard, wildcard_index, valid) = find_wildcard(prefix);
-
-            if wildcard_index.is_none() {
-                current.value = Some(UnsafeCell::new(val));
-                current.prefix = prefix.to_owned();
-                return Ok(());
-            };
-
-            let mut wildcard_index = wildcard_index.unwrap();
-            let wildcard = wildcard.unwrap();
-
-            // the wildcard name must not contain ':' and '*'
-            if !valid {
-                return Err(InsertError::TooManyParams);
+            // search for a wildcard segment
+            let (wildcard, wildcard_index) = match find_wildcard(prefix) {
+                (Some((w, i)), true) => (w, i),
+                // the wildcard name contains invalid characters (':' or '*')
+                (Some(..), false) => return Err(InsertError::TooManyParams),
+                // no wildcard, simply use the current node
+                (None, _) => {
+                    current.value = Some(UnsafeCell::new(val));
+                    current.prefix = prefix.to_owned();
+                    return Ok(());
+                }
             };
 
             // check if the wildcard has a name
@@ -249,9 +247,9 @@ impl<T> Node<T> {
                 return Err(InsertError::UnnamedParam);
             }
 
-            // Param
+            // route parameter
             if wildcard[0] == b':' {
-                // Insert prefix before the current wildcard
+                // insert prefix before the current wildcard
                 if wildcard_index > 0 {
                     current.prefix = prefix[..wildcard_index].to_owned();
                     prefix = &prefix[wildcard_index..];
@@ -268,7 +266,7 @@ impl<T> Node<T> {
                 current = &mut current.children[child];
                 current.priority += 1;
 
-                // If the route doesn't end with the wildcard, then there
+                // if the route doesn't end with the wildcard, then there
                 // will be another non-wildcard subroute starting with '/'
                 if wildcard.len() < prefix.len() {
                     prefix = &prefix[wildcard.len()..];
@@ -282,53 +280,46 @@ impl<T> Node<T> {
                     continue;
                 }
 
-                // Otherwise we're done. Insert the value in the new leaf
+                // otherwise we're done. Insert the value in the new leaf
                 current.value = Some(UnsafeCell::new(val));
                 return Ok(());
             }
 
-            // catch all
+            // catch all route
+            assert_eq!(wildcard[0], b'*');
+
+            // "/foo/*catchall/bar"
             if wildcard_index + wildcard.len() != prefix.len() {
                 return Err(InsertError::InvalidCatchAll);
             }
 
-            if !current.prefix.is_empty() && current.prefix.last().copied() == Some(b'/') {
-                return Err(InsertError::conflict(route, prefix, current));
+            if let Some(i) = wildcard_index.checked_sub(1) {
+                // "/foo/bar*catchall"
+                if prefix[i] != b'/' {
+                    return Err(InsertError::InvalidCatchAll);
+                }
             }
 
-            // Currently fixed width 1 for '/'
-            wildcard_index = wildcard_index
-                .checked_sub(1)
-                .ok_or(InsertError::MalformedPath)?;
-
-            if prefix[wildcard_index] != b'/' {
+            // "*catchall"
+            if prefix == route && route[0] != b'/' {
                 return Err(InsertError::InvalidCatchAll);
             }
 
-            current.prefix = prefix[..wildcard_index].to_owned();
-            current.indices = vec![b'/'];
+            if wildcard_index > 0 {
+                current.prefix = prefix[..wildcard_index].to_owned();
+                prefix = &prefix[wildcard_index..];
+            }
 
-            // first node: CatchAll Node with empty route
             let child = Self {
-                wild_child: true,
-                node_type: NodeType::CatchAll,
-                ..Self::default()
-            };
-
-            let child = current.add_child(child);
-            current = &mut current.children[child];
-            current.priority += 1;
-
-            // Second node: node holding the variable
-            let child = Self {
-                prefix: prefix[wildcard_index..].to_owned(),
+                prefix: prefix.to_owned(),
                 node_type: NodeType::CatchAll,
                 value: Some(UnsafeCell::new(val)),
                 priority: 1,
                 ..Self::default()
             };
 
-            current.children = vec![child];
+            current.add_child(child);
+            current.wild_child = true;
 
             return Ok(());
         }
@@ -362,9 +353,9 @@ macro_rules! backtracker {
 }
 
 impl<T> Node<T> {
-    // It's a bit sad that we have to introduce unsafe here, but rust doesn't really have a way
-    // to abstract over mutability, so it avoids having to duplicate logic between `at` and
-    // `at_mut`.
+    // It's a bit sad that we have to introduce unsafe here,
+    // but rust doesn't really have a way to abstract over mutability,
+    // so it avoids having to duplicate logic between `at` and `at_mut`.
     pub fn at<'n, 'p>(
         &'n self,
         path: &'p [u8],
@@ -387,8 +378,8 @@ impl<T> Node<T> {
                     path = rest;
                     let index = path[0];
 
-                    // Try all the non-wildcard children first by matching the indices
-                    // unless we are currently backtracking
+                    // try all the non-wildcard children first by matching
+                    // the indices, unless we are currently backtracking
                     if !backtracking {
                         if let Some(i) = current.indices.iter().position(|&c| c == index) {
                             if current.wild_child {
@@ -410,16 +401,16 @@ impl<T> Node<T> {
                             return Err(MatchError::ExtraTrailingSlash);
                         }
 
-                        // Try backtracking.
+                        // try backtracking
                         if path != b"/" {
                             try_backtrack!();
                         }
 
-                        // Nothing found.
+                        // nothing found
                         return Err(MatchError::NotFound);
                     }
 
-                    // Handle wildcard child, which is always at the end of the array
+                    // handle wildcard child, which is always at the end of the array
                     current = current.children.last().unwrap();
 
                     match current.node_type {
@@ -448,7 +439,7 @@ impl<T> Node<T> {
                                 }
                             }
 
-                            if let Some(value) = current.value.as_ref() {
+                            if let Some(ref value) = current.value {
                                 return Ok((value, params));
                             }
 
@@ -469,10 +460,10 @@ impl<T> Node<T> {
                             return Err(MatchError::NotFound);
                         }
                         NodeType::CatchAll => {
-                            params.push(&current.prefix[2..], path);
+                            params.push(&current.prefix[1..], path);
 
-                            return match current.value.as_ref() {
-                                Some(value) => Ok((value, params)),
+                            return match current.value {
+                                Some(ref value) => Ok((value, params)),
                                 None => Err(MatchError::NotFound),
                             };
                         }
@@ -482,34 +473,31 @@ impl<T> Node<T> {
             }
 
             if path == current.prefix {
-                // We should have reached the node containing the value.
-                if let Some(value) = current.value.as_ref() {
+                // we should have reached the node containing the value
+                if let Some(ref value) = current.value {
                     return Ok((value, params));
                 }
 
-                // Otherwise try backtracking.
+                // otherwise try backtracking
                 if path != b"/" {
                     try_backtrack!();
                 }
 
-                // If there is no value for this route, but this route has a
+                // if there is no value for this route, but this route has a
                 // wildcard child, there must be a handle for this path with an
                 // additional trailing slash
                 if path == b"/" && current.wild_child && current.node_type != NodeType::Root {
-                    // TODO: This case is also being triggered when there is an overlap
-                    // of dynamic and static route segments and an *extra* trailing slash.
+                    // TODO: this case is also being triggered when there is an overlap
+                    // of dynamic and static route segments and an *extra* trailing slash
                     return Err(MatchError::unsure(full_path));
                 }
 
-                // Check if the path is missing a trailing '/'.
+                // check if the path is missing a trailing '/'
                 if !backtracking {
                     if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
                         current = &current.children[i];
 
-                        if (current.prefix.len() == 1 && current.value.is_some())
-                            || (current.node_type == NodeType::CatchAll
-                                && current.children[0].value.is_some())
-                        {
+                        if current.prefix.len() == 1 && current.value.is_some() {
                             return Err(MatchError::MissingTrailingSlash);
                         }
                     }
@@ -526,7 +514,7 @@ impl<T> Node<T> {
                 return Err(MatchError::MissingTrailingSlash);
             }
 
-            // If there is no tsr, try backtracking.
+            // if there is no tsr, try backtracking
             if path != b"/" {
                 try_backtrack!();
             }
@@ -563,7 +551,7 @@ impl<T> Node<T> {
             if !path.is_empty() {
                 let cached_lower_path = <&[u8]>::clone(&lower_path);
 
-                // If this node does not have a wildcard (param or catchAll) child,
+                // if this node does not have a wildcard (param or catchAll) child,
                 // we can just look up the next child node and continue to walk down
                 // the tree
                 if !self.wild_child {
@@ -647,7 +635,7 @@ impl<T> Node<T> {
                         }
                     }
 
-                    // Nothing found. We can recommend to redirect to the same URL
+                    // nothing found. we can recommend to redirect to the same URL
                     // without a trailing slash if a leaf exists for that path
                     return path == [b'/'] && self.value.is_some();
                 }
@@ -655,14 +643,14 @@ impl<T> Node<T> {
                 return self.children[0].fix_path_match_helper(path, insensitive_path, buf);
             }
 
-            // We should have reached the node containing the value.
-            // Check if this node has a value registered.
+            // we should have reached the node containing the value.
+            // check if this node has a value registered.
             if self.value.is_some() {
                 return true;
             }
 
-            // No value found.
-            // Try to fix the path by adding a trailing slash
+            // no value found.
+            // try to fix the path by adding a trailing slash
             for i in 0..self.indices.len() {
                 if self.indices[i] == b'/' {
                     if (self.children[i].prefix.len() == 1 && self.children[i].value.is_some())
@@ -679,8 +667,8 @@ impl<T> Node<T> {
             return false;
         }
 
-        // Nothing found.
-        // Try to fix the path by adding / removing a trailing slash
+        // nothing found.
+        // try to fix the path by adding / removing a trailing slash
         if path == [b'/'] {
             return true;
         }
@@ -732,7 +720,7 @@ impl<T> Node<T> {
                     && self.children[0].prefix == [b'/']
                     && self.children[0].value.is_some()
                 {
-                    // No value found. Check if a value for this path + a
+                    // no value found. check if a value for this path + a
                     // trailing slash exists
                     insensitive_path.push(b'/');
                     return true;
@@ -781,26 +769,46 @@ const fn char_start(b: u8) -> bool {
 }
 
 // Search for a wildcard segment and check the name for invalid characters.
-fn find_wildcard(path: &[u8]) -> (Option<&[u8]>, Option<usize>, bool) {
-    // Find start
+fn find_wildcard(path: &[u8]) -> (Option<(&[u8], usize)>, bool) {
     for (start, &c) in path.iter().enumerate() {
-        // A wildcard starts with ':' (param) or '*' (catch-all)
+        // a wildcard starts with ':' (param) or '*' (catch-all)
         if c != b':' && c != b'*' {
             continue;
         };
 
-        // Find end and check for invalid characters
+        // find end and check for invalid characters
         let mut valid = true;
 
         for (end, &c) in path[start + 1..].iter().enumerate() {
             match c {
-                b'/' => return (Some(&path[start..start + 1 + end]), Some(start), valid),
+                b'/' => return (Some((&path[start..start + 1 + end], start)), valid),
                 b':' | b'*' => valid = false,
                 _ => (),
             };
         }
 
-        return (Some(&path[start..]), Some(start), valid);
+        return (Some((&path[start..], start)), valid);
     }
-    (None, None, false)
+
+    (None, false)
+}
+
+#[cfg(test)] // visualize the tree structure when debugging
+impl<T: std::fmt::Debug> std::fmt::Debug for Node<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut x = f.debug_struct("Node");
+        x.field("value", &unsafe { self.value.as_ref().map(|x| &*x.get()) });
+        x.field("prefix", &std::str::from_utf8(&self.prefix).unwrap());
+        x.field("node_type", &self.node_type);
+        x.field("children", &self.children);
+        x.field(
+            "indices",
+            &self
+                .indices
+                .iter()
+                .map(|&x| char::from_u32(x as _))
+                .collect::<Vec<_>>(),
+        );
+        x.finish()
+    }
 }

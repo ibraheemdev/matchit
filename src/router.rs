@@ -5,6 +5,7 @@ use crate::{InsertError, MatchError, Params};
 ///
 /// See [the crate documentation](crate) for details.
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct Router<T> {
     root: Node<T>,
 }
