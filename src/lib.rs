@@ -48,7 +48,7 @@
 //!
 //! ### Catch-all Parameters
 //!
-//! Catch-all parameters start with `*` and match everything, including slashes. They must always be at the **end** of the route:
+//! Catch-all parameters start with `*` and match everything after the `/`. They must always be at the **end** of the route:
 //!
 //! ```rust
 //! # use matchit::Router;
@@ -56,9 +56,8 @@
 //! let mut m = Router::new();
 //! m.insert("/*p", true)?;
 //!
-//! assert_eq!(m.at("/")?.params.get("p"), Some("/"));
-//! assert_eq!(m.at("/foo.js")?.params.get("p"), Some("/foo.js"));
-//! assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("/c/bar.css"));
+//! assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
+//! assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 //!
 //! # Ok(())
 //! # }
@@ -66,34 +65,14 @@
 //!
 //! ## Routing Priority
 //!
-//! Static and dynamic route segments are allowed to overlap. If they do, static segments will be given higher priority:
+//! Static and wildcard routes are allowed to overlap. If they do, static segments will be given higher priority:
 //! ```rust
 //! # use matchit::Router;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut m = Router::new();
-//! m.insert("/home", "Welcome!").unwrap();  // priority: 1
+//! m.insert("/", "Welcome!").unwrap()    ;  // priority: 1
 //! m.insert("/about", "About Me").unwrap(); // priority: 1
-//! m.insert("/:other", "...").unwrap();     // priority: 2
-//!
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! Note that *catch-all* parameters are not allowed to overlap with other path segments. Attempting to insert a conflicting route will result
-//! in an error:
-//!
-//! ```rust
-//! # use matchit::{InsertError, Router};
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let mut m = Router::new();
-//! m.insert("/home", "Welcome!").unwrap();
-//!
-//! assert_eq!(
-//!     m.insert("/*filepath", "..."),
-//!     Err(InsertError::Conflict {
-//!         with: "/home".into()
-//!     })
-//! );
+//! m.insert("/*filepath", "...").unwrap();  // priority: 2
 //!
 //! # Ok(())
 //! # }

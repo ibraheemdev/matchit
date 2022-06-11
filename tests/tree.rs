@@ -145,6 +145,7 @@ match_tests! {
             "/cmd/whoami/root",
             "/cmd/whoami/root/",
             "/src",
+            "/src/",
             "/src/*filepath",
             "/search/",
             "/search/:query",
@@ -206,8 +207,8 @@ match_tests! {
         "/cmd/whoami/root"                      :: "/cmd/whoami/root"                      => {},
         "/cmd/whoami/root/"                     :: "/cmd/whoami/root/"                     => {},
         "/src"                                  :: "/src"                                  => {},
-        "/src/"                                 :: "/src/*filepath"                        => { "filepath" => "/" },
-        "/src/some/file.png"                    :: "/src/*filepath"                        => { "filepath" => "/some/file.png" },
+        "/src/"                                 :: "/src/"                                 => {},
+        "/src/some/file.png"                    :: "/src/*filepath"                        => { "filepath" => "some/file.png" },
         "/search/"                              :: "/search/"                              => {},
         "/search/actix"                         :: "/search/:query"                        => { "query" => "actix" },
         "/search/actix-web"                     :: "/search/actix-web"                     => {},
@@ -215,12 +216,13 @@ match_tests! {
         "/search/someth!ng+in+ünìcodé/"         :: ""                                      => None,
         "/user_rustacean"                       :: "/user_:name"                           => { "name" => "rustacean" },
         "/user_rustacean/about"                 :: "/user_:name/about"                     => { "name" => "rustacean" },
-        "/files/js/inc/framework.js"            :: "/files/:dir/*filepath"                 => { "dir" => "js", "filepath" => "/inc/framework.js" },
+        "/files/js/inc/framework.js"            :: "/files/:dir/*filepath"                 => { "dir" => "js", "filepath" => "inc/framework.js" },
         "/info/gordon/public"                   :: "/info/:user/public"                    => { "user" => "gordon" },
         "/info/gordon/project/rust"             :: "/info/:user/project/:project"          => { "user" => "gordon", "project" => "rust" } ,
         "/info/gordon/project/rustlang"         :: "/info/:user/project/rustlang"          => { "user" => "gordon" },
-        "/aa/aa"                                :: "/aa/*xx"                               => { "xx" => "/aa" },
-        "/ab/ab"                                :: "/ab/*xx"                               => { "xx" => "/ab" },
+        "/aa/"                                  :: "/"                                     => None,
+        "/aa/aa"                                :: "/aa/*xx"                               => { "xx" => "aa" },
+        "/ab/ab"                                :: "/ab/*xx"                               => { "xx" => "ab" },
         "/a"                                    :: "/:cc"                                  => { "cc" => "a" },
         "/all"                                  :: "/:cc"                                  => { "cc" => "all" },
         "/d"                                    :: "/:cc"                                  => { "cc" => "d" },
@@ -321,7 +323,7 @@ match_tests! {
         "/posts/2021/01/rust"   :: "/posts/:year/:month/:post" => { "year" => "2021", "month" => "01", "post" => "rust" },
         "/posts/2021/01/index"  :: "/posts/:year/:month/index" => { "year" => "2021", "month" => "01" },
         "/posts/2021/top"       :: "/posts/:year/top"          => { "year" => "2021" },
-        "/static/foo.png"       :: "/static/*path"             => { "path" => "/foo.png" },
+        "/static/foo.png"       :: "/static/*path"             => { "path" => "foo.png" },
         "/favicon.ico"          :: "/favicon.ico"              => {},
     },
     double_overlap {
@@ -343,12 +345,51 @@ match_tests! {
         "/other/an_object/1"              :: "/other/an_object/:id"                => { "id" => "1" },
         "/other/static/path"              :: "/other/static/path"                  => {},
         "/other/long/static/path/"        :: "/other/long/static/path/"            => {},
+    },
+    catchall_off_by_one {
+        routes = [
+            "/foo/*catchall",
+            "/bar",
+            "/bar/",
+            "/bar/*catchall",
+        ],
+        "/foo"   :: ""               => None,
+        "/foo/"  :: ""               => None,
+        "/foo/x" :: "/foo/*catchall" => { "catchall" => "x" },
+        "/bar"   :: "/bar"           => {},
+        "/bar/"  :: "/bar/"          => {},
+        "/bar/x" :: "/bar/*catchall" => { "catchall" => "x" },
+    },
+    catchall_static_overlap {
+        routes = [
+            "/foo",
+            "/bar",
+            "/*bar",
+            "/baz",
+            "/baz/",
+            "/baz/x",
+            "/baz/:xxx",
+            "/",
+            "/xxx/*x",
+            "/xxx/",
+        ],
+        "/foo"    :: "/foo"    => {},
+        "/bar"    :: "/bar"    => {},
+        "/baz"    :: "/baz"    => {},
+        "/baz/"   :: "/baz/"   => {},
+        "/baz/x"  :: "/baz/x"  => {},
+        "/???"    :: "/*bar"   => { "bar" => "???" },
+        "/"       :: "/"       => {},
+        ""        :: ""        => None,
+        "/xxx/y"  :: "/xxx/*x" => { "x" => "y" },
+        "/xxx/"   :: "/xxx/"   => {},
+        "/xxx"    :: ""        => None
     }
 }
 
 // https://github.com/ibraheemdev/matchit/issues/12
 #[test]
-fn foo() {
+fn issue_12() {
     let mut matcher = Router::new();
 
     matcher.insert("/:object/:id", "object with id").unwrap();
@@ -380,16 +421,18 @@ insert_tests! {
         "/cmd/:tool/:bad/foo" => Err(InsertError::Conflict { with: "/cmd/:tool/:sub".into() }),
         "/src/*filepath"      => Ok(()),
         "/src/:file"          => Err(InsertError::Conflict { with: "/src/*filepath".into() }),
-        "/src/static.json"    => Err(InsertError::Conflict { with: "/src/*filepath".into() }),
-        "/src/$filepathx"     => Err(InsertError::Conflict { with: "/src/*filepath".into() }),
-        "/src/"               => Err(InsertError::Conflict { with: "/src/*filepath".into() }),
-        "/src/foo/bar"        => Err(InsertError::Conflict { with: "/src/*filepath".into() }),
+        "/src/static.json"    => Ok(()),
+        "/src/$filepathx"     => Ok(()),
+        "/src/"               => Ok(()),
+        "/src/foo/bar"        => Ok(()),
         "/src1/"              => Ok(()),
-        "/src1/*filepath"     => Err(InsertError::Conflict { with: "/src1/".into() }),
+        "/src1/*filepath"     => Ok(()),
         "/src2*filepath"      => Err(InsertError::InvalidCatchAll),
         "/src2/*filepath"     => Ok(()),
-        "/src2/"              => Err(InsertError::Conflict { with: "/src2/*filepath".into() }),
+        "/src2/"              => Ok(()),
         "/src2"               => Ok(()),
+        "/src3"               => Ok(()),
+        "/src3/*filepath"     => Ok(()),
         "/search/:query"      => Ok(()),
         "/search/valid"       => Ok(()),
         "/user_:name"         => Ok(()),
@@ -400,13 +443,17 @@ insert_tests! {
     },
     invalid_catchall {
         "/non-leading-*catchall" => Err(InsertError::InvalidCatchAll),
+        "/foo/bar*catchall"      => Err(InsertError::InvalidCatchAll),
         "/src/*filepath/x"       => Err(InsertError::InvalidCatchAll),
         "/src2/"                 => Ok(()),
         "/src2/*filepath/x"      => Err(InsertError::InvalidCatchAll),
     },
+    invalid_catchall2 {
+        "*x" => Err(InsertError::InvalidCatchAll)
+    },
     catchall_root_conflict {
         "/"          => Ok(()),
-        "/*filepath" => Err(InsertError::Conflict { with: "/".into() }),
+        "/*filepath" => Ok(()),
     },
     child_conflict {
         "/cmd/vet"        => Ok(()),
@@ -415,7 +462,7 @@ insert_tests! {
         "/cmd/:tool/misc" => Ok(()),
         "/cmd/:tool/:bad" => Err(InsertError::Conflict { with: "/cmd/:tool/:sub".into() }),
         "/src/AUTHORS"    => Ok(()),
-        "/src/*filepath"  => Err(InsertError::Conflict { with: "/src/AUTHORS".into() }),
+        "/src/*filepath"  => Ok(()),
         "/user_x"         => Ok(()),
         "/user_:name"     => Ok(()),
         "/id/:id"         => Ok(()),
@@ -446,19 +493,41 @@ insert_tests! {
         "/:foo:bar/" => Err(InsertError::TooManyParams),
         "/:foo*bar/" => Err(InsertError::TooManyParams),
     },
-    malformed_route {
-        "*x" => Err(InsertError::MalformedPath)
-    },
     more_conflicts {
         "/con:tact"           => Ok(()),
         "/who/are/*you"       => Ok(()),
         "/who/foo/hello"      => Ok(()),
         "/whose/:users/:name" => Ok(()),
-        "/who/are/foo"        => Err(InsertError::Conflict { with: "/who/are/*you".into() }),
-        "/who/are/foo/bar"    => Err(InsertError::Conflict { with: "/who/are/*you".into() }),
+        "/who/are/foo"        => Ok(()),
+        "/who/are/foo/bar"    => Ok(()),
         "/con:nection"        => Err(InsertError::Conflict { with: "/con:tact".into() }),
         "/whose/:users/:user" => Err(InsertError::Conflict { with: "/whose/:users/:name".into() }),
-    }
+    },
+    catchall_static_overlap1 {
+        "/bar"      => Ok(()),
+        "/bar/"     => Ok(()),
+        "/bar/*foo" => Ok(()),
+    },
+    catchall_static_overlap2 {
+        "/foo"            => Ok(()),
+        "/*bar"           => Ok(()),
+        "/bar"            => Ok(()),
+        "/baz"            => Ok(()),
+        "/baz/:split"     => Ok(()),
+        "/"               => Ok(()),
+        "/*bar"           => Err(InsertError::Conflict { with: "/*bar".into() }),
+        "/*zzz"           => Err(InsertError::Conflict { with: "/*bar".into() }),
+        "/:xxx"           => Err(InsertError::Conflict { with: "/*bar".into() }),
+    },
+    catchall_static_overlap3 {
+        "/*bar"           => Ok(()),
+        "/bar"            => Ok(()),
+        "/bar/x"          => Ok(()),
+        "/bar_:x"         => Ok(()),
+        "/bar_:x"         => Err(InsertError::Conflict { with: "/bar_:x".into() }),
+        "/bar_:x/y"       => Ok(()),
+        "/bar/:x"         => Ok(()),
+    },
 }
 
 tsr_tests! {
@@ -500,7 +569,8 @@ tsr_tests! {
         "/b"                 => MissingTrailingSlash,
         "/search/rustacean/" => ExtraTrailingSlash,
         "/cmd/vet"           => MissingTrailingSlash,
-        "/src"               => MissingTrailingSlash,
+        "/src"               => NotFound,
+        "/src/"              => NotFound,
         "/x/"                => ExtraTrailingSlash,
         "/y"                 => MissingTrailingSlash,
         "/0/rust/"           => ExtraTrailingSlash,
@@ -521,7 +591,8 @@ tsr_tests! {
         "/"                  => NotFound,
         "/no"                => NotFound,
         "/no/"               => NotFound,
-        "/no/a/b"            => MissingTrailingSlash,
+        "/no/a/b"            => NotFound,
+        "/no/a/b/"           => NotFound,
         "/_"                 => NotFound,
         "/_/"                => NotFound,
         "/api"               => NotFound,
@@ -577,7 +648,7 @@ tsr_tests! {
         "/other/static/path/"        => ExtraTrailingSlash,
         "/other/long/static/path"    => MissingTrailingSlash,
         "/other/object/static/path"  => NotFound,
-    }
+    },
 }
 
 #[test]
