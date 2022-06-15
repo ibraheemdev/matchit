@@ -23,7 +23,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-
 ## Parameters
 
 Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters:
@@ -57,6 +56,7 @@ assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 ## Routing Priority
 
 Static and dynamic route segments are allowed to overlap. If they do, static segments will be given higher priority:
+
 ```rust,ignore
 let mut m = Router::new();
 m.insert("/", "Welcome!").unwrap();      // priority: 1
@@ -88,11 +88,11 @@ by the number of children with registered values, increasing the chance of choos
 # Benchmarks
 
 As it turns out, this method of routing is extremely fast. In a benchmark matching 4 paths against 130 registered routes, `matchit` find the correct routes
-in just over 200 nanoseconds, an order of magnitude faster than most other routers. You can view the benchmark code [here](https://github.com/ibraheemdev/matchit/blob/master/benches/bench.rs). 
+in under 200 nanoseconds, an order of magnitude faster than most other routers. You can view the benchmark code [here](https://github.com/ibraheemdev/matchit/blob/master/benches/bench.rs). 
 
 ```text
 Compare Routers/matchit 
-time:   [219.10 ns 219.38 ns 219.70 ns]
+time:   [197.57 ns 198.74 ns 199.83 ns]
 
 Compare Routers/actix   
 time:   [31.629 us 31.664 us 31.701 us]

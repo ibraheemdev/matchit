@@ -23,7 +23,6 @@
 //! }
 //! ```
 //!
-//!
 //! ## Parameters
 //!
 //! Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters:
@@ -65,7 +64,8 @@
 //!
 //! ## Routing Priority
 //!
-//! Static and wildcard routes are allowed to overlap. If they do, static segments will be given higher priority:
+//! Static and dynamic route segments are allowed to overlap. If they do, static segments will be given higher priority:
+//!
 //! ```rust
 //! # use matchit::Router;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
