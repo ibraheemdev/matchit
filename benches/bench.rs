@@ -143,7 +143,7 @@ macro_rules! register {
             concat!("/user/keys"),
             concat!("/user/keys/", $p1),
         ];
-        std::array::IntoIter::new(arr)
+        arr.into_iter()
     }};
 }
 
@@ -154,7 +154,7 @@ fn call() -> impl Iterator<Item = &'static str> {
         "/orgs/rust-lang/public_members/nikomatsakis",
         "/repos/rust-lang/rust/releases/1.51.0",
     ];
-    std::array::IntoIter::new(arr)
+    arr.into_iter()
 }
 
 fn compare_routers(c: &mut Criterion) {
