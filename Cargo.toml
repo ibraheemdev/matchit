@@ -21,6 +21,7 @@ regex = "1.5.4"
 route-recognizer = "0.3.0"
 gonzales = "0.0.3-beta"
 path-tree = "0.2.2"
+routefinder = "0.5.2"
 
 [features]
 default = []

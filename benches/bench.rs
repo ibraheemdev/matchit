@@ -1,5 +1,103 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
+fn call() -> impl IntoIterator<Item = &'static str> {
+    [
+        "/user/repos",
+        "/repos/rust-lang/rust/stargazers",
+        "/orgs/rust-lang/public_members/nikomatsakis",
+        "/repos/rust-lang/rust/releases/1.51.0",
+    ]
+}
+
+fn compare_routers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Compare Routers");
+
+    let mut matchit = matchit::Router::new();
+    for route in register!(colon) {
+        matchit.insert(route, true).unwrap();
+    }
+    group.bench_function("matchit", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                black_box(matchit.at(route).unwrap());
+            }
+        });
+    });
+
+    let mut path_tree = path_tree::PathTree::new();
+    for route in register!(colon) {
+        path_tree.insert(route, true);
+    }
+    group.bench_function("path-tree", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                black_box(path_tree.find(route).unwrap());
+            }
+        });
+    });
+
+    let gonzales = gonzales::RouterBuilder::new().build(register!(brackets));
+    group.bench_function("gonzales", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                black_box(gonzales.route(route).unwrap());
+            }
+        });
+    });
+
+    let mut actix = actix_router::Router::<bool>::build();
+    for route in register!(brackets) {
+        actix.path(route, true);
+    }
+    let actix = actix.finish();
+    group.bench_function("actix", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                let mut path = actix_router::Path::new(route);
+                black_box(actix.recognize(&mut path).unwrap());
+            }
+        });
+    });
+
+    let regex_set = regex::RegexSet::new(register!(regex)).unwrap();
+    group.bench_function("regex", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                black_box(regex_set.matches(route));
+            }
+        });
+    });
+
+    let mut route_recognizer = route_recognizer::Router::new();
+    for route in register!(colon) {
+        route_recognizer.add(route, true);
+    }
+    group.bench_function("route-recognizer", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                black_box(route_recognizer.recognize(route).unwrap());
+            }
+        });
+    });
+
+    let mut routefinder = routefinder::Router::new();
+    for route in register!(colon) {
+        routefinder.add(route, true).unwrap();
+    }
+    group.bench_function("routefinder", |b| {
+        b.iter(|| {
+            for route in black_box(call()) {
+                black_box(routefinder.best_match(route).unwrap());
+            }
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, compare_routers);
+criterion_main!(benches);
+
 macro_rules! register {
     (colon) => {{
         register!(finish => ":p1", ":p2", ":p3", ":p4")
@@ -11,7 +109,7 @@ macro_rules! register {
         register!(finish => "(.*)", "(.*)", "(.*)", "(.*)")
     }};
     (finish => $p1:literal, $p2:literal, $p3:literal, $p4:literal) => {{
-        let arr = [
+        [
             concat!("/authorizations"),
             concat!("/authorizations/", $p1),
             concat!("/applications/", $p1, "/tokens/", $p2),
@@ -142,94 +240,8 @@ macro_rules! register {
             concat!("/users/", $p1, "/keys"),
             concat!("/user/keys"),
             concat!("/user/keys/", $p1),
-        ];
-        arr.into_iter()
+        ]
     }};
 }
 
-fn call() -> impl Iterator<Item = &'static str> {
-    let arr = [
-        "/user/repos",
-        "/repos/rust-lang/rust/stargazers",
-        "/orgs/rust-lang/public_members/nikomatsakis",
-        "/repos/rust-lang/rust/releases/1.51.0",
-    ];
-    arr.into_iter()
-}
-
-fn compare_routers(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Compare Routers");
-
-    let mut matchit = matchit::Router::new();
-    for route in register!(colon) {
-        matchit.insert(route, true).unwrap();
-    }
-    group.bench_function("matchit", |b| {
-        b.iter(|| {
-            for route in black_box(call()) {
-                black_box(matchit.at(route).unwrap());
-            }
-        });
-    });
-
-    let mut path_tree = path_tree::PathTree::new();
-    for route in register!(colon) {
-        path_tree.insert(route, true);
-    }
-    group.bench_function("path-tree", |b| {
-        b.iter(|| {
-            for route in black_box(call()) {
-                black_box(path_tree.find(route).unwrap());
-            }
-        });
-    });
-
-    let gonzales = gonzales::RouterBuilder::new().build(register!(brackets));
-    group.bench_function("gonzales", |b| {
-        b.iter(|| {
-            for route in black_box(call()) {
-                black_box(gonzales.route(route).unwrap());
-            }
-        });
-    });
-
-    let mut actix = actix_router::Router::<bool>::build();
-    for route in register!(brackets) {
-        actix.path(route, true);
-    }
-    let actix = actix.finish();
-    group.bench_function("actix", |b| {
-        b.iter(|| {
-            for route in black_box(call()) {
-                let mut path = actix_router::Path::new(route);
-                black_box(actix.recognize(&mut path).unwrap());
-            }
-        });
-    });
-
-    let regex_set = regex::RegexSet::new(register!(regex)).unwrap();
-    group.bench_function("regex", |b| {
-        b.iter(|| {
-            for route in black_box(call()) {
-                black_box(regex_set.matches(route));
-            }
-        });
-    });
-
-    let mut route_recognizer = route_recognizer::Router::new();
-    for route in register!(colon) {
-        route_recognizer.add(route, true);
-    }
-    group.bench_function("route-recognizer", |b| {
-        b.iter(|| {
-            for route in black_box(call()) {
-                black_box(route_recognizer.recognize(route).unwrap());
-            }
-        });
-    });
-
-    group.finish();
-}
-
-criterion_group!(benches, compare_routers);
-criterion_main!(benches);
+use register;
