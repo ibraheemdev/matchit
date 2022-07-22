@@ -97,27 +97,6 @@ impl<T> Router<T> {
         }
     }
 
-    /// Performs a case-insensitive lookup of the given path,
-    /// returning the case corrected path if successful.
-    ///
-    /// Missing/extra trailing slashes are also corrected.
-    ///
-    /// ```rust
-    /// # use matchit::Router;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut router = Router::new();
-    /// router.insert("/home", "Welcome!")?;
-    ///
-    /// let path = router.fix_path("/HoMe/").unwrap();
-    /// assert_eq!(path, "/home");
-    /// # Ok(())
-    /// # }
-    /// ````
-    pub fn fix_path(&self, path: &str) -> Option<String> {
-        self.root.fix_path(path)
-    }
-
     #[cfg(feature = "__test_helpers")]
     pub fn check_priorities(&self) -> Result<u32, (u32, u32)> {
         self.root.check_priorities()

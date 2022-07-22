@@ -3,7 +3,6 @@ use crate::{InsertError, MatchError, Params};
 use std::cell::UnsafeCell;
 use std::cmp::min;
 use std::mem;
-use std::str;
 
 /// The types of nodes the tree can hold
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
@@ -523,219 +522,6 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn fix_path(&self, path: &str) -> Option<String> {
-        let mut insensitive_path = Vec::with_capacity(path.len() + 1);
-        let found = self.fix_path_helper(path.as_bytes(), &mut insensitive_path, [0; 4]);
-        if found {
-            Some(String::from_utf8(insensitive_path).unwrap())
-        } else {
-            None
-        }
-    }
-
-    fn fix_path_helper(
-        &self,
-        mut path: &[u8],
-        insensitive_path: &mut Vec<u8>,
-        mut buf: [u8; 4],
-    ) -> bool {
-        let lower_path: &[u8] = &path.to_ascii_lowercase();
-        if lower_path.len() >= self.prefix.len()
-            && (self.prefix.is_empty()
-                || lower_path[1..self.prefix.len()].eq_ignore_ascii_case(&self.prefix[1..]))
-        {
-            insensitive_path.extend_from_slice(&self.prefix);
-
-            path = &path[self.prefix.len()..];
-
-            if !path.is_empty() {
-                let cached_lower_path = <&[u8]>::clone(&lower_path);
-
-                // if this node does not have a wildcard (param or catchAll) child,
-                // we can just look up the next child node and continue to walk down
-                // the tree
-                if !self.wild_child {
-                    // skip char bytes already processed
-                    buf = shift_n_bytes(buf, self.prefix.len());
-
-                    if buf[0] == 0 {
-                        // process a new char
-                        let mut current_char = 0 as char;
-
-                        // find char start
-                        // chars are up to 4 byte long,
-                        // -4 would definitely be another char
-                        let mut off = 0;
-                        for j in 0..min(self.prefix.len(), 3) {
-                            let i = self.prefix.len() - j;
-                            if char_start(cached_lower_path[i]) {
-                                // read char from cached path
-                                current_char = str::from_utf8(&cached_lower_path[i..])
-                                    .unwrap()
-                                    .chars()
-                                    .next()
-                                    .unwrap();
-                                off = j;
-                                break;
-                            }
-                        }
-
-                        current_char.encode_utf8(&mut buf);
-
-                        // skip already processed bytes
-                        buf = shift_n_bytes(buf, off);
-
-                        for i in 0..self.indices.len() {
-                            // lowercase matches
-                            if self.indices[i] == buf[0] {
-                                // must use a recursive approach since both the
-                                // uppercase byte and the lowercase byte might exist
-                                // as an index
-                                if self.children[i].fix_path_helper(path, insensitive_path, buf) {
-                                    return true;
-                                }
-
-                                if insensitive_path.len() > self.children[i].prefix.len() {
-                                    let prev_len =
-                                        insensitive_path.len() - self.children[i].prefix.len();
-                                    insensitive_path.truncate(prev_len);
-                                }
-
-                                break;
-                            }
-                        }
-
-                        // same for uppercase char, if it differs
-                        let up = current_char.to_ascii_uppercase();
-                        if up != current_char {
-                            up.encode_utf8(&mut buf);
-                            buf = shift_n_bytes(buf, off);
-
-                            for i in 0..self.indices.len() {
-                                if self.indices[i] == buf[0] {
-                                    return self.children[i].fix_path_helper(
-                                        path,
-                                        insensitive_path,
-                                        buf,
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        // old char not finished
-                        for i in 0..self.indices.len() {
-                            if self.indices[i] == buf[0] {
-                                // continue with child node
-                                return self.children[i].fix_path_helper(
-                                    path,
-                                    insensitive_path,
-                                    buf,
-                                );
-                            }
-                        }
-                    }
-
-                    // nothing found. we can recommend to redirect to the same URL
-                    // without a trailing slash if a leaf exists for that path
-                    return path == [b'/'] && self.value.is_some();
-                }
-
-                return self.children[0].fix_path_match_helper(path, insensitive_path, buf);
-            }
-
-            // we should have reached the node containing the value.
-            // check if this node has a value registered.
-            if self.value.is_some() {
-                return true;
-            }
-
-            // no value found.
-            // try to fix the path by adding a trailing slash
-            for i in 0..self.indices.len() {
-                if self.indices[i] == b'/' {
-                    if (self.children[i].prefix.len() == 1 && self.children[i].value.is_some())
-                        || (self.children[i].node_type == NodeType::CatchAll
-                            && self.children[i].children[0].value.is_some())
-                    {
-                        insensitive_path.push(b'/');
-                        return true;
-                    }
-                    return false;
-                }
-            }
-
-            return false;
-        }
-
-        // nothing found.
-        // try to fix the path by adding / removing a trailing slash
-        if path == [b'/'] {
-            return true;
-        }
-        if lower_path.len() + 1 == self.prefix.len()
-            && self.prefix[lower_path.len()] == b'/'
-            && lower_path[1..].eq_ignore_ascii_case(&self.prefix[1..lower_path.len()])
-            && self.value.is_some()
-        {
-            insensitive_path.extend_from_slice(&self.prefix);
-            return true;
-        }
-
-        false
-    }
-
-    fn fix_path_match_helper(
-        &self,
-        mut path: &[u8],
-        insensitive_path: &mut Vec<u8>,
-        buf: [u8; 4],
-    ) -> bool {
-        match self.node_type {
-            NodeType::Param => {
-                let mut end = 0;
-
-                while end < path.len() && path[end] != b'/' {
-                    end += 1;
-                }
-
-                insensitive_path.extend_from_slice(&path[..end]);
-
-                if end < path.len() {
-                    if !self.children.is_empty() {
-                        path = &path[end..];
-
-                        return self.children[0].fix_path_helper(path, insensitive_path, buf);
-                    }
-
-                    // ... but we can't
-                    if path.len() == end + 1 {
-                        return true;
-                    }
-                    return false;
-                }
-
-                if self.value.is_some() {
-                    return true;
-                } else if self.children.len() == 1
-                    && self.children[0].prefix == [b'/']
-                    && self.children[0].value.is_some()
-                {
-                    // no value found. check if a value for this path + a
-                    // trailing slash exists
-                    insensitive_path.push(b'/');
-                    return true;
-                }
-
-                false
-            }
-            NodeType::CatchAll => {
-                insensitive_path.extend_from_slice(path);
-                true
-            }
-            _ => unreachable!(),
-        }
-    }
-
     #[cfg(feature = "__test_helpers")]
     pub fn check_priorities(&self) -> Result<u32, (u32, u32)> {
         let mut priority: u32 = 0;
@@ -753,19 +539,6 @@ impl<T> Node<T> {
 
         Ok(priority)
     }
-}
-
-// Shift bytes in array by n bytes left
-pub const fn shift_n_bytes(bytes: [u8; 4], n: usize) -> [u8; 4] {
-    match u32::from_ne_bytes(bytes).overflowing_shr((n * 8) as u32) {
-        (_, true) => [0; 4],
-        (shifted, false) => shifted.to_ne_bytes(),
-    }
-}
-
-// Reports whether the byte could be the first byte of a `char`.
-const fn char_start(b: u8) -> bool {
-    b & 0xC0 != 0x80
 }
 
 // Search for a wildcard segment and check the name for invalid characters.
@@ -794,21 +567,26 @@ fn find_wildcard(path: &[u8]) -> (Option<(&[u8], usize)>, bool) {
 }
 
 #[cfg(test)] // visualize the tree structure when debugging
-impl<T: std::fmt::Debug> std::fmt::Debug for Node<T> {
+impl<T> std::fmt::Debug for Node<T>
+where
+    T: std::fmt::Debug,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut x = f.debug_struct("Node");
-        x.field("value", &unsafe { self.value.as_ref().map(|x| &*x.get()) });
-        x.field("prefix", &std::str::from_utf8(&self.prefix).unwrap());
-        x.field("node_type", &self.node_type);
-        x.field("children", &self.children);
-        x.field(
-            "indices",
-            &self
-                .indices
-                .iter()
-                .map(|&x| char::from_u32(x as _))
-                .collect::<Vec<_>>(),
-        );
-        x.finish()
+        let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
+        let indices = self
+            .indices
+            .iter()
+            .map(|&x| char::from_u32(x as _))
+            .collect::<Vec<_>>();
+
+        let mut fmt = f.debug_struct("Node");
+
+        fmt.field("value", &value);
+        fmt.field("prefix", &std::str::from_utf8(&self.prefix));
+        fmt.field("node_type", &self.node_type);
+        fmt.field("children", &self.children);
+        fmt.field("indices", &indices);
+
+        fmt.finish()
     }
 }
