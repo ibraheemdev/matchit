@@ -98,7 +98,6 @@
 //!
 //! This allows us to reduce the route search to a small number of branches. Child nodes on the same level of the tree are also prioritized
 //! by the number of children with registered values, increasing the chance of choosing the correct branch of the first try.
-
 #![deny(rust_2018_idioms, clippy::all)]
 
 mod error;

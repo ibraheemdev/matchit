@@ -1,112 +1,16 @@
 use matchit::{InsertError, MatchError, Router};
 
-macro_rules! match_tests {
-    ($($name:ident {
-        routes = $routes:expr,
-        $( $path:literal :: $route:literal =>
-            $( $(@$none:tt)? None )?
-            $( $(@$some:tt)? { $( $key:literal => $val:literal ),* $(,)? } )?
-        ),* $(,)?
-    }),* $(,)?) => { $(
-        #[test]
-        fn $name() {
-            let mut router = Router::new();
+#[test]
+fn issue_22() {
+    let mut x = Router::new();
+    x.insert("/foo_bar", "Welcome!").unwrap();
+    x.insert("/foo/bar", "Welcome!").unwrap();
+    assert_eq!(x.at("/foo/").unwrap_err(), MatchError::NotFound);
 
-            for route in $routes {
-                router.insert(route, route.to_owned())
-                    .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
-            }
-
-            $(match router.at($path) {
-                Err(_) => {
-                    $($( @$some )?
-                        panic!("Expected value for route '{}'", $path)
-                    )?
-                }
-                Ok(result) => {
-                    $($( @$some )?
-                        if result.value != $route {
-                            panic!(
-                                "Wrong value for route '{}'. Expected '{}', found '{}')",
-                                $path, result.value, $route
-                            );
-                        }
-
-                        let expected_params = vec![$(($key, $val)),*];
-                        let got_params = result.params.iter().collect::<Vec<_>>();
-
-                        assert_eq!(
-                            got_params, expected_params,
-                            "Wrong params for route '{}'",
-                            $path
-                        );
-
-                        router.at_mut($path).unwrap().value.push_str("CHECKED");
-                        assert!(router.at($path).unwrap().value.contains("CHECKED"));
-
-                        let val = router.at_mut($path).unwrap().value;
-                        *val = val.replace("CHECKED", "");
-                    )?
-
-                    $($( @$none )?
-                        panic!(
-                            "Unexpected value for route '{}', got: {:?}",
-                            $path,
-                            result.params.iter().collect::<Vec<_>>()
-                        );
-                    )?
-                }
-            })*
-
-            if let Err((got, expected)) = router.check_priorities() {
-                panic!(
-                    "priority mismatch for node: got '{}', expected '{}'",
-                    got, expected
-                )
-            }
-        }
-   )* };
-}
-
-macro_rules! insert_tests {
-    ($($name:ident {
-        $($route:literal => $res:expr),* $(,)?
-    }),* $(,)?) => { $(
-        #[test]
-        fn $name() {
-            let mut router = Router::new();
-
-            $(
-                let res = router.insert($route, $route.to_owned());
-                assert_eq!(res, $res, "unexpected result for path '{}'", $route);
-            )*
-        }
-   )* };
-}
-
-macro_rules! tsr_tests {
-    ($($name:ident {
-        routes = $routes:expr,
-        $($path:literal => $tsr:ident),* $(,)?
-    }),* $(,)?) => { $(
-        #[test]
-        fn $name() {
-            let mut router = Router::new();
-
-            for route in $routes {
-                router.insert(route, route.to_owned())
-                    .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
-            }
-
-            $(
-                match router.at($path) {
-                    Err(MatchError::$tsr) => {},
-                    Err(e) => panic!("wrong tsr value for '{}', expected {}, found {}", $path, MatchError::$tsr, e),
-                    res => panic!("unexpected result for '{}': {:?}", $path, res)
-                }
-            )*
-        }
-   )* };
+    let mut x = Router::new();
+    x.insert("/foo", "Welcome!").unwrap();
+    x.insert("/foo/bar", "Welcome!").unwrap();
+    assert_eq!(x.at("/foo/").unwrap_err(), MatchError::ExtraTrailingSlash);
 }
 
 match_tests! {
@@ -650,3 +554,114 @@ tsr_tests! {
         "/other/object/static/path"  => NotFound,
     },
 }
+
+macro_rules! match_tests {
+    ($($name:ident {
+        routes = $routes:expr,
+        $( $path:literal :: $route:literal =>
+            $( $(@$none:tt)? None )?
+            $( $(@$some:tt)? { $( $key:literal => $val:literal ),* $(,)? } )?
+        ),* $(,)?
+    }),* $(,)?) => { $(
+        #[test]
+        fn $name() {
+            let mut router = Router::new();
+
+            for route in $routes {
+                router.insert(route, route.to_owned())
+                    .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
+            }
+
+            $(match router.at($path) {
+                Err(_) => {
+                    $($( @$some )?
+                        panic!("Expected value for route '{}'", $path)
+                    )?
+                }
+                Ok(result) => {
+                    $($( @$some )?
+                        if result.value != $route {
+                            panic!(
+                                "Wrong value for route '{}'. Expected '{}', found '{}')",
+                                $path, result.value, $route
+                            );
+                        }
+
+                        let expected_params = vec![$(($key, $val)),*];
+                        let got_params = result.params.iter().collect::<Vec<_>>();
+
+                        assert_eq!(
+                            got_params, expected_params,
+                            "Wrong params for route '{}'",
+                            $path
+                        );
+
+                        router.at_mut($path).unwrap().value.push_str("CHECKED");
+                        assert!(router.at($path).unwrap().value.contains("CHECKED"));
+
+                        let val = router.at_mut($path).unwrap().value;
+                        *val = val.replace("CHECKED", "");
+                    )?
+
+                    $($( @$none )?
+                        panic!(
+                            "Unexpected value for route '{}', got: {:?}",
+                            $path,
+                            result.params.iter().collect::<Vec<_>>()
+                        );
+                    )?
+                }
+            })*
+
+            if let Err((got, expected)) = router.check_priorities() {
+                panic!(
+                    "priority mismatch for node: got '{}', expected '{}'",
+                    got, expected
+                )
+            }
+        }
+   )* };
+}
+
+macro_rules! insert_tests {
+    ($($name:ident {
+        $($route:literal => $res:expr),* $(,)?
+    }),* $(,)?) => { $(
+        #[test]
+        fn $name() {
+            let mut router = Router::new();
+
+            $(
+                let res = router.insert($route, $route.to_owned());
+                assert_eq!(res, $res, "unexpected result for path '{}'", $route);
+            )*
+        }
+   )* };
+}
+
+macro_rules! tsr_tests {
+    ($($name:ident {
+        routes = $routes:expr,
+        $($path:literal => $tsr:ident),* $(,)?
+    }),* $(,)?) => { $(
+        #[test]
+        fn $name() {
+            let mut router = Router::new();
+
+            for route in $routes {
+                router.insert(route, route.to_owned())
+                    .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
+            }
+
+            $(
+                match router.at($path) {
+                    Err(MatchError::$tsr) => {},
+                    Err(e) => panic!("wrong tsr value for '{}', expected {}, found {}", $path, MatchError::$tsr, e),
+                    res => panic!("unexpected result for '{}': {:?}", $path, res)
+                }
+            )*
+        }
+   )* };
+}
+
+pub(self) use {insert_tests, match_tests, tsr_tests};

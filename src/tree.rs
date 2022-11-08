@@ -35,41 +35,6 @@ pub struct Node<T> {
 unsafe impl<T: Send> Send for Node<T> {}
 unsafe impl<T: Sync> Sync for Node<T> {}
 
-impl<T> Clone for Node<T>
-where
-    T: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            prefix: self.prefix.clone(),
-            wild_child: self.wild_child,
-            node_type: self.node_type,
-            indices: self.indices.clone(),
-            children: self.children.clone(),
-            // SAFETY: we only expose &mut T through &mut self
-            value: self
-                .value
-                .as_ref()
-                .map(|val| UnsafeCell::new(unsafe { &*val.get() }.clone())),
-            priority: self.priority,
-        }
-    }
-}
-
-impl<T> Default for Node<T> {
-    fn default() -> Self {
-        Self {
-            prefix: Vec::new(),
-            wild_child: false,
-            node_type: NodeType::Static,
-            indices: Vec::new(),
-            children: Vec::new(),
-            value: None,
-            priority: 0,
-        }
-    }
-}
-
 impl<T> Node<T> {
     pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into().into_bytes();
@@ -122,11 +87,11 @@ impl<T> Node<T> {
             if prefix.len() > i {
                 prefix = &prefix[i..];
 
-                let idxc = prefix[0];
+                let first = prefix[0];
 
                 // `/` after param
                 if current.node_type == NodeType::Param
-                    && idxc == b'/'
+                    && first == b'/'
                     && current.children.len() == 1
                 {
                     current = &mut current.children[0];
@@ -137,15 +102,15 @@ impl<T> Node<T> {
 
                 // check if a child with the next path byte exists
                 for mut i in 0..current.indices.len() {
-                    if idxc == current.indices[i] {
+                    if first == current.indices[i] {
                         i = current.update_child_priority(i);
                         current = &mut current.children[i];
                         continue 'walk;
                     }
                 }
 
-                if idxc != b':' && idxc != b'*' && current.node_type != NodeType::CatchAll {
-                    current.indices.push(idxc);
+                if first != b':' && first != b'*' && current.node_type != NodeType::CatchAll {
+                    current.indices.push(first);
                     let mut child = current.add_child(Self::default());
                     child = current.update_child_priority(child);
                     current = &mut current.children[child];
@@ -200,17 +165,17 @@ impl<T> Node<T> {
     // returns the new position (index) of the child
     fn update_child_priority(&mut self, pos: usize) -> usize {
         self.children[pos].priority += 1;
-        let prio = self.children[pos].priority;
+        let priority = self.children[pos].priority;
+
         // adjust position (move to front)
         let mut new_pos = pos;
-
-        while new_pos > 0 && self.children[new_pos - 1].priority < prio {
+        while new_pos > 0 && self.children[new_pos - 1].priority < priority {
             // swap node positions
             self.children.swap(new_pos - 1, new_pos);
             new_pos -= 1;
         }
 
-        // build new index char string
+        // build new index list
         if new_pos != pos {
             self.indices = [
                 &self.indices[..new_pos],    // unchanged prefix, might be empty
@@ -336,12 +301,13 @@ macro_rules! backtracker {
     ($skipped_nodes:ident, $path:ident, $current:ident, $params:ident, $backtracking:ident, $walk:lifetime) => {
         macro_rules! try_backtrack {
             () => {
+                // try backtracking to any matching wildcard nodes we skipped while traversing
+                // the tree
                 while let Some(skipped) = $skipped_nodes.pop() {
                     if skipped.path.ends_with($path) {
                         $path = skipped.path;
                         $current = &skipped.node;
                         $params.truncate(skipped.params);
-
                         $backtracking = true;
                         continue $walk;
                     }
@@ -352,50 +318,64 @@ macro_rules! backtracker {
 }
 
 impl<T> Node<T> {
-    // It's a bit sad that we have to introduce unsafe here,
-    // but rust doesn't really have a way to abstract over mutability,
-    // so it avoids having to duplicate logic between `at` and `at_mut`.
+    // It's a bit sad that we have to introduce unsafe here but rust doesn't really have a way
+    // to abstract over mutability, so UnsafeCell lets us avoid having to duplicate logic between
+    // `at` and `at_mut`.
     pub fn at<'n, 'p>(
         &'n self,
-        path: &'p [u8],
+        full_path: &'p [u8],
     ) -> Result<(&'n UnsafeCell<T>, Params<'n, 'p>), MatchError> {
-        let full_path = path;
-
         let mut current = self;
         let mut path = full_path;
         let mut backtracking = false;
         let mut params = Params::new();
-        let mut skipped_nodes: Vec<Skipped<'_, '_, _>> = Vec::new();
+        let mut skipped_nodes = Vec::new();
 
         'walk: loop {
             backtracker!(skipped_nodes, path, current, params, backtracking, 'walk);
 
+            // the path is longer than this node's prefix - we are expecting a child node
             if path.len() > current.prefix.len() {
                 let (prefix, rest) = path.split_at(current.prefix.len());
 
+                // prefix matches
                 if prefix == current.prefix {
+                    let first = rest[0];
+                    let consumed = path;
                     path = rest;
-                    let index = path[0];
 
-                    // try all the non-wildcard children first by matching
-                    // the indices, unless we are currently backtracking
+                    // try searching for a matching static child unless we are currently
+                    // backtracking, which would mean we already traversed them
                     if !backtracking {
-                        if let Some(i) = current.indices.iter().position(|&c| c == index) {
+                        if let Some(i) = current.indices.iter().position(|&c| c == first) {
+                            // keep track of wildcard routes we skipped to backtrack to later if
+                            // we don't find a math
                             if current.wild_child {
                                 skipped_nodes.push(Skipped {
-                                    path: &full_path
-                                        [full_path.len() - (current.prefix.len() + path.len())..],
+                                    path: consumed,
                                     node: current,
                                     params: params.len(),
                                 });
                             }
 
+                            // child won't match because of an extra trailing slash
+                            if path == b"/"
+                                && current.children[i].prefix != b"/"
+                                && current.value.is_some()
+                            {
+                                return Err(MatchError::ExtraTrailingSlash);
+                            }
+
+                            // continue with the child node
                             current = &current.children[i];
                             continue 'walk;
                         }
                     }
 
+                    // we didn't find a match and there are no children with wildcards,
+                    // there is no match
                     if !current.wild_child {
+                        // extra trailing slash
                         if path == b"/" && current.value.is_some() {
                             return Err(MatchError::ExtraTrailingSlash);
                         }
@@ -409,60 +389,83 @@ impl<T> Node<T> {
                         return Err(MatchError::NotFound);
                     }
 
-                    // handle wildcard child, which is always at the end of the array
+                    // handle the wildcard child, which is always at the end of the list
                     current = current.children.last().unwrap();
 
                     match current.node_type {
                         NodeType::Param => {
+                            // check if there are more segments in the path other than this parameter
                             match path.iter().position(|&c| c == b'/') {
-                                Some(param_idx) => {
-                                    let (param, rest) = path.split_at(param_idx);
-                                    params.push(&current.prefix[1..], param);
+                                Some(i) => {
+                                    let (param, rest) = path.split_at(i);
 
-                                    if current.children.is_empty() {
-                                        if path.len() == param_idx + 1 {
+                                    if let [child] = current.children.as_slice() {
+                                        // child won't match because of an extra trailing slash
+                                        if rest == b"/"
+                                            && child.prefix != b"/"
+                                            && current.value.is_some()
+                                        {
                                             return Err(MatchError::ExtraTrailingSlash);
                                         }
 
-                                        return Err(MatchError::NotFound);
+                                        // store the parameter value
+                                        params.push(&current.prefix[1..], param);
+
+                                        // continue with the child node
+                                        path = rest;
+                                        current = child;
+                                        backtracking = false;
+                                        continue 'walk;
                                     }
 
-                                    path = rest;
-                                    current = &current.children[0];
+                                    // this node has no children yet the path has more segments...
+                                    // either the path has an extra trailing slash or there is no match
+                                    if path.len() == i + 1 {
+                                        return Err(MatchError::ExtraTrailingSlash);
+                                    }
 
-                                    backtracking = false;
-                                    continue 'walk;
+                                    return Err(MatchError::NotFound);
                                 }
+                                // this is the last path segment
                                 None => {
+                                    // store the parameter value
                                     params.push(&current.prefix[1..], path);
+
+                                    // found the matching value
+                                    if let Some(ref value) = current.value {
+                                        return Ok((value, params));
+                                    }
+
+                                    // check the child node in case the path is missing a trailing slash
+                                    if let [child] = current.children.as_slice() {
+                                        current = child;
+
+                                        if (current.prefix == b"/" && current.value.is_some())
+                                            || (current.prefix.is_empty()
+                                                && current.indices == b"/")
+                                        {
+                                            return Err(MatchError::MissingTrailingSlash);
+                                        }
+
+                                        // no match, try backtracking
+                                        if path != b"/" {
+                                            try_backtrack!();
+                                        }
+                                    }
+
+                                    // this node doesn't have the value, no match
+                                    return Err(MatchError::NotFound);
                                 }
                             }
-
-                            if let Some(ref value) = current.value {
-                                return Ok((value, params));
-                            }
-
-                            if let [only_child] = current.children.as_slice() {
-                                current = only_child;
-
-                                if (current.prefix == b"/" && current.value.is_some())
-                                    || (current.prefix.is_empty() && current.indices == b"/")
-                                {
-                                    return Err(MatchError::MissingTrailingSlash);
-                                }
-
-                                if path != b"/" {
-                                    try_backtrack!();
-                                }
-                            }
-
-                            return Err(MatchError::NotFound);
                         }
                         NodeType::CatchAll => {
-                            params.push(&current.prefix[1..], path);
-
+                            // catch all segments are only allowed at the end of the route,
+                            // either this node has the value or there is no match
                             return match current.value {
-                                Some(ref value) => Ok((value, params)),
+                                Some(ref value) => {
+                                    params.push(&current.prefix[1..], path);
+                                    Ok((value, params))
+                                }
                                 None => Err(MatchError::NotFound),
                             };
                         }
@@ -471,28 +474,24 @@ impl<T> Node<T> {
                 }
             }
 
+            // this is it, we should have reached the node containing the value
             if path == current.prefix {
-                // we should have reached the node containing the value
                 if let Some(ref value) = current.value {
                     return Ok((value, params));
                 }
 
-                // otherwise try backtracking
+                // nope, try backtracking
                 if path != b"/" {
                     try_backtrack!();
                 }
 
-                // if there is no value for this route, but this route has a
-                // wildcard child, there must be a handle for this path with an
-                // additional trailing slash
+                // TODO: does this always means there is an extra trailing slash?
                 if path == b"/" && current.wild_child && current.node_type != NodeType::Root {
-                    // TODO: this case is also being triggered when there is an overlap
-                    // of dynamic and static route segments and an *extra* trailing slash
                     return Err(MatchError::unsure(full_path));
                 }
 
-                // check if the path is missing a trailing '/'
                 if !backtracking {
+                    // check if the path is missing a trailing slash
                     if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
                         current = &current.children[i];
 
@@ -505,15 +504,12 @@ impl<T> Node<T> {
                 return Err(MatchError::NotFound);
             }
 
-            if path == b"/" && full_path != b"/" {
-                return Err(MatchError::ExtraTrailingSlash);
-            }
-
+            // nothing matches, check for a missing trailing slash
             if current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some() {
                 return Err(MatchError::MissingTrailingSlash);
             }
 
-            // if there is no tsr, try backtracking
+            // last chance, try backtracking
             if path != b"/" {
                 try_backtrack!();
             }
@@ -541,7 +537,7 @@ impl<T> Node<T> {
     }
 }
 
-// Search for a wildcard segment and check the name for invalid characters.
+// Searches for a wildcard segment and checks the path for invalid characters.
 fn find_wildcard(path: &[u8]) -> (Option<(&[u8], usize)>, bool) {
     for (start, &c) in path.iter().enumerate() {
         // a wildcard starts with ':' (param) or '*' (catch-all)
@@ -566,27 +562,69 @@ fn find_wildcard(path: &[u8]) -> (Option<(&[u8], usize)>, bool) {
     (None, false)
 }
 
-#[cfg(test)] // visualize the tree structure when debugging
-impl<T> std::fmt::Debug for Node<T>
+impl<T> Clone for Node<T>
 where
-    T: std::fmt::Debug,
+    T: Clone,
 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
-        let indices = self
-            .indices
-            .iter()
-            .map(|&x| char::from_u32(x as _))
-            .collect::<Vec<_>>();
+    fn clone(&self) -> Self {
+        let value = match self.value {
+            Some(ref value) => {
+                // safety: we only expose &mut T through &mut self
+                let value = unsafe { &*value.get() };
+                Some(UnsafeCell::new(value.clone()))
+            }
+            None => None,
+        };
 
-        let mut fmt = f.debug_struct("Node");
-
-        fmt.field("value", &value);
-        fmt.field("prefix", &std::str::from_utf8(&self.prefix));
-        fmt.field("node_type", &self.node_type);
-        fmt.field("children", &self.children);
-        fmt.field("indices", &indices);
-
-        fmt.finish()
+        Self {
+            value,
+            prefix: self.prefix.clone(),
+            wild_child: self.wild_child,
+            node_type: self.node_type,
+            indices: self.indices.clone(),
+            children: self.children.clone(),
+            priority: self.priority,
+        }
     }
 }
+
+impl<T> Default for Node<T> {
+    fn default() -> Self {
+        Self {
+            prefix: Vec::new(),
+            wild_child: false,
+            node_type: NodeType::Static,
+            indices: Vec::new(),
+            children: Vec::new(),
+            value: None,
+            priority: 0,
+        }
+    }
+}
+
+// visualize the tree structure when debugging
+#[cfg(test)]
+const _: () = {
+    use std::fmt::{self, Debug, Formatter};
+
+    impl<T: Debug> Debug for Node<T> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            // safety: we only expose &mut T through &mut self
+            let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
+
+            let indices = self
+                .indices
+                .iter()
+                .map(|&x| char::from_u32(x as _))
+                .collect::<Vec<_>>();
+
+            let mut fmt = f.debug_struct("Node");
+            fmt.field("value", &value);
+            fmt.field("prefix", &std::str::from_utf8(&self.prefix));
+            fmt.field("node_type", &self.node_type);
+            fmt.field("children", &self.children);
+            fmt.field("indices", &indices);
+            fmt.finish()
+        }
+    }
+};
