@@ -1,6 +1,6 @@
-//! # MatchIt
+//! # `matchit`
 //!
-//! [![Documentation](https://img.shields.io/badge/docs-0.6.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
+//! [![Documentation](https://img.shields.io/badge/docs-0.7.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
 //! [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 //! [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 //! [![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/matchit/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/matchit/actions)
@@ -10,17 +10,16 @@
 //! ```rust
 //! use matchit::Router;
 //!
-//! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let mut router = Router::new();
-//!     router.insert("/home", "Welcome!")?;
-//!     router.insert("/users/:id", "A User")?;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut router = Router::new();
+//! router.insert("/home", "Welcome!")?;
+//! router.insert("/users/:id", "A User")?;
 //!
-//!     let matched = router.at("/users/978")?;
-//!     assert_eq!(matched.params.get("id"), Some("978"));
-//!     assert_eq!(*matched.value, "A User");
-//!
-//!     Ok(())
-//! }
+//! let matched = router.at("/users/978")?;
+//! assert_eq!(matched.params.get("id"), Some("978"));
+//! assert_eq!(*matched.value, "A User");
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Parameters
