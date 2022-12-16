@@ -2,15 +2,16 @@ use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
+use std::collections::VecDeque;
 use std::mem;
 
 /// The types of nodes the tree can hold
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 enum NodeType {
     /// The root path
     Root,
     /// A route parameter, ex: `/:id`.
-    Param,
+    Param { name: Vec<u8> },
     /// A catchall parameter, ex: `/*file`
     CatchAll,
     /// Anything else
@@ -25,7 +26,7 @@ pub struct Node<T> {
     wild_child: bool,
     indices: Vec<u8>,
     node_type: NodeType,
-    // see `at_inner` for why an unsafe cell is needed.
+    // see `at` for why an unsafe cell is needed
     value: Option<UnsafeCell<T>>,
     pub(crate) prefix: Vec<u8>,
     pub(crate) children: Vec<Self>,
@@ -38,13 +39,14 @@ unsafe impl<T: Sync> Sync for Node<T> {}
 impl<T> Node<T> {
     pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into().into_bytes();
+        let (route, mut param_names) = normalize_params(route)?;
         let mut prefix = route.as_ref();
 
         self.priority += 1;
 
         // empty tree
         if self.prefix.is_empty() && self.children.is_empty() {
-            self.insert_child(prefix, &route, val)?;
+            self.insert_child(prefix, &route, &mut param_names, val)?;
             self.node_type = NodeType::Root;
             return Ok(());
         }
@@ -90,7 +92,7 @@ impl<T> Node<T> {
                 let first = prefix[0];
 
                 // `/` after param
-                if current.node_type == NodeType::Param
+                if matches!(current.node_type, NodeType::Param { .. })
                     && first == b'/'
                     && current.children.len() == 1
                 {
@@ -128,13 +130,14 @@ impl<T> Node<T> {
                         && (current.prefix.len() >= prefix.len()
                             || prefix[current.prefix.len()] == b'/')
                     {
+                        param_names.pop_front().unwrap();
                         continue 'walk;
                     }
 
                     return Err(InsertError::conflict(&route, prefix, current));
                 }
 
-                return current.insert_child(prefix, &route, val);
+                return current.insert_child(prefix, &route, &mut param_names, val);
             }
 
             // otherwise add value to current node
@@ -189,27 +192,26 @@ impl<T> Node<T> {
         new_pos
     }
 
-    fn insert_child(&mut self, mut prefix: &[u8], route: &[u8], val: T) -> Result<(), InsertError> {
+    fn insert_child(
+        &mut self,
+        mut prefix: &[u8],
+        route: &[u8],
+        param_names: &mut ParamNames,
+        val: T,
+    ) -> Result<(), InsertError> {
         let mut current = self;
 
         loop {
             // search for a wildcard segment
-            let (wildcard, wildcard_index) = match find_wildcard(prefix) {
-                (Some((w, i)), true) => (w, i),
-                // the wildcard name contains invalid characters (':' or '*')
-                (Some(..), false) => return Err(InsertError::TooManyParams),
+            let (wildcard, wildcard_index) = match find_wildcard(prefix)? {
+                Some((w, i)) => (w, i),
                 // no wildcard, simply use the current node
-                (None, _) => {
+                None => {
                     current.value = Some(UnsafeCell::new(val));
                     current.prefix = prefix.to_owned();
                     return Ok(());
                 }
             };
-
-            // check if the wildcard has a name
-            if wildcard.len() < 2 {
-                return Err(InsertError::UnnamedParam);
-            }
 
             // route parameter
             if wildcard[0] == b':' {
@@ -220,7 +222,9 @@ impl<T> Node<T> {
                 }
 
                 let child = Self {
-                    node_type: NodeType::Param,
+                    node_type: NodeType::Param {
+                        name: param_names.pop_front().unwrap(),
+                    },
                     prefix: wildcard.to_owned(),
                     ..Self::default()
                 };
@@ -393,7 +397,7 @@ impl<T> Node<T> {
                     current = current.children.last().unwrap();
 
                     match current.node_type {
-                        NodeType::Param => {
+                        NodeType::Param { ref name } => {
                             // check if there are more segments in the path other than this parameter
                             match path.iter().position(|&c| c == b'/') {
                                 Some(i) => {
@@ -409,7 +413,7 @@ impl<T> Node<T> {
                                         }
 
                                         // store the parameter value
-                                        params.push(&current.prefix[1..], param);
+                                        params.push(&name[1..], param);
 
                                         // continue with the child node
                                         path = rest;
@@ -429,7 +433,7 @@ impl<T> Node<T> {
                                 // this is the last path segment
                                 None => {
                                     // store the parameter value
-                                    params.push(&current.prefix[1..], path);
+                                    params.push(&name[1..], path);
 
                                     // found the matching value
                                     if let Some(ref value) = current.value {
@@ -537,29 +541,74 @@ impl<T> Node<T> {
     }
 }
 
+type ParamNames = VecDeque<Vec<u8>>;
+
+fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamNames), InsertError> {
+    let mut start = 0;
+    let mut next = b'a';
+    let mut original = ParamNames::new();
+
+    loop {
+        let (wildcard, mut wildcard_index) = match find_wildcard(&path[start..])? {
+            Some((w, i)) => (w, i),
+            None => return Ok((path, original)),
+        };
+
+        // makes sure the param has a valid name
+        if wildcard.len() < 2 {
+            return Err(InsertError::UnnamedParam);
+        }
+
+        // don't need to normalize catch-all parameters
+        if wildcard[0] == b'*' {
+            start += wildcard_index + wildcard.len();
+            continue;
+        }
+
+        wildcard_index += start;
+        let removed = path.splice(
+            (wildcard_index)..(wildcard_index + wildcard.len()),
+            vec![b':', next],
+        );
+
+        original.push_back(removed.collect());
+
+        next += 1;
+        if next > b'z' {
+            panic!("too many route parameters");
+        }
+
+        start = wildcard_index + 2;
+    }
+}
+
+pub(crate) fn denormalize_prefix<T>(node: &Node<T>) -> &[u8] {
+    match node.node_type {
+        NodeType::Param { ref name } => name,
+        _ => &node.prefix,
+    }
+}
+
 // Searches for a wildcard segment and checks the path for invalid characters.
-fn find_wildcard(path: &[u8]) -> (Option<(&[u8], usize)>, bool) {
+fn find_wildcard(path: &[u8]) -> Result<Option<(&[u8], usize)>, InsertError> {
     for (start, &c) in path.iter().enumerate() {
         // a wildcard starts with ':' (param) or '*' (catch-all)
         if c != b':' && c != b'*' {
             continue;
-        };
-
-        // find end and check for invalid characters
-        let mut valid = true;
+        }
 
         for (end, &c) in path[start + 1..].iter().enumerate() {
             match c {
-                b'/' => return (Some((&path[start..start + 1 + end], start)), valid),
-                b':' | b'*' => valid = false,
+                b'/' => return Ok(Some((&path[start..start + 1 + end], start))),
+                b':' | b'*' => return Err(InsertError::TooManyParams),
                 _ => (),
-            };
+            }
         }
 
-        return (Some((&path[start..], start)), valid);
+        return Ok(Some((&path[start..], start)));
     }
 
-    (None, false)
+    Ok(None)
 }
 
 impl<T> Clone for Node<T>
@@ -567,20 +616,17 @@ where
     T: Clone,
 {
     fn clone(&self) -> Self {
-        let value = match self.value {
-            Some(ref value) => {
-                // safety: we only expose &mut T through &mut self
-                let value = unsafe { &*value.get() };
-                Some(UnsafeCell::new(value.clone()))
-            }
-            None => None,
-        };
+        let value = self.value.as_ref().map(|value| {
+            // safety: we only expose &mut T through &mut self
+            let value = unsafe { &*value.get() };
+            UnsafeCell::new(value.clone())
+        });
 
         Self {
             value,
             prefix: self.prefix.clone(),
             wild_child: self.wild_child,
-            node_type: self.node_type,
+            node_type: self.node_type.clone(),
             indices: self.indices.clone(),
             children: self.children.clone(),
             priority: self.priority,
@@ -602,11 +648,11 @@ impl<T> Default for Node<T> {
     }
 }
 
-// visualize the tree structure when debugging
 #[cfg(test)]
 const _: () = {
     use std::fmt::{self, Debug, Formatter};
 
+    // visualize the tree structure when debugging
     impl<T: Debug> Debug for Node<T> {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             // safety: we only expose &mut T through &mut self

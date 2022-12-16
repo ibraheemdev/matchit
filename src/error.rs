@@ -1,4 +1,4 @@
-use crate::tree::Node;
+use crate::tree::{denormalize_prefix, Node};
 
 use std::fmt;
 
@@ -46,12 +46,12 @@ impl InsertError {
         let mut route = route[..route.len() - prefix.len()].to_owned();
 
         if !route.ends_with(&current.prefix) {
-            route.extend_from_slice(&current.prefix);
+            route.extend_from_slice(denormalize_prefix(&current));
         }
 
         let mut current = current.children.first();
         while let Some(node) = current {
-            route.extend_from_slice(&node.prefix);
+            route.extend_from_slice(denormalize_prefix(&node));
             current = node.children.first();
         }
 
