@@ -2,16 +2,15 @@ use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
-use std::collections::VecDeque;
 use std::mem;
 
 /// The types of nodes the tree can hold
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
-enum NodeType {
+pub(crate) enum NodeType {
     /// The root path
     Root,
     /// A route parameter, ex: `/:id`.
-    Param { name: Vec<u8> },
+    Param,
     /// A catchall parameter, ex: `/*file`
     CatchAll,
     /// Anything else
@@ -25,9 +24,10 @@ pub struct Node<T> {
     priority: u32,
     wild_child: bool,
     indices: Vec<u8>,
-    node_type: NodeType,
     // see `at` for why an unsafe cell is needed
     value: Option<UnsafeCell<T>>,
+    pub(crate) param_remapping: ParamRemapping,
+    pub(crate) node_type: NodeType,
     pub(crate) prefix: Vec<u8>,
     pub(crate) children: Vec<Self>,
 }
@@ -39,14 +39,15 @@ unsafe impl<T: Sync> Sync for Node<T> {}
 impl<T> Node<T> {
     pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into().into_bytes();
-        let (route, mut param_names) = normalize_params(route)?;
+        let (route, param_names) = normalize_params(route)?;
         let mut prefix = route.as_ref();
 
         self.priority += 1;
 
         // empty tree
         if self.prefix.is_empty() && self.children.is_empty() {
-            self.insert_child(prefix, &route, &mut param_names, val)?;
+            let last = self.insert_child(prefix, &route, val)?;
+            last.param_remapping = param_names;
             self.node_type = NodeType::Root;
             return Ok(());
         }
@@ -73,6 +74,7 @@ impl<T> Node<T> {
                     wild_child: current.wild_child,
                     indices: current.indices.clone(),
                     value: current.value.take(),
+                    param_remapping: mem::take(&mut current.param_remapping),
                     priority: current.priority - 1,
                     ..Self::default()
                 };
@@ -130,14 +132,15 @@ impl<T> Node<T> {
                         && (current.prefix.len() >= prefix.len()
                             || prefix[current.prefix.len()] == b'/')
                     {
-                        param_names.pop_front().unwrap();
                         continue 'walk;
                     }
 
                     return Err(InsertError::conflict(&route, prefix, current));
                 }
 
-                return current.insert_child(prefix, &route, &mut param_names, val);
+                let last = current.insert_child(prefix, &route, val)?;
+                last.param_remapping = param_names;
+                return Ok(());
             }
 
             // otherwise add value to current node
@@ -146,7 +149,7 @@ impl<T> Node<T> {
             }
 
             current.value = Some(UnsafeCell::new(val));
-
+            current.param_remapping = param_names;
             return Ok(());
         }
     }
@@ -196,9 +199,8 @@ impl<T> Node<T> {
         &mut self,
         mut prefix: &[u8],
         route: &[u8],
-        param_names: &mut ParamNames,
         val: T,
-    ) -> Result<(), InsertError> {
+    ) -> Result<&mut Node<T>, InsertError> {
         let mut current = self;
 
         loop {
@@ -209,7 +211,7 @@ impl<T> Node<T> {
                 None => {
                     current.value = Some(UnsafeCell::new(val));
                     current.prefix = prefix.to_owned();
-                    return Ok(());
+                    return Ok(current);
                 }
             };
 
@@ -222,9 +224,7 @@ impl<T> Node<T> {
                 }
 
                 let child = Self {
-                    node_type: NodeType::Param {
-                        name: param_names.pop_front().unwrap(),
-                    },
+                    node_type: NodeType::Param,
                     prefix: wildcard.to_owned(),
                     ..Self::default()
                 };
@@ -250,7 +250,7 @@ impl<T> Node<T> {
 
                 // otherwise we're done. Insert the value in the new leaf
                 current.value = Some(UnsafeCell::new(val));
-                return Ok(());
+                return Ok(current);
             }
 
             // catch all route
@@ -286,10 +286,10 @@ impl<T> Node<T> {
                 ..Self::default()
             };
 
-            current.add_child(child);
+            let x = current.add_child(child);
             current.wild_child = true;
 
-            return Ok(());
+            return Ok(&mut current.children[x]);
         }
     }
 }
@@ -397,7 +397,7 @@ impl<T> Node<T> {
                     current = current.children.last().unwrap();
 
                     match current.node_type {
-                        NodeType::Param { ref name } => {
+                        NodeType::Param => {
                             // check if there are more segments in the path other than this parameter
                             match path.iter().position(|&c| c == b'/') {
                                 Some(i) => {
@@ -413,7 +413,7 @@ impl<T> Node<T> {
                                         }
 
                                         // store the parameter value
-                                        params.push(&name[1..], param);
+                                        params.push(&current.prefix[1..], param);
 
                                         // continue with the child node
                                         path = rest;
@@ -433,10 +433,14 @@ impl<T> Node<T> {
                                 // this is the last path segment
                                 None => {
                                     // store the parameter value
-                                    params.push(&name[1..], path);
+                                    params.push(&current.prefix[1..], path);
 
                                     // found the matching value
                                     if let Some(ref value) = current.value {
+                                        params.for_each_key_mut(|(i, key)| {
+                                            *key = &current.param_remapping[i][1..]
+                                        });
+
                                         return Ok((value, params));
                                     }
 
@@ -467,6 +471,10 @@ impl<T> Node<T> {
                             // either this node has the value or there is no match
                             return match current.value {
                                 Some(ref value) => {
+                                    params.for_each_key_mut(|(i, key)| {
+                                        *key = &current.param_remapping[i][1..]
+                                    });
+
                                     params.push(&current.prefix[1..], path);
                                     Ok((value, params))
                                 }
@@ -481,6 +489,7 @@ impl<T> Node<T> {
             // this is it, we should have reached the node containing the value
             if path == current.prefix {
                 if let Some(ref value) = current.value {
+                    params.for_each_key_mut(|(i, key)| *key = &current.param_remapping[i][1..]);
                     return Ok((value, params));
                 }
 
@@ -541,12 +550,12 @@ impl<T> Node<T> {
     }
 }
 
-type ParamNames = VecDeque<Vec<u8>>;
+type ParamRemapping = Vec<Vec<u8>>;
 
-fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamNames), InsertError> {
+fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamRemapping), InsertError> {
     let mut start = 0;
     let mut next = b'a';
-    let mut original = ParamNames::new();
+    let mut original = ParamRemapping::new();
 
     loop {
         let (wildcard, mut wildcard_index) = match find_wildcard(&path[start..])? {
@@ -571,7 +580,7 @@ fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamNames), InsertEr
             vec![b':', next],
         );
 
-        original.push_back(removed.collect());
+        original.push(removed.collect());
 
         next += 1;
         if next > b'z' {
@@ -582,10 +591,30 @@ fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamNames), InsertEr
     }
 }
 
-pub(crate) fn denormalize_prefix<T>(node: &Node<T>) -> &[u8] {
-    match node.node_type {
-        NodeType::Param { ref name } => name,
-        _ => &node.prefix,
+pub(crate) fn denormalize_params(route: &mut Vec<u8>, params: &ParamRemapping) {
+    let mut start = 0;
+    let mut i = 0;
+
+    loop {
+        let (wildcard, mut wildcard_index) = match find_wildcard(&route[start..]).unwrap() {
+            Some((w, i)) => (w, i),
+            None => return,
+        };
+
+        wildcard_index += start;
+
+        let next = match params.get(i) {
+            Some(param) => param.clone(),
+            None => return,
+        };
+
+        route.splice(
+            (wildcard_index)..(wildcard_index + wildcard.len()),
+            next.clone(),
+        );
+
+        i += 1;
+        start = wildcard_index + 2;
     }
 }
 
@@ -629,6 +658,7 @@ where
             node_type: self.node_type.clone(),
             indices: self.indices.clone(),
             children: self.children.clone(),
+            param_remapping: self.param_remapping.clone(),
             priority: self.priority,
         }
     }
@@ -637,6 +667,7 @@ where
 impl<T> Default for Node<T> {
     fn default() -> Self {
         Self {
+            param_remapping: ParamRemapping::new(),
             prefix: Vec::new(),
             wild_child: false,
             node_type: NodeType::Static,
@@ -664,11 +695,18 @@ const _: () = {
                 .map(|&x| char::from_u32(x as _))
                 .collect::<Vec<_>>();
 
+            let param_names = self
+                .param_remapping
+                .iter()
+                .map(|x| std::str::from_utf8(x).unwrap())
+                .collect::<Vec<_>>();
+
             let mut fmt = f.debug_struct("Node");
             fmt.field("value", &value);
             fmt.field("prefix", &std::str::from_utf8(&self.prefix));
             fmt.field("node_type", &self.node_type);
             fmt.field("children", &self.children);
+            fmt.field("param_names", &param_names);
             fmt.field("indices", &indices);
             fmt.finish()
         }

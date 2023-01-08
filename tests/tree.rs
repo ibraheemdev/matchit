@@ -1,6 +1,19 @@
 use matchit::{InsertError, MatchError, Router};
 
 #[test]
+fn normalized() {
+    let mut x = Router::new();
+    x.insert("/x/:foo/bar", ()).unwrap();
+    x.insert("/x/:bar/baz", ()).unwrap();
+    x.insert("/:foo/:bar/baz", ()).unwrap();
+    x.insert("/:bar/x/baz", ()).unwrap();
+    assert_eq!(x.at("/x/foo/bar").unwrap().params.get("foo"), Some("foo"));
+    assert_eq!(x.at("/x/foo/baz").unwrap().params.get("bar"), Some("foo"));
+    assert_eq!(x.at("/bax/foo/baz").unwrap().params.get("foo"), Some("bax"));
+    assert_eq!(x.at("/bax/x/baz").unwrap().params.get("bar"), Some("bax"));
+}
+
+#[test]
 fn issue_22() {
     let mut x = Router::new();
     x.insert("/foo_bar", "Welcome!").unwrap();
@@ -44,7 +57,7 @@ match_tests! {
         routes = [
             "/",
             "/cmd/:tool/",
-            "/cmd/:tool/:sub",
+            "/cmd/:tool2/:sub",
             "/cmd/whoami",
             "/cmd/whoami/root",
             "/cmd/whoami/root/",
@@ -101,12 +114,12 @@ match_tests! {
         "/"                                     :: "/"                                     => {},
         "/cmd/test"                             :: "/cmd/:tool/"                           => None,
         "/cmd/test/"                            :: "/cmd/:tool/"                           => { "tool" => "test" },
-        "/cmd/test/3"                           :: "/cmd/:tool/:sub"                       => { "tool" => "test", "sub" => "3" },
+        "/cmd/test/3"                           :: "/cmd/:tool2/:sub"                       => { "tool2" => "test", "sub" => "3" },
         "/cmd/who"                              :: "/cmd/:tool/"                           => None,
         "/cmd/who/"                             :: "/cmd/:tool/"                           => { "tool" => "who" },
         "/cmd/whoami"                           :: "/cmd/whoami"                           => {},
         "/cmd/whoami/"                          :: "/cmd/whoami"                           => None,
-        "/cmd/whoami/r"                         :: "/cmd/:tool/:sub"                       => { "tool" => "whoami", "sub" => "r" },
+        "/cmd/whoami/r"                         :: "/cmd/:tool2/:sub"                       => { "tool2" => "whoami", "sub" => "r" },
         "/cmd/whoami/r/"                        :: "/cmd/:tool/:sub"                       => None,
         "/cmd/whoami/root"                      :: "/cmd/whoami/root"                      => {},
         "/cmd/whoami/root/"                     :: "/cmd/whoami/root/"                     => {},
@@ -320,9 +333,8 @@ insert_tests! {
         "/foo/:name"          => Ok(()),
         "/foo/:names"         => Err(InsertError::Conflict { with: "/foo/:name".into() }),
         "/cmd/*path"          => Err(InsertError::Conflict { with: "/cmd/:tool/:sub".into() }),
-        "/cmd/:badvar"        => Err(InsertError::Conflict { with: "/cmd/:tool/:sub".into() }),
-        "/cmd/:tool/names"    => Ok(()),
-        "/cmd/:tool/:bad/foo" => Err(InsertError::Conflict { with: "/cmd/:tool/:sub".into() }),
+        "/cmd/:xxx/names"     => Ok(()),
+        "/cmd/:tool/:xxx/foo" => Ok(()),
         "/src/*filepath"      => Ok(()),
         "/src/:file"          => Err(InsertError::Conflict { with: "/src/*filepath".into() }),
         "/src/static.json"    => Ok(()),

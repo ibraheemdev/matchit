@@ -7,7 +7,7 @@ use crate::{InsertError, MatchError, Params};
 #[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct Router<T> {
-    root: Node<T>,
+    pub root: Node<T>,
 }
 
 impl<T> Default for Router<T> {
