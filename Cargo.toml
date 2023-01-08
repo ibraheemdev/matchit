@@ -22,6 +22,11 @@ gonzales = "0.0.3-beta"
 path-tree = "0.2.2"
 routefinder = "0.5.2"
 
+# examples
+tower = { version = "0.4", features = ["make", "util"] }
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "0.14", features = ["full"] }
+
 [features]
 default = []
 __test_helpers = []
