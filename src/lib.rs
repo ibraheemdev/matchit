@@ -57,6 +57,9 @@
 //! assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 //! assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 //!
+//! // note that this would not match
+//! assert!(m.at("/").is_err());
+//!
 //! # Ok(())
 //! # }
 //! ```

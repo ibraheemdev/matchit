@@ -47,9 +47,11 @@ Catch-all parameters start with `*` and match everything after the `/`. They mus
 let mut m = Router::new();
 m.insert("/*p", true)?;
 
-assert_eq!(m.at("/")?.params.get("p"), Some(""));
 assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
+
+// note that this would not match:
+assert_eq!(m.at("/").is_err());
 ```
 
 ## Routing Priority
