@@ -1,6 +1,6 @@
 # `matchit`
 
-[![Documentation](https://img.shields.io/badge/docs-0.7.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
+[![Documentation](https://img.shields.io/badge/docs-0.7.1-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
 [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 
