@@ -4,7 +4,7 @@
 [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 
-A blazing fast URL router.
+A high performance, zero-copy URL router.
 
 ```rust
 use matchit::Router;
