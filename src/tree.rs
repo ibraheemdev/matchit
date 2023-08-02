@@ -399,6 +399,9 @@ impl<T> Node<T> {
                                         continue 'walk;
                                     }
 
+                                    // try backtracking
+                                    try_backtrack!();
+
                                     return Err(MatchError::NotFound);
                                 }
                                 // this is the last path segment

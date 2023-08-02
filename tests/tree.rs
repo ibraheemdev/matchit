@@ -13,6 +13,31 @@ fn issue_22() {
     assert_eq!(x.at("/foo/").unwrap_err(), MatchError::NotFound);
 }
 
+#[test]
+fn issue_31() {
+    let mut router = Router::new();
+    router.insert("/path/foo", "foo").unwrap();
+    router.insert("/path/*rest", "wildcard").unwrap();
+
+    assert_eq!(router.at("/path/foo").map(|m| *m.value), Ok("foo"));
+    assert_eq!(router.at("/path/bar").map(|m| *m.value), Ok("wildcard"));
+    assert_eq!(router.at("/path/foo/").map(|m| *m.value), Ok("wildcard"));
+
+    let mut router = Router::new();
+    router.insert("/path/foo/:arg", "foo").unwrap();
+    router.insert("/path/*rest", "wildcard").unwrap();
+
+    assert_eq!(router.at("/path/foo/myarg").map(|m| *m.value), Ok("foo"));
+    assert_eq!(
+        router.at("/path/foo/myarg/").map(|m| *m.value),
+        Ok("wildcard")
+    );
+    assert_eq!(
+        router.at("/path/foo/myarg/bar/baz").map(|m| *m.value),
+        Ok("wildcard")
+    );
+}
+
 match_tests! {
     basic {
         routes = [
@@ -360,7 +385,7 @@ match_tests! {
         "/object/id/path"            :: ""                    => None,
         "/other/object/1"            :: ""                    => None,
         "/other/object/1/2"          :: ""                    => None,
-        "/other/an_object/1/"        :: ""                    => None,
+        "/other/an_object/1/"        :: "/other/:object/:id/" => { "object" => "an_object", "id" => "1" },
         "/other/static/path/"        :: "/other/:object/:id/" => { "object" => "static", "id" => "path" },
         "/other/long/static/path"    :: ""                    => None,
         "/other/object/static/path"  :: ""                    => None,
