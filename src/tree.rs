@@ -428,6 +428,11 @@ impl<T> Node<T> {
                                         return Err(MatchError::ExtraTrailingSlash);
                                     }
 
+                                    // try backtracking
+                                    if path != b"/" {
+                                        try_backtrack!();
+                                    }
+
                                     return Err(MatchError::NotFound);
                                 }
                                 // this is the last path segment
