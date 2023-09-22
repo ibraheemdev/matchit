@@ -139,6 +139,24 @@ impl<'k, 'v> Params<'k, 'v> {
             ParamsKind::Large(vec) => vec.push(param),
         }
     }
+
+    // Transform each key.
+    pub(crate) fn for_each_key_mut(&mut self, f: impl Fn((usize, &mut &'k [u8]))) {
+        match &mut self.kind {
+            ParamsKind::None => {}
+            ParamsKind::Small(arr, len) => arr
+                .iter_mut()
+                .take(*len)
+                .map(|param| &mut param.key)
+                .enumerate()
+                .for_each(f),
+            ParamsKind::Large(vec) => vec
+                .iter_mut()
+                .map(|param| &mut param.key)
+                .enumerate()
+                .for_each(f),
+        }
+    }
 }
 
 /// An iterator over the keys and values of a route's [parameters](crate::Params).

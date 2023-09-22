@@ -1,4 +1,4 @@
-use crate::tree::Node;
+use crate::tree::{denormalize_params, Node};
 
 use std::fmt;
 
@@ -49,11 +49,18 @@ impl InsertError {
             route.extend_from_slice(&current.prefix);
         }
 
+        let mut last = current;
+        while let Some(node) = last.children.first() {
+            last = node;
+        }
+
         let mut current = current.children.first();
         while let Some(node) = current {
             route.extend_from_slice(&node.prefix);
             current = node.children.first();
         }
+
+        denormalize_params(&mut route, &last.param_remapping);
 
         InsertError::Conflict {
             with: String::from_utf8(route).unwrap(),
