@@ -1,10 +1,10 @@
 [package]
 name = "matchit"
-version = "0.7.2"
+version = "0.7.3"
 license = "MIT AND BSD-3-Clause"
 authors = ["Ibraheem Ahmed <ibraheem@ibraheem.ca>"]
 edition = "2021"
-description = "A blazing fast URL router."
+description = "A high performance, zero-copy URL router."
 categories = ["network-programming", "algorithms"]
 keywords = ["router", "path", "tree", "match", "url"]
 repository = "https://github.com/ibraheemdev/matchit"
