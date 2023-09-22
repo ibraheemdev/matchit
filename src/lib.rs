@@ -1,9 +1,8 @@
 //! # `matchit`
 //!
-//! [![Documentation](https://img.shields.io/badge/docs-0.7.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
+//! [![Documentation](https://img.shields.io/badge/docs-0.7.2-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
 //! [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 //! [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
-//! [![Actions](https://img.shields.io/github/workflow/status/ibraheemdev/matchit/Rust/master?style=for-the-badge)](https://github.com/ibraheemdev/matchit/actions)
 //!
 //! A blazing fast URL router.
 //!
@@ -56,6 +55,9 @@
 //!
 //! assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 //! assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
+//!
+//! // note that this would not match
+//! assert!(m.at("/").is_err());
 //!
 //! # Ok(())
 //! # }

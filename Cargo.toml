@@ -1,7 +1,7 @@
 [package]
 name = "matchit"
-version = "0.7.0"
-license = "MIT"
+version = "0.7.2"
+license = "MIT AND BSD-3-Clause"
 authors = ["Ibraheem Ahmed <ibraheem@ibraheem.ca>"]
 edition = "2021"
 description = "A blazing fast URL router."
@@ -21,6 +21,11 @@ route-recognizer = "0.3.0"
 gonzales = "0.0.3-beta"
 path-tree = "0.2.2"
 routefinder = "0.5.2"
+
+# examples
+tower = { version = "0.4", features = ["make", "util"] }
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "0.14", features = ["full"] }
 
 [features]
 default = []
