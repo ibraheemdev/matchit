@@ -39,7 +39,7 @@ unsafe impl<T: Sync> Sync for Node<T> {}
 impl<T> Node<T> {
     pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into().into_bytes();
-        let (route, param_names) = normalize_params(route)?;
+        let (route, param_remapping) = normalize_params(route)?;
         let mut prefix = route.as_ref();
 
         self.priority += 1;
@@ -47,7 +47,7 @@ impl<T> Node<T> {
         // empty tree
         if self.prefix.is_empty() && self.children.is_empty() {
             let last = self.insert_child(prefix, &route, val)?;
-            last.param_remapping = param_names;
+            last.param_remapping = param_remapping;
             self.node_type = NodeType::Root;
             return Ok(());
         }
@@ -94,7 +94,7 @@ impl<T> Node<T> {
                 let first = prefix[0];
 
                 // `/` after param
-                if matches!(current.node_type, NodeType::Param { .. })
+                if current.node_type == NodeType::Param
                     && first == b'/'
                     && current.children.len() == 1
                 {
@@ -139,7 +139,7 @@ impl<T> Node<T> {
                 }
 
                 let last = current.insert_child(prefix, &route, val)?;
-                last.param_remapping = param_names;
+                last.param_remapping = param_remapping;
                 return Ok(());
             }
 
@@ -149,7 +149,7 @@ impl<T> Node<T> {
             }
 
             current.value = Some(UnsafeCell::new(val));
-            current.param_remapping = param_names;
+            current.param_remapping = param_remapping;
             return Ok(());
         }
     }
@@ -286,10 +286,10 @@ impl<T> Node<T> {
                 ..Self::default()
             };
 
-            let x = current.add_child(child);
+            let i = current.add_child(child);
             current.wild_child = true;
 
-            return Ok(&mut current.children[x]);
+            return Ok(&mut current.children[i]);
         }
     }
 }
@@ -437,6 +437,7 @@ impl<T> Node<T> {
 
                                     // found the matching value
                                     if let Some(ref value) = current.value {
+                                        // remap parameter keys
                                         params.for_each_key_mut(|(i, key)| {
                                             *key = &current.param_remapping[i][1..]
                                         });
@@ -471,11 +472,14 @@ impl<T> Node<T> {
                             // either this node has the value or there is no match
                             return match current.value {
                                 Some(ref value) => {
+                                    // remap parameter keys
                                     params.for_each_key_mut(|(i, key)| {
                                         *key = &current.param_remapping[i][1..]
                                     });
 
+                                    // store the final catch-all parameter
                                     params.push(&current.prefix[1..], path);
+
                                     Ok((value, params))
                                 }
                                 None => Err(MatchError::NotFound),
@@ -489,6 +493,7 @@ impl<T> Node<T> {
             // this is it, we should have reached the node containing the value
             if path == current.prefix {
                 if let Some(ref value) = current.value {
+                    // remap parameter keys
                     params.for_each_key_mut(|(i, key)| *key = &current.param_remapping[i][1..]);
                     return Ok((value, params));
                 }
@@ -550,12 +555,17 @@ impl<T> Node<T> {
     }
 }
 
+/// An ordered list of route parameters keys for a specific route, stored at leaf nodes.
 type ParamRemapping = Vec<Vec<u8>>;
 
+/// Returns `path` with normalized route parameters, and a parameter remapping
+/// to store at the leaf node for this route.
 fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamRemapping), InsertError> {
     let mut start = 0;
-    let mut next = b'a';
     let mut original = ParamRemapping::new();
+
+    // parameter names are normalized alphabetically
+    let mut next = b'a';
 
     loop {
         let (wildcard, mut wildcard_index) = match find_wildcard(&path[start..])? {
@@ -575,13 +585,17 @@ fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamRemapping), Inse
         }
 
         wildcard_index += start;
+
+        // normalize the parameter
         let removed = path.splice(
             (wildcard_index)..(wildcard_index + wildcard.len()),
             vec![b':', next],
         );
 
+        // remember the original name for remappings
         original.push(removed.collect());
 
+        // get the next key
         next += 1;
         if next > b'z' {
             panic!("too many route parameters");
@@ -591,11 +605,13 @@ fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamRemapping), Inse
     }
 }
 
+/// Restores `route` to it's original, denormalized form.
 pub(crate) fn denormalize_params(route: &mut Vec<u8>, params: &ParamRemapping) {
     let mut start = 0;
     let mut i = 0;
 
     loop {
+        // find the next wildcard
         let (wildcard, mut wildcard_index) = match find_wildcard(&route[start..]).unwrap() {
             Some((w, i)) => (w, i),
             None => return,
@@ -608,6 +624,7 @@ pub(crate) fn denormalize_params(route: &mut Vec<u8>, params: &ParamRemapping) {
             None => return,
         };
 
+        // denormalize this parameter
         route.splice(
             (wildcard_index)..(wildcard_index + wildcard.len()),
             next.clone(),

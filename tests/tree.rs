@@ -1,19 +1,6 @@
 use matchit::{InsertError, MatchError, Router};
 
 #[test]
-fn normalized() {
-    let mut x = Router::new();
-    x.insert("/x/:foo/bar", ()).unwrap();
-    x.insert("/x/:bar/baz", ()).unwrap();
-    x.insert("/:foo/:bar/baz", ()).unwrap();
-    x.insert("/:bar/x/baz", ()).unwrap();
-    assert_eq!(x.at("/x/foo/bar").unwrap().params.get("foo"), Some("foo"));
-    assert_eq!(x.at("/x/foo/baz").unwrap().params.get("bar"), Some("foo"));
-    assert_eq!(x.at("/bax/foo/baz").unwrap().params.get("foo"), Some("bax"));
-    assert_eq!(x.at("/bax/x/baz").unwrap().params.get("bar"), Some("bax"));
-}
-
-#[test]
 fn issue_22() {
     let mut x = Router::new();
     x.insert("/foo_bar", "Welcome!").unwrap();
@@ -227,6 +214,39 @@ match_tests! {
         "/get/abc/123abf/testss"                :: "/get/abc/123abf/:param"                => { "param" => "testss" },
         "/get/abc/123abfff/te"                  :: "/get/abc/123abfff/:param"              => { "param" => "te" },
     },
+    normalized {
+        routes = [
+            "/x/:foo/bar",
+            "/x/:bar/baz",
+            "/:foo/:baz/bax",
+            "/:foo/:bar/baz",
+            "/:fod/:baz/:bax/foo",
+            "/:fod/baz/bax/foo",
+            "/:foo/baz/bax",
+            "/:bar/:bay/bay",
+            "/s",
+            "/s/s",
+            "/s/s/s",
+            "/s/s/s/s",
+            "/s/s/:s/x",
+            "/s/s/:y/d",
+        ],
+        "/x/foo/bar"      :: "/x/:foo/bar"         => { "foo" => "foo" },
+        "/x/foo/baz"      :: "/x/:bar/baz"         => { "bar" => "foo" },
+        "/y/foo/baz"      :: "/:foo/:bar/baz"      => { "foo" => "y", "bar" => "foo" },
+        "/y/foo/bax"      :: "/:foo/:baz/bax"      => { "foo" => "y", "baz" => "foo" },
+        "/y/baz/baz"      :: "/:foo/:bar/baz"      => { "foo" => "y", "bar" => "baz" },
+        "/y/baz/bax/foo"  :: "/:fod/baz/bax/foo"   => { "fod" => "y" },
+        "/y/baz/b/foo"    :: "/:fod/:baz/:bax/foo" => { "fod" => "y", "baz" => "baz", "bax" => "b" },
+        "/y/baz/bax"      :: "/:foo/baz/bax"       => { "foo" => "y" },
+        "/z/bar/bay"      :: "/:bar/:bay/bay"      => { "bar" => "z", "bay" => "bar" },
+        "/s"              :: "/s"                  => { },
+        "/s/s"            :: "/s/s"                => { },
+        "/s/s/s"          :: "/s/s/s"              => { },
+        "/s/s/s/s"        :: "/s/s/s/s"            => { },
+        "/s/s/s/x"        :: "/s/s/:s/x"           => { "s" => "s" },
+        "/s/s/s/d"        :: "/s/s/:y/d"           => { "y" => "s" },
+    },
     blog {
         routes = [
             "/:page",
@@ -408,6 +428,14 @@ insert_tests! {
         "/:foo:bar"  => Err(InsertError::TooManyParams),
         "/:foo:bar/" => Err(InsertError::TooManyParams),
         "/:foo*bar/" => Err(InsertError::TooManyParams),
+    },
+    normalized_conflict {
+        "/x/:foo/bar"  => Ok(()),
+        "/x/:bar/bar"  => Err(InsertError::Conflict { with: "/x/:foo/bar".into() }),
+        "/:y/bar/baz"  => Ok(()),
+        "/:y/baz/baz"  => Ok(()),
+        "/:z/bar/bat"  => Ok(()),
+        "/:z/bar/baz"  => Err(InsertError::Conflict { with: "/:y/bar/baz".into() }),
     },
     more_conflicts {
         "/con:tact"           => Ok(()),
