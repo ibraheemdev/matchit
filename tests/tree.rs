@@ -1,6 +1,20 @@
 use matchit::{InsertError, MatchError, Router};
 
 #[test]
+fn wip() {
+    let mut router = Router::new();
+    router.insert("/path/*rest", 0).unwrap();
+    router.insert("/path/*rest/foo", 1).unwrap();
+    dbg!(&router.root);
+    assert_eq!(router.at("/path/rest/bar").map(|m| *m.value), Ok(0));
+
+    // assert_eq!(
+    //     router.at("/path/rest/bar").map(|m| *m.value),
+    //     Ok(1)
+    // );
+}
+
+#[test]
 fn issue_31() {
     let mut router = Router::new();
     router.insert("/path/foo/:arg", "foo").unwrap();

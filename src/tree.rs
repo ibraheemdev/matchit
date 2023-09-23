@@ -88,7 +88,7 @@ impl<T> Node<T> {
                 let next = prefix[0];
 
                 // `/` after param
-                if current.node_type == NodeType::Param
+                if matches!(current.node_type, NodeType::Param | NodeType::CatchAll)
                     && next == b'/'
                     && current.children.len() == 1
                 {
@@ -109,7 +109,7 @@ impl<T> Node<T> {
                 }
 
                 // not a wildcard and there is no matching child node, create a new one
-                if !matches!(next, b':' | b'*') && current.node_type != NodeType::CatchAll {
+                if !matches!(next, b':' | b'*') {
                     current.indices.push(next);
                     let mut child = current.add_child(Node::default());
                     child = current.update_child_priority(child);
@@ -130,7 +130,7 @@ impl<T> Node<T> {
                     if prefix.len() < current.prefix.len()
                         || current.prefix != prefix[..current.prefix.len()]
                         // catch-alls cannot have children 
-                        || current.node_type == NodeType::CatchAll
+                        // || current.node_type == NodeType::CatchAll
                         // check for longer wildcard, e.g. :name and :names
                         || (current.prefix.len() < prefix.len()
                             && prefix[current.prefix.len()] != b'/')
@@ -285,18 +285,47 @@ impl<T> Node<T> {
                     prefix = &prefix[wildcard_index..];
                 }
 
+                // let child = Self {
+                //     prefix: prefix.to_owned(),
+                //     node_type: NodeType::CatchAll,
+                //     value: Some(UnsafeCell::new(val)),
+                //     priority: 1,
+                //     ..Self::default()
+                // };
+
+                // let i = current.add_child(child);
+                // current.wild_child = true;
+
+                // return Ok(&mut current.children[i]);
+
                 let child = Self {
-                    prefix: prefix.to_owned(),
                     node_type: NodeType::CatchAll,
-                    value: Some(UnsafeCell::new(val)),
-                    priority: 1,
+                    prefix: wildcard.to_owned(),
                     ..Self::default()
                 };
 
-                let i = current.add_child(child);
+                let child = current.add_child(child);
                 current.wild_child = true;
+                current = &mut current.children[child];
+                current.priority += 1;
 
-                return Ok(&mut current.children[i]);
+                // if the route doesn't end with the wildcard, then there
+                // will be another non-wildcard subroute starting with '/'
+                if wildcard.len() < prefix.len() {
+                    prefix = &prefix[wildcard.len()..];
+                    let child = Self {
+                        priority: 1,
+                        ..Self::default()
+                    };
+
+                    let child = current.add_child(child);
+                    current = &mut current.children[child];
+                    continue;
+                }
+
+                // otherwise we're done. Insert the value in the new leaf
+                current.value = Some(UnsafeCell::new(val));
+                return Ok(current);
             }
         }
     }
@@ -480,6 +509,41 @@ impl<T> Node<T> {
                             }
                         }
                         NodeType::CatchAll => {
+                            dbg!("HERE!");
+                            dbg!(current.indices.len());
+                            dbg!(std::str::from_utf8(&current.prefix).unwrap());
+
+                            if !backtracking {
+                                for (d, byte) in path.iter().enumerate() {
+                                    if let Some(i) =
+                                        current.indices.iter().position(|&c| c == *byte)
+                                    {
+                                        let consumed = &path[..d];
+                                        path = &path[d..];
+
+                                        // keep track of wildcard routes we skipped to backtrack to later if
+                                        // we don't find a math
+                                        skipped_nodes.push(Skipped {
+                                            path: consumed,
+                                            node: current,
+                                            params: params.len(),
+                                        });
+
+                                        // child won't match because of an extra trailing slash
+                                        if path == b"/"
+                                            && current.children[i].prefix != b"/"
+                                            && current.value.is_some()
+                                        {
+                                            return Err(MatchError::ExtraTrailingSlash);
+                                        }
+
+                                        // continue with the child node
+                                        current = &current.children[i];
+                                        continue 'walk;
+                                    }
+                                }
+                            }
+
                             // catch all segments are only allowed at the end of the route,
                             // either this node has the value or there is no match
                             return match current.value {
@@ -708,36 +772,36 @@ impl<T> Default for Node<T> {
     }
 }
 
-#[cfg(test)]
-const _: () = {
-    use std::fmt::{self, Debug, Formatter};
+// #[cfg(test)]
+//const _: () = {
+use std::fmt::{self, Debug, Formatter};
 
-    // visualize the tree structure when debugging
-    impl<T: Debug> Debug for Node<T> {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            // safety: we only expose &mut T through &mut self
-            let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
+// visualize the tree structure when debugging
+impl<T: Debug> Debug for Node<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        // safety: we only expose &mut T through &mut self
+        let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
 
-            let indices = self
-                .indices
-                .iter()
-                .map(|&x| char::from_u32(x as _))
-                .collect::<Vec<_>>();
+        let indices = self
+            .indices
+            .iter()
+            .map(|&x| char::from_u32(x as _))
+            .collect::<Vec<_>>();
 
-            let param_names = self
-                .param_remapping
-                .iter()
-                .map(|x| std::str::from_utf8(x).unwrap())
-                .collect::<Vec<_>>();
+        let param_names = self
+            .param_remapping
+            .iter()
+            .map(|x| std::str::from_utf8(x).unwrap())
+            .collect::<Vec<_>>();
 
-            let mut fmt = f.debug_struct("Node");
-            fmt.field("value", &value);
-            fmt.field("prefix", &std::str::from_utf8(&self.prefix));
-            fmt.field("node_type", &self.node_type);
-            fmt.field("children", &self.children);
-            fmt.field("param_names", &param_names);
-            fmt.field("indices", &indices);
-            fmt.finish()
-        }
+        let mut fmt = f.debug_struct("Node");
+        fmt.field("value", &value);
+        fmt.field("prefix", &std::str::from_utf8(&self.prefix));
+        fmt.field("node_type", &self.node_type);
+        fmt.field("children", &self.children);
+        fmt.field("param_names", &param_names);
+        fmt.field("indices", &indices);
+        fmt.finish()
     }
-};
+}
+//};
