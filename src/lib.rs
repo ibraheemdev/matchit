@@ -45,7 +45,8 @@
 //!
 //! ### Catch-all Parameters
 //!
-//! Catch-all parameters start with `*` and match everything after the `/`. They must always be at the **end** of the route:
+//! Catch-all parameters start with `*` and match anything until the end of the path.
+//! They must always be at the **end** of the route:
 //!
 //! ```rust
 //! # use matchit::Router;
