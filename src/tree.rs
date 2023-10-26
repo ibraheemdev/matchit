@@ -267,13 +267,6 @@ impl<T> Node<T> {
                     return Err(InsertError::InvalidCatchAll);
                 }
 
-                if let Some(i) = wildcard_index.checked_sub(1) {
-                    // "/foo/bar*x"
-                    if prefix[i] != b'/' {
-                        return Err(InsertError::InvalidCatchAll);
-                    }
-                }
-
                 // "*x" without leading `/`
                 if prefix == route && route[0] != b'/' {
                     return Err(InsertError::InvalidCatchAll);
@@ -511,9 +504,7 @@ impl<T> Node<T> {
                 }
 
                 // nope, try backtracking
-                if path != b"/" {
-                    try_backtrack!();
-                }
+                try_backtrack!();
 
                 // TODO: does this *always* means there is an extra trailing slash?
                 if path == b"/" && current.wild_child && current.node_type != NodeType::Root {

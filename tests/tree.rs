@@ -353,6 +353,14 @@ match_tests! {
         "/xxx/y"  :: "/xxx/*x" => { "x" => "y" },
         "/xxx/"   :: "/xxx/"   => {},
         "/xxx"    :: ""        => None
+    },
+    catchall_overlap {
+        routes = [
+            "/yyy/*x",
+            "/yyy*x",
+        ],
+        "/yyy/y"  :: "/yyy/*x" => { "x" => "y" },
+        "/yyy/"   :: "/yyy*x"  => { "x" => "/"},
     }
 }
 
@@ -395,7 +403,7 @@ insert_tests! {
         "/src/foo/bar"        => Ok(()),
         "/src1/"              => Ok(()),
         "/src1/*filepath"     => Ok(()),
-        "/src2*filepath"      => Err(InsertError::InvalidCatchAll),
+        "/src2*filepath"      => Ok(()),
         "/src2/*filepath"     => Ok(()),
         "/src2/"              => Ok(()),
         "/src2"               => Ok(()),
@@ -410,8 +418,8 @@ insert_tests! {
         "/id/:id"             => Ok(()),
     },
     invalid_catchall {
-        "/non-leading-*catchall" => Err(InsertError::InvalidCatchAll),
-        "/foo/bar*catchall"      => Err(InsertError::InvalidCatchAll),
+        "/non-leading-*catchall" => Ok(()),
+        "/foo/bar*catchall"      => Ok(()),
         "/src/*filepath/x"       => Err(InsertError::InvalidCatchAll),
         "/src2/"                 => Ok(()),
         "/src2/*filepath/x"      => Err(InsertError::InvalidCatchAll),
