@@ -514,6 +514,12 @@ insert_tests! {
         "/bar_:x/y"       => Ok(()),
         "/bar/:x"         => Ok(()),
     },
+    duplicate_conflict {
+        "/hey" => Ok(()),
+        "/hey/users" => Ok(()),
+        "/hey/user" => Ok(()),
+        "/hey/user" => Err(InsertError::Conflict { with: "/hey/user".into() }),
+    },
 }
 
 tsr_tests! {
