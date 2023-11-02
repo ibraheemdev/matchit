@@ -44,7 +44,7 @@ impl std::error::Error for InsertError {}
 impl InsertError {
     pub(crate) fn conflict<T>(route: &[u8], prefix: &[u8], current: &Node<T>) -> Self {
         // The new route would have had to replace the current node in the tree.
-        if prefix == &current.prefix {
+        if prefix == current.prefix {
             let mut route = route.to_owned();
             denormalize_params(&mut route, &current.param_remapping);
             return InsertError::Conflict {
