@@ -218,7 +218,7 @@ impl<T> Node<T> {
                 // no wildcard, simply use the current node
                 None => {
                     current.value = Some(UnsafeCell::new(val));
-                    current.prefix = prefix.to_owned();
+                    current.prefix = unescape_prefix(prefix);
                     return Ok(current);
                 }
             };
@@ -227,7 +227,7 @@ impl<T> Node<T> {
             if wildcard[0] == b':' {
                 // insert prefix before the current wildcard
                 if wildcard_index > 0 {
-                    current.prefix = prefix[..wildcard_index].to_owned();
+                    current.prefix = unescape_prefix(&prefix[..wildcard_index]);
                     prefix = &prefix[wildcard_index..];
                 }
 
@@ -281,7 +281,7 @@ impl<T> Node<T> {
 
                 // insert prefix before the current wildcard
                 if wildcard_index > 0 {
-                    current.prefix = prefix[..wildcard_index].to_owned();
+                    current.prefix = unescape_prefix(&prefix[..wildcard_index]);
                     prefix = &prefix[wildcard_index..];
                 }
 
@@ -647,11 +647,26 @@ pub(crate) fn denormalize_params(route: &mut Vec<u8>, params: &ParamRemapping) {
     }
 }
 
+// Removes parameter escape sequences from a route prefix for literal matches.
+fn unescape_prefix(escaped: &[u8]) -> Vec<u8> {
+    let mut prefix = Vec::with_capacity(escaped.len());
+
+    for i in 0..escaped.len() {
+        if escaped[i] == b'\\' && matches!(escaped.get(i + 1), Some(b':' | b'*')) {
+            continue;
+        }
+
+        prefix.push(escaped[i]);
+    }
+
+    prefix
+}
+
 // Searches for a wildcard segment and checks the path for invalid characters.
 fn find_wildcard(path: &[u8]) -> Result<Option<(&[u8], usize)>, InsertError> {
     for (start, &c) in path.iter().enumerate() {
         // a wildcard starts with ':' (param) or '*' (catch-all)
-        if c != b':' && c != b'*' {
+        if (c != b':' && c != b'*') || path[start.saturating_sub(1)] == b'\\' {
             continue;
         }
 

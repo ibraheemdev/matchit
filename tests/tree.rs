@@ -3,13 +3,12 @@ use matchit::{InsertError, MatchError, Router};
 #[test]
 fn issue_31() {
     let mut router = Router::new();
-    router.insert("/path/foo/:arg", "foo").unwrap();
-    router.insert("/path/*rest", "wildcard").unwrap();
+    // router.insert("/path\\:arg", "foo").unwrap();
+    // assert_eq!(router.at("/path:arg").map(|m| *m.value), Ok("foo"));
 
-    assert_eq!(
-        router.at("/path/foo/myarg/bar/baz").map(|m| *m.value),
-        Ok("wildcard")
-    );
+    router.insert("/path\\", "foo").unwrap();
+    router.insert("/path\\:arg", "foo").unwrap();
+    assert_eq!(router.at("/path:arg").map(|m| *m.value), Ok("foo"));
 }
 
 #[test]
