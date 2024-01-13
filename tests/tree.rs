@@ -727,6 +727,28 @@ macro_rules! insert_tests {
    )* };
 }
 
+macro_rules! remove_tests {
+	($($name:ident {
+		routes = $routes:expr,
+		$($path:literal => $res:expr),* $(,)?
+	}),* $(,)?) => { $(
+		#[test]
+		fn $name() {
+			let mut router = Router::new();
+
+			for route in $routes {
+				router.insert(route, route.to_owned())
+					.unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
+			}
+
+			$(
+				let res = router.remove($path);
+				assert_eq!(res, $res, "unexpected result for path '{}'", $path);
+			)*
+		}
+   )* };
+}
+
 macro_rules! tsr_tests {
     ($($name:ident {
         routes = $routes:expr,

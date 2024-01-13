@@ -160,6 +160,47 @@ impl<T> Node<T> {
         }
     }
 
+    pub fn remove<'p>(&mut self, full_path: &'p [u8]) -> Option<UnsafeCell<T>> {
+        let mut current = self;
+        let full_path = normalize_params(full_path.to_vec()).unwrap().0;
+        let mut path = full_path.as_slice();
+
+        // FIND THE NODE AND REMOVE IT
+		// TODO: find wildcards
+        'walk: loop {
+            // the path is longer than this node's prefix, we are expecting a child node
+            if path.len() > current.prefix.len() {
+                let (prefix, rest) = path.split_at(current.prefix.len());
+
+                // the prefix matches
+                if prefix == current.prefix {
+                    let first = rest[0];
+                    path = rest;
+
+                    if let Some(i) = current.indices.iter().position(|&c| c == first) {
+						// continue with the child node
+						current = &mut current.children[i];
+						continue 'walk;
+					}
+                }
+            }
+
+            // this is it, we should have reached the node containing the value
+            if path == current.prefix {
+                return current.value.take();
+            }
+
+            // nothing matches, check for a missing trailing slash
+            if current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some() {
+                return None;
+            }
+
+            return None;
+        }
+
+        // WALK BACK UP AND REMOVE UNUSED NODES
+    }
+
     // add a child node, keeping wildcards at the end
     fn add_child(&mut self, child: Node<T>) -> usize {
         let len = self.children.len();
@@ -732,3 +773,33 @@ const _: () = {
         }
     }
 };
+
+#[cfg(test)]
+mod test {
+    use super::{normalize_params, Node};
+
+    #[test]
+    fn test_normalization() {
+        let path = "/users/:azda/test/:test";
+        let (a, b) = normalize_params(path.to_string().into_bytes()).unwrap();
+        let a1 = std::str::from_utf8(&a).unwrap();
+        let b1 = std::str::from_utf8(&b[0]).unwrap();
+        let b2 = std::str::from_utf8(&b[1]).unwrap();
+        dbg!(a1, b1, b2);
+    }
+
+    #[test]
+    fn test_tree() {
+        let mut root = Node::default();
+        root.insert("/azdiuaz/:azda", ()).unwrap();
+        root.insert("/sxnqjxqi/:azda/:test", ()).unwrap();
+        root.insert("/mlsiqds/azd", ()).unwrap();
+        root.insert("/mlsiqds", ()).unwrap();
+        root.insert("/mlsiqds/qsdqd", ()).unwrap();
+
+        dbg!(&root);
+		root.remove(b"/mlsiqds/qsdqd").unwrap();
+        dbg!(&root);
+
+    }
+}
