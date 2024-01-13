@@ -97,6 +97,27 @@ impl<T> Router<T> {
         }
     }
 
+    /// Remove a given route from the router.
+    /// Returns the value stored under the route if it was found.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use matchit::Router;
+    /// let mut router = Router::new();
+    /// router.insert("/home", "Welcome!");
+    ///
+    /// assert_eq!(router.remove("/home"), Some("Welcome!"));
+    /// assert_eq!(router.remove("/home"), None);
+    ///
+    /// router.insert("/home/{id}/", "Hello!");
+    /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
+    /// assert_eq!(router.remove("/home/{id}/"), None);
+    /// ```
+    pub fn remove(&mut self, path: impl Into<String>) -> Option<T> {
+        self.root.remove(path)
+    }
+
     #[cfg(feature = "__test_helpers")]
     pub fn check_priorities(&self) -> Result<u32, (u32, u32)> {
         self.root.check_priorities()

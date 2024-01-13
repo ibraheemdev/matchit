@@ -173,6 +173,102 @@ impl<T> Node<T> {
         }
     }
 
+    /// Removes a route from the tree, returning the value if the route existed.
+    /// The provided path should be the same as the one used to insert the route (including wildcards).
+    pub fn remove(&mut self, full_path: impl Into<String>) -> Option<T> {
+        let mut current = self;
+        let unescaped = UnescapedRoute::new(full_path.into().into_bytes());
+        let full_path = normalize_params(unescaped).ok()?.0.into_inner();
+        let mut path: &[u8] = full_path.as_ref();
+
+        fn drop_child<T>(node: &mut Node<T>, i: usize) -> Option<T> {
+            // if the node we are dropping doesn't have any children, we can remove it
+            let val = if node.children[i].children.is_empty() {
+                // if the parent node only has one child there are no indices
+                if node.children.len() == 1 && node.indices.is_empty() {
+                    node.wild_child = false;
+                    node.children.remove(0).value.take()
+                } else {
+                    let child = node.children.remove(i);
+                    // Indices are only used for static nodes
+                    if child.node_type == NodeType::Static {
+                        node.indices.remove(i);
+                    } else {
+                        // It was a dynamic node, we remove the wildcard child flag
+                        node.wild_child = false;
+                    }
+                    child.value
+                }
+            } else {
+                node.children[i].value.take()
+            };
+
+            val.map(UnsafeCell::into_inner)
+        }
+
+        // Specifice case if we are removing the root node
+        if path == current.prefix.inner() {
+            let val = current.value.take().map(UnsafeCell::into_inner);
+            // if the root node has no children, we can just reset it
+            if current.children.is_empty() {
+                *current = Self::default();
+            }
+            return val;
+        }
+
+        'walk: loop {
+            // the path is longer than this node's prefix, we are expecting a child node
+            if path.len() > current.prefix.len() {
+                let (prefix, rest) = path.split_at(current.prefix.len());
+                // the prefix matches
+                if prefix == current.prefix.inner() {
+                    let first = rest[0];
+                    path = rest;
+
+                    // If there is only one child we can continue with the child node
+                    if current.children.len() == 1 {
+                        if current.children[0].prefix.inner() == rest {
+                            return drop_child(current, 0);
+                        } else {
+                            current = &mut current.children[0];
+                            continue 'walk;
+                        }
+                    }
+
+                    // If there are many we get the index of the child matching the first byte
+                    if let Some(i) = current.indices.iter().position(|&c| c == first) {
+                        // continue with the child node
+                        if current.children[i].prefix.inner() == rest {
+                            return drop_child(current, i);
+                        } else {
+                            current = &mut current.children[i];
+                            continue 'walk;
+                        }
+                    }
+
+                    // If this node has a wildcard child and that it matches our standardized path
+                    // we continue with that
+                    if current.wild_child
+                        && !current.children.is_empty()
+                        && rest.len() > 2
+                        && rest[0] == b'{'
+                        && rest[2] == b'}'
+                    {
+                        // continue with the wildcard child
+                        if current.children.last_mut().unwrap().prefix.inner() == rest {
+                            return drop_child(current, current.children.len() - 1);
+                        } else {
+                            current = current.children.last_mut().unwrap();
+                            continue 'walk;
+                        }
+                    }
+                }
+            }
+
+            return None;
+        }
+    }
+
     // add a child node, keeping wildcards at the end
     fn add_child(&mut self, child: Node<T>) -> usize {
         let len = self.children.len();
