@@ -3,6 +3,7 @@ use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
+use std::fmt::Display;
 use std::mem;
 use std::ops::Range;
 
@@ -760,6 +761,30 @@ impl<T> Default for Node<T> {
             value: None,
             priority: 0,
         }
+    }
+}
+
+impl<T> Display for Node<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Display the entire tree structure with the prefix of each node
+        // and the value of each leaf node
+        fn fmt_node<T>(
+            node: &Node<T>,
+            f: &mut std::fmt::Formatter<'_>,
+            i: usize,
+        ) -> std::fmt::Result {
+            let prefix = std::str::from_utf8(&node.prefix).unwrap();
+            let has_value = node.value.is_some();
+            writeln!(f, "{}{} --> {}", "|---".repeat(i), prefix, has_value)?;
+
+            for child in &node.children {
+                fmt_node(child, f, i + 1)?;
+            }
+
+            Ok(())
+        }
+        write!(f, "root\n")?;
+        fmt_node(self, f, 0)
     }
 }
 
