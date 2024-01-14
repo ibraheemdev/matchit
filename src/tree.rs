@@ -848,7 +848,7 @@ mod test {
     }
 
     #[test]
-    fn test_tree() {
+    fn test_remove() {
         let mut root = Node::default();
 
         const ROUTES: &[&str] = &[
