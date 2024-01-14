@@ -2,6 +2,7 @@ use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
+use std::fmt::Display;
 use std::mem;
 
 /// The types of nodes the tree can hold
@@ -160,45 +161,79 @@ impl<T> Node<T> {
         }
     }
 
-    pub fn remove<'p>(&mut self, full_path: &'p [u8]) -> Option<UnsafeCell<T>> {
+	/// Removes a route from the tree, returning the value if the route existed.
+	/// The provided path should be the same as the one used to insert the route (including wildcards).
+    pub fn remove<'p>(&mut self, full_path: &'p [u8]) -> Option<T> {
         let mut current = self;
         let full_path = normalize_params(full_path.to_vec()).unwrap().0;
         let mut path = full_path.as_slice();
 
-        // FIND THE NODE AND REMOVE IT
-		// TODO: find wildcards
+        fn drop_child<T>(node: &mut Node<T>, i: usize) -> Option<T> {
+			// if the node we are dropping doesn't have any children, we can remove it
+			let val = if node.children[i].children.is_empty() {
+				// if the parent node only has one child there are no indices
+				if node.children.len() == 1 && node.indices.is_empty() {
+					node.children.remove(0).value.take()
+				} else {
+					node.indices.remove(i);
+					node.children.remove(i).value.take()
+				}
+			} else {
+				node.children[i].value.take()
+			};
+
+			val.map(UnsafeCell::into_inner)
+        }
+
         'walk: loop {
             // the path is longer than this node's prefix, we are expecting a child node
             if path.len() > current.prefix.len() {
                 let (prefix, rest) = path.split_at(current.prefix.len());
-
                 // the prefix matches
                 if prefix == current.prefix {
                     let first = rest[0];
                     path = rest;
 
+                    // If there is only one child we can continue with the child node
+                    if current.children.len() == 1 {
+                        if current.children[0].prefix == rest {
+                            return drop_child(current, 0);
+                        } else {
+                            current = &mut current.children[0];
+                            continue 'walk;
+                        }
+                    }
+
+                    // If there are many we get the index of the child matching the first byte
                     if let Some(i) = current.indices.iter().position(|&c| c == first) {
-						// continue with the child node
-						current = &mut current.children[i];
-						continue 'walk;
-					}
+                        // continue with the child node
+                        if current.children[i].prefix == rest {
+                            return drop_child(current, i);
+                        } else {
+                            current = &mut current.children[i];
+                            continue 'walk;
+                        }
+                    }
+
+                    // If this node has a wildcard child and that it matches our standardized path
+                    // we continue with that
+                    if current.wild_child
+                        && rest[0] == b':'
+                        && current.indices.last() == Some(&rest[1])
+                    {
+                        // continue with the wildcard child
+                        if current.children.last_mut().unwrap().prefix == rest {
+                            return drop_child(current, current.children.len() - 1);
+                        } else {
+                            current = current.children.last_mut().unwrap();
+                            continue 'walk;
+                        }
+                    }
                 }
-            }
-
-            // this is it, we should have reached the node containing the value
-            if path == current.prefix {
-                return current.value.take();
-            }
-
-            // nothing matches, check for a missing trailing slash
-            if current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some() {
-                return None;
             }
 
             return None;
         }
-
-        // WALK BACK UP AND REMOVE UNUSED NODES
     }
 
     // add a child node, keeping wildcards at the end
@@ -740,6 +775,30 @@ impl<T> Default for Node<T> {
     }
 }
 
+impl<T> Display for Node<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Display the entire tree structure with the prefix of each node
+        // and the value of each leaf node
+        fn fmt_node<T>(
+            node: &Node<T>,
+            f: &mut std::fmt::Formatter<'_>,
+            i: usize,
+        ) -> std::fmt::Result {
+            let prefix = std::str::from_utf8(&node.prefix).unwrap();
+            let has_value = node.value.is_some();
+            writeln!(f, "{}{} --> {}", "|---".repeat(i), prefix, has_value)?;
+
+            for child in &node.children {
+                fmt_node(child, f, i + 1)?;
+            }
+
+            Ok(())
+        }
+        write!(f, "root\n")?;
+        fmt_node(self, f, 0)
+    }
+}
+
 #[cfg(test)]
 const _: () = {
     use std::fmt::{self, Debug, Formatter};
@@ -791,15 +850,48 @@ mod test {
     #[test]
     fn test_tree() {
         let mut root = Node::default();
-        root.insert("/azdiuaz/:azda", ()).unwrap();
-        root.insert("/sxnqjxqi/:azda/:test", ()).unwrap();
-        root.insert("/mlsiqds/azd", ()).unwrap();
-        root.insert("/mlsiqds", ()).unwrap();
-        root.insert("/mlsiqds/qsdqd", ()).unwrap();
 
-        dbg!(&root);
-		root.remove(b"/mlsiqds/qsdqd").unwrap();
-        dbg!(&root);
+        const ROUTES: &[&str] = &[
+            "/hi",
+            "/contact",
+            "/co",
+            "/c",
+            "/a",
+            "/ab",
+            "/doc/",
+            "/doc/rust_faq.html",
+            "/doc/rust1.26.html",
+            "/ʯ",
+            "/β",
+            "/sd!here",
+            "/sd$here",
+            "/sd&here",
+            "/sd'here",
+            "/sd(here",
+            "/sd)here",
+            "/sd+here",
+            "/sd,here",
+            "/sd;here",
+            "/sd=here",
+            "/get/test/abc",
+            "/get/:param/abc",
+            "/something/:pzd/thirdthing",
+            "/get/abc",
+            "/get/:param",
+            "/foo/*catchall",
+            "/bar",
+            "/bar/",
+            "/bar/*catchall",
+        ];
 
+        for route in ROUTES {
+            root.insert(*route, ()).unwrap();
+        }
+
+        println!("{}", root);
+        for route in ROUTES {
+            root.remove(route.as_bytes()).unwrap();
+        }
+        println!("{}", root);
     }
 }
