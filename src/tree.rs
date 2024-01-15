@@ -3,7 +3,6 @@ use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
-use std::fmt::Display;
 use std::mem;
 use std::ops::Range;
 
@@ -774,7 +773,8 @@ impl<T> Default for Node<T> {
     }
 }
 
-impl<T> Display for Node<T> {
+#[cfg(test)]
+impl<T> std::fmt::Display for Node<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Display the entire tree structure with the prefix of each node
         // and the value of each leaf node
