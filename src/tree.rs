@@ -162,7 +162,7 @@ impl<T> Node<T> {
 
     /// Removes a route from the tree, returning the value if the route existed.
     /// The provided path should be the same as the one used to insert the route (including wildcards).
-    pub fn remove<'p>(&mut self, full_path: &'p [u8]) -> Option<T> {
+    pub fn remove(&mut self, full_path: &[u8]) -> Option<T> {
         let mut current = self;
         let full_path = normalize_params(full_path.to_vec()).unwrap().0;
         let mut path = full_path.as_slice();
@@ -804,7 +804,7 @@ impl<T> std::fmt::Display for Node<T> {
 
             Ok(())
         }
-        write!(f, "root\n")?;
+        writeln!(f, "root")?;
         fmt_node(self, f, 0)
     }
 }
@@ -859,8 +859,6 @@ mod test {
 
     #[test]
     fn test_remove() {
-        let mut root = Node::default();
-
         const ROUTES: &[&str] = &[
             "/hi",
             "/contact",
@@ -893,15 +891,16 @@ mod test {
             "/bar/",
             "/bar/*catchall",
         ];
+        let mut root = Node::default();
 
         for route in ROUTES {
             root.insert(*route, ()).unwrap();
         }
 
-        println!("{}", root);
+        println!("{root}");
         for route in ROUTES {
             root.remove(route.as_bytes()).unwrap();
         }
-        println!("{}", root);
+        println!("{root}");
     }
 }
