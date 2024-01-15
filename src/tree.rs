@@ -160,39 +160,39 @@ impl<T> Node<T> {
         }
     }
 
-	/// Removes a route from the tree, returning the value if the route existed.
-	/// The provided path should be the same as the one used to insert the route (including wildcards).
+    /// Removes a route from the tree, returning the value if the route existed.
+    /// The provided path should be the same as the one used to insert the route (including wildcards).
     pub fn remove<'p>(&mut self, full_path: &'p [u8]) -> Option<T> {
         let mut current = self;
         let full_path = normalize_params(full_path.to_vec()).unwrap().0;
         let mut path = full_path.as_slice();
 
         fn drop_child<T>(node: &mut Node<T>, i: usize) -> Option<T> {
-			// if the node we are dropping doesn't have any children, we can remove it
-			let val = if node.children[i].children.is_empty() {
-				// if the parent node only has one child there are no indices
-				if node.children.len() == 1 && node.indices.is_empty() {
-					node.children.remove(0).value.take()
-				} else {
-					node.indices.remove(i);
-					node.children.remove(i).value.take()
-				}
-			} else {
-				node.children[i].value.take()
-			};
+            // if the node we are dropping doesn't have any children, we can remove it
+            let val = if node.children[i].children.is_empty() {
+                // if the parent node only has one child there are no indices
+                if node.children.len() == 1 && node.indices.is_empty() {
+                    node.children.remove(0).value.take()
+                } else {
+                    node.indices.remove(i);
+                    node.children.remove(i).value.take()
+                }
+            } else {
+                node.children[i].value.take()
+            };
 
-			val.map(UnsafeCell::into_inner)
+            val.map(UnsafeCell::into_inner)
         }
 
-		// Specifice case if we are removing the root node
-		if path == current.prefix {
-			let val = current.value.take().map(UnsafeCell::into_inner);
-			// if the root node has no children, we can just reset it
-			if current.children.is_empty() {
-				*current = Self::default();
-			}
-			return val;
-		}
+        // Specifice case if we are removing the root node
+        if path == current.prefix {
+            let val = current.value.take().map(UnsafeCell::into_inner);
+            // if the root node has no children, we can just reset it
+            if current.children.is_empty() {
+                *current = Self::default();
+            }
+            return val;
+        }
 
         'walk: loop {
             // the path is longer than this node's prefix, we are expecting a child node
