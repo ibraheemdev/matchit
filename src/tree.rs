@@ -217,6 +217,16 @@ impl<T> Node<T> {
             return val;
         }
 
+		// Specifice case if we are removing the root node
+		if path == current.prefix {
+			let val = current.value.take().map(UnsafeCell::into_inner);
+			// if the root node has no children, we can just reset it
+			if current.children.is_empty() {
+				*current = Self::default();
+			}
+			return val;
+		}
+
         'walk: loop {
             // the path is longer than this node's prefix, we are expecting a child node
             if path.len() > current.prefix.len() {
