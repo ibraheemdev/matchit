@@ -793,7 +793,7 @@ impl<T> std::fmt::Display for Node<T> {
 
             Ok(())
         }
-        write!(f, "root\n")?;
+        writeln!(f, "root")?;
         fmt_node(self, f, 0)
     }
 }
