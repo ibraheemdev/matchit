@@ -643,6 +643,34 @@ tsr_tests! {
     },
 }
 
+remove_tests! {
+    test_remove_leaf_node {
+        routes = vec!["route1", "route2"],
+        remove = "route1",
+        "route1" => None::<String>,
+        "route2" => Some("route2"),
+    },
+    test_remove_non_leaf_node {
+        routes = vec!["route1", "route1/:id"],
+        remove = "route1",
+        "route1" => None::<String>,
+        "route1/:id" => Some("route1/:id"),
+    },
+    test_tree_state_after_removal {
+        routes = vec!["route1", "route2", "route3"],
+        remove = "route2",
+        "route1" => Some("route1"),
+        "route2" => None::<String>,
+        "route3" => Some("route3"),
+    },
+    test_remove_unnamed_wildcard {
+        routes = vec!["route1", "route1/*test"],
+        remove = "route1",
+        "route1" => None::<String>,
+        "route1/*test" => Some("route1/*test"),
+    },
+}
+
 macro_rules! match_tests {
     ($($name:ident {
         routes = $routes:expr,
@@ -728,24 +756,46 @@ macro_rules! insert_tests {
 }
 
 macro_rules! remove_tests {
-	($($name:ident {
-		routes = $routes:expr,
+    ($($name:ident {
+        routes = $routes:expr,
+        remove = $remove:expr,
 		$($path:literal => $res:expr),* $(,)?
-	}),* $(,)?) => { $(
-		#[test]
-		fn $name() {
-			let mut router = Router::new();
+    }),* $(,)?) => { $(
+        #[test]
+        fn $name() {
+            let mut router = Router::new();
 
-			for route in $routes {
-				router.insert(route, route.to_owned())
-					.unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
-			}
+            for route in $routes {
+                router.insert(route, route.to_owned())
+                    .unwrap_or_else(|e| panic!("error when inserting route '{}': {:?}", route, e));
+            }
 
-			$(
-				let res = router.remove($path);
-				assert_eq!(res, $res, "unexpected result for path '{}'", $path);
-			)*
-		}
+            let removed = router.remove($remove);
+            assert_eq!(removed, Some($remove.to_owned()), "unexpected result for removed path '{}'", $remove);
+
+            $(
+                match router.at($path) {
+					Err(_) => {
+						match $res {
+							Some(data) => panic!("Expected err for route '{}', found: {:?}", $path, data),
+							None => {}
+						}
+					}
+					Ok(result) => {
+						if $res.is_none() {
+							panic!("Expected route not found '{}', found: {:?}", $path, result);
+						}
+
+						if result.value != &$res.unwrap() {
+							panic!(
+								"Wrong value for route '{}'. Expected '{}')",
+								$path, result.value
+							);
+						}
+					}
+				}
+            )*
+        }
    )* };
 }
 
@@ -774,4 +824,4 @@ macro_rules! tsr_tests {
    )* };
 }
 
-pub(self) use {insert_tests, match_tests, tsr_tests};
+pub(self) use {insert_tests, match_tests, remove_tests, tsr_tests};

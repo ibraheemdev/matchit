@@ -845,7 +845,7 @@ const _: () = {
 
 #[cfg(test)]
 mod test {
-    use super::{normalize_params, Node};
+    use super::normalize_params;
 
     #[test]
     fn test_normalization() {
@@ -854,53 +854,8 @@ mod test {
         let a1 = std::str::from_utf8(&a).unwrap();
         let b1 = std::str::from_utf8(&b[0]).unwrap();
         let b2 = std::str::from_utf8(&b[1]).unwrap();
-        dbg!(a1, b1, b2);
-    }
-
-    #[test]
-    fn test_remove() {
-        const ROUTES: &[&str] = &[
-            "/hi",
-            "/contact",
-            "/co",
-            "/c",
-            "/a",
-            "/ab",
-            "/doc/",
-            "/doc/rust_faq.html",
-            "/doc/rust1.26.html",
-            "/ʯ",
-            "/β",
-            "/sd!here",
-            "/sd$here",
-            "/sd&here",
-            "/sd'here",
-            "/sd(here",
-            "/sd)here",
-            "/sd+here",
-            "/sd,here",
-            "/sd;here",
-            "/sd=here",
-            "/get/test/abc",
-            "/get/:param/abc",
-            "/something/:pzd/thirdthing",
-            "/get/abc",
-            "/get/:param",
-            "/foo/*catchall",
-            "/bar",
-            "/bar/",
-            "/bar/*catchall",
-        ];
-        let mut root = Node::default();
-
-        for route in ROUTES {
-            root.insert(*route, ()).unwrap();
-        }
-
-        println!("{root}");
-        for route in ROUTES {
-            root.remove(route.as_bytes()).unwrap();
-        }
-        println!("{root}");
+        assert_eq!(a1, "/users/:a/test/:b");
+        assert_eq!(b1, ":azda");
+        assert_eq!(b2, ":test");
     }
 }
