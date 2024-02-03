@@ -86,16 +86,6 @@ impl InsertError {
 /// router.insert("/home", "Welcome!")?;
 /// router.insert("/blog/", "Our blog.")?;
 ///
-/// // a route exists without the trailing slash
-/// if let Err(err) = router.at("/home/") {
-///     assert_eq!(err, MatchError::ExtraTrailingSlash);
-/// }
-///
-/// // a route exists with a trailing slash
-/// if let Err(err) = router.at("/blog") {
-///     assert_eq!(err, MatchError::MissingTrailingSlash);
-/// }
-///
 /// // no routes match
 /// if let Err(err) = router.at("/foobar") {
 ///     assert_eq!(err, MatchError::NotFound);
@@ -104,33 +94,13 @@ impl InsertError {
 /// # }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum MatchError {
-    /// The path was missing a trailing slash.
-    MissingTrailingSlash,
-    /// The path had an extra trailing slash.
-    ExtraTrailingSlash,
     /// No matching route was found.
     NotFound,
 }
 
-impl MatchError {
-    pub(crate) fn unsure(full_path: &[u8]) -> Self {
-        if full_path[full_path.len() - 1] == b'/' {
-            MatchError::ExtraTrailingSlash
-        } else {
-            MatchError::MissingTrailingSlash
-        }
-    }
-}
-
 impl fmt::Display for MatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let msg = match self {
-            MatchError::MissingTrailingSlash => "match error: expected trailing slash",
-            MatchError::ExtraTrailingSlash => "match error: found extra trailing slash",
-            MatchError::NotFound => "match error: route not found",
-        };
-
-        write!(f, "{}", msg)
+        write!(f, "matching route not found")
     }
 }
 

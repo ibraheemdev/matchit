@@ -363,14 +363,6 @@ impl<T> Node<T> {
                                 });
                             }
 
-                            // child won't match because of an extra trailing slash
-                            if path == b"/"
-                                && current.children[i].prefix != b"/"
-                                && current.value.is_some()
-                            {
-                                return Err(MatchError::ExtraTrailingSlash);
-                            }
-
                             // continue with the child node
                             current = &current.children[i];
                             continue 'walk;
@@ -379,15 +371,8 @@ impl<T> Node<T> {
 
                     // we didn't find a match and there are no children with wildcards, there is no match
                     if !current.wild_child {
-                        // extra trailing slash
-                        if path == b"/" && current.value.is_some() {
-                            return Err(MatchError::ExtraTrailingSlash);
-                        }
-
                         // try backtracking
-                        if path != b"/" {
-                            try_backtrack!();
-                        }
+                        try_backtrack!();
 
                         // nothing found
                         return Err(MatchError::NotFound);
@@ -404,14 +389,6 @@ impl<T> Node<T> {
                                     let (param, rest) = path.split_at(i);
 
                                     if let [child] = current.children.as_slice() {
-                                        // child won't match because of an extra trailing slash
-                                        if rest == b"/"
-                                            && child.prefix != b"/"
-                                            && current.value.is_some()
-                                        {
-                                            return Err(MatchError::ExtraTrailingSlash);
-                                        }
-
                                         // store the parameter value
                                         params.push(&current.prefix[1..], param);
 
@@ -422,16 +399,8 @@ impl<T> Node<T> {
                                         continue 'walk;
                                     }
 
-                                    // this node has no children yet the path has more segments...
-                                    // either the path has an extra trailing slash or there is no match
-                                    if path.len() == i + 1 {
-                                        return Err(MatchError::ExtraTrailingSlash);
-                                    }
-
                                     // try backtracking
-                                    if path != b"/" {
-                                        try_backtrack!();
-                                    }
+                                    try_backtrack!();
 
                                     return Err(MatchError::NotFound);
                                 }
@@ -450,22 +419,8 @@ impl<T> Node<T> {
                                         return Ok((value, params));
                                     }
 
-                                    // check the child node in case the path is missing a trailing slash
-                                    if let [child] = current.children.as_slice() {
-                                        current = child;
-
-                                        if (current.prefix == b"/" && current.value.is_some())
-                                            || (current.prefix.is_empty()
-                                                && current.indices == b"/")
-                                        {
-                                            return Err(MatchError::MissingTrailingSlash);
-                                        }
-
-                                        // no match, try backtracking
-                                        if path != b"/" {
-                                            try_backtrack!();
-                                        }
-                                    }
+                                    // no match, try backtracking
+                                    try_backtrack!();
 
                                     // this node doesn't have the value, no match
                                     return Err(MatchError::NotFound);
@@ -506,34 +461,11 @@ impl<T> Node<T> {
                 // nope, try backtracking
                 try_backtrack!();
 
-                // TODO: does this *always* means there is an extra trailing slash?
-                if path == b"/" && current.wild_child && current.node_type != NodeType::Root {
-                    return Err(MatchError::unsure(full_path));
-                }
-
-                if !backtracking {
-                    // check if the path is missing a trailing slash
-                    if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
-                        current = &current.children[i];
-
-                        if current.prefix.len() == 1 && current.value.is_some() {
-                            return Err(MatchError::MissingTrailingSlash);
-                        }
-                    }
-                }
-
                 return Err(MatchError::NotFound);
             }
 
-            // nothing matches, check for a missing trailing slash
-            if current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some() {
-                return Err(MatchError::MissingTrailingSlash);
-            }
-
             // last chance, try backtracking
-            if path != b"/" {
-                try_backtrack!();
-            }
+            try_backtrack!();
 
             return Err(MatchError::NotFound);
         }
