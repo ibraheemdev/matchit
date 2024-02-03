@@ -1,10 +1,10 @@
 # `matchit`
 
-[![Documentation](https://img.shields.io/badge/docs-0.7.1-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
+[![Documentation](https://img.shields.io/badge/docs-0.7.3-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
 [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 
-A blazing fast URL router.
+A high performance, zero-copy URL router.
 
 ```rust
 use matchit::Router;
@@ -41,7 +41,7 @@ assert!(m.at("/users").is_err());
 
 ### Catch-all Parameters
 
-Catch-all parameters start with `*` and match everything after the `/`. They must always be at the **end** of the route:
+Catch-all parameters start with `*` and match anything until the end of the path. They must always be at the **end** of the route:
 
 ```rust,ignore
 let mut m = Router::new();

@@ -1,4 +1,4 @@
-use crate::tree::Node;
+use crate::tree::{denormalize_params, Node};
 
 use std::fmt;
 
@@ -43,10 +43,24 @@ impl std::error::Error for InsertError {}
 
 impl InsertError {
     pub(crate) fn conflict<T>(route: &[u8], prefix: &[u8], current: &Node<T>) -> Self {
+        // The new route would have had to replace the current node in the tree.
+        if prefix == current.prefix {
+            let mut route = route.to_owned();
+            denormalize_params(&mut route, &current.param_remapping);
+            return InsertError::Conflict {
+                with: String::from_utf8(route).unwrap(),
+            };
+        }
+
         let mut route = route[..route.len() - prefix.len()].to_owned();
 
         if !route.ends_with(&current.prefix) {
             route.extend_from_slice(&current.prefix);
+        }
+
+        let mut last = current;
+        while let Some(node) = last.children.first() {
+            last = node;
         }
 
         let mut current = current.children.first();
@@ -54,6 +68,8 @@ impl InsertError {
             route.extend_from_slice(&node.prefix);
             current = node.children.first();
         }
+
+        denormalize_params(&mut route, &last.param_remapping);
 
         InsertError::Conflict {
             with: String::from_utf8(route).unwrap(),
