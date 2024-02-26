@@ -12,9 +12,9 @@ pub enum InsertError {
         with: String,
     },
     /// Only one parameter per route segment is allowed.
-    TooManyParams,
-    /// Parameters must be registered with a name.
-    UnnamedParam,
+    InvalidParam,
+    /// Parameters must be registered with a valid name.
+    InvalidParamName,
     /// Catch-all parameters are only allowed at the end of a path.
     InvalidCatchAll,
 }
@@ -29,8 +29,8 @@ impl fmt::Display for InsertError {
                     with
                 )
             }
-            Self::TooManyParams => write!(f, "only one parameter is allowed per path segment"),
-            Self::UnnamedParam => write!(f, "parameters must be registered with a name"),
+            Self::InvalidParam => write!(f, "only one parameter is allowed per path segment"),
+            Self::InvalidParamName => write!(f, "parameters must be registered with a valid name"),
             Self::InvalidCatchAll => write!(
                 f,
                 "catch-all parameters are only allowed at the end of a route"

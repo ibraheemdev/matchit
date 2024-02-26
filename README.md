@@ -12,7 +12,7 @@ use matchit::Router;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut router = Router::new();
     router.insert("/home", "Welcome!")?;
-    router.insert("/users/:id", "A User")?;
+    router.insert("/users/{id}", "A User")?;
 
     let matched = router.at("/users/978")?;
     assert_eq!(matched.params.get("id"), Some("978"));
@@ -28,11 +28,11 @@ Along with static routes, the router also supports dynamic route segments. These
 
 ### Named Parameters
 
-Named parameters like `/:id` match anything until the next `/` or the end of the path:
+Named parameters like `/{id}` match anything until the next `/` or the end of the path:
 
 ```rust,ignore
 let mut m = Router::new();
-m.insert("/users/:id", true)?;
+m.insert("/users/{id}", true)?;
 
 assert_eq!(m.at("/users/1")?.params.get("id"), Some("1"));
 assert_eq!(m.at("/users/23")?.params.get("id"), Some("23"));
@@ -45,7 +45,7 @@ Catch-all parameters start with `*` and match anything until the end of the path
 
 ```rust,ignore
 let mut m = Router::new();
-m.insert("/*p", true)?;
+m.insert("/{*p}", true)?;
 
 assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
@@ -62,7 +62,7 @@ Static and dynamic route segments are allowed to overlap. If they do, static seg
 let mut m = Router::new();
 m.insert("/", "Welcome!").unwrap();      // priority: 1
 m.insert("/about", "About Me").unwrap(); // priority: 1
-m.insert("/*filepath", "...").unwrap();  // priority: 2
+m.insert("/{*filepath}", "...").unwrap();  // priority: 2
 ```
 
 ## How does it work?
