@@ -188,15 +188,9 @@ impl<T> Node<T> {
             updated -= 1;
         }
 
-        // build new index list
+        // update the index position
         if updated != i {
-            self.indices = [
-                &self.indices[..updated],  // unchanged prefix, might be empty
-                &self.indices[i..=i],      // the index char we move
-                &self.indices[updated..i], // rest without char at 'pos'
-                &self.indices[i + 1..],
-            ]
-            .concat();
+            self.indices[updated..=i].rotate_right(1);
         }
 
         updated
