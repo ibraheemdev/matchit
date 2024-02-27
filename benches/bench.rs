@@ -13,7 +13,7 @@ fn compare_routers(c: &mut Criterion) {
     let mut group = c.benchmark_group("Compare Routers");
 
     let mut matchit = matchit::Router::new();
-    for route in register!(colon) {
+    for route in register!(brackets) {
         matchit.insert(route, true).unwrap();
     }
     group.bench_function("matchit", |b| {

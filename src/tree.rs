@@ -652,25 +652,25 @@ impl<T> Default for Node<T> {
 #[cfg(test)]
 const _: () = {
     use std::fmt::{self, Debug, Formatter};
-    
+
     // visualize the tree structure when debugging
     impl<T: Debug> Debug for Node<T> {
         fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
             // safety: we only expose &mut T through &mut self
             let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
-    
+
             let indices = self
                 .indices
                 .iter()
                 .map(|&x| char::from_u32(x as _))
                 .collect::<Vec<_>>();
-    
+
             let param_names = self
                 .param_remapping
                 .iter()
                 .map(|x| std::str::from_utf8(x).unwrap())
                 .collect::<Vec<_>>();
-    
+
             let mut fmt = f.debug_struct("Node");
             fmt.field("value", &value);
             fmt.field("prefix", &std::str::from_utf8(&self.prefix));
