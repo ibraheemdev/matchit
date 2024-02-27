@@ -9,7 +9,7 @@ use std::mem;
 pub(crate) enum NodeType {
     /// The root path
     Root,
-    /// A route parameter, ex: `/:id`.
+    /// A route parameter, ex: `/{id}`.
     Param,
     /// A catchall parameter, ex: `/*file`
     CatchAll,

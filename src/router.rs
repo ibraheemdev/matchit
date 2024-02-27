@@ -33,7 +33,7 @@ impl<T> Router<T> {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut router = Router::new();
     /// router.insert("/home", "Welcome!")?;
-    /// router.insert("/users/:id", "A User")?;
+    /// router.insert("/users/{id}", "A User")?;
     /// # Ok(())
     /// # }
     /// ```
