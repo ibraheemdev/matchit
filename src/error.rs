@@ -12,6 +12,9 @@ pub enum InsertError {
         with: String,
     },
     /// Only one parameter per route segment is allowed.
+    ///
+    /// Prefixes are allowed before a parmeter, but not after it. For example,
+    /// `/foo-{bar}` is a valid route, but `/{bar}-foo` is not.
     InvalidParam,
     /// Parameters must be registered with a valid name.
     InvalidParamName,
