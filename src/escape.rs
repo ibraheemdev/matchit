@@ -65,7 +65,7 @@ impl UnscapedRoute {
         let offset = (range.len() as isize) - (replace.len() as isize);
         for i in &mut self.escaped {
             if *i > range.start {
-                *i = i.checked_add_signed(offset).unwrap();
+                *i = (*i).checked_add_signed(offset).unwrap();
             }
         }
 
@@ -124,7 +124,7 @@ pub struct UnescapedRef<'a> {
 
 impl<'a> UnescapedRef<'a> {
     /// Converts this reference into an owned route.
-    pub fn to_owned(&self) -> UnscapedRoute {
+    pub fn to_owned(self) -> UnscapedRoute {
         let mut escaped = Vec::new();
         for &i in self.escaped {
             if i + self.offset < self.inner.len() {
@@ -147,7 +147,7 @@ impl<'a> UnescapedRef<'a> {
     pub fn slice_off(&self, start: usize) -> UnescapedRef<'a> {
         UnescapedRef {
             inner: &self.inner[start..],
-            escaped: &self.escaped,
+            escaped: self.escaped,
             offset: self.offset + start,
         }
     }
@@ -156,14 +156,14 @@ impl<'a> UnescapedRef<'a> {
     pub fn slice_until(&self, end: usize) -> UnescapedRef<'a> {
         UnescapedRef {
             inner: &self.inner[..end],
-            escaped: &self.escaped,
+            escaped: self.escaped,
             offset: self.offset,
         }
     }
 
     /// Returns a reference to the inner slice.
     pub fn inner(&self) -> &[u8] {
-        &self.inner
+        self.inner
     }
 }
 
