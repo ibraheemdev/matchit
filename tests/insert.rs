@@ -60,7 +60,6 @@ fn invalid_catchall() {
         ("/src/{*filepath}/x", Err(InsertError::InvalidCatchAll)),
         ("/src2/", Ok(())),
         ("/src2/{*filepath}/x", Err(InsertError::InvalidCatchAll)),
-        ("{*x}", Err(InsertError::InvalidCatchAll)),
     ])
     .run()
 }
@@ -202,4 +201,9 @@ fn duplicate_conflict() {
         ("/hey/user", Err(conflict("/hey/user"))),
     ])
     .run()
+}
+
+#[test]
+fn bare_catchall() {
+    InsertTest(vec![("{*foo}", Ok(())), ("foo/{*bar}", Ok(()))]).run()
 }

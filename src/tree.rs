@@ -46,7 +46,7 @@ impl<T> Node<T> {
 
         // the tree is empty
         if self.prefix.is_empty() && self.children.is_empty() {
-            let last = self.insert_child(prefix, &route, val)?;
+            let last = self.insert_child(prefix, val)?;
             last.param_remapping = param_remapping;
             self.node_type = NodeType::Root;
             return Ok(());
@@ -115,7 +115,7 @@ impl<T> Node<T> {
                     child = current.update_child_priority(child);
 
                     // insert into the new node
-                    let last = current.children[child].insert_child(prefix, &route, val)?;
+                    let last = current.children[child].insert_child(prefix, val)?;
                     last.param_remapping = param_remapping;
                     return Ok(());
                 }
@@ -142,7 +142,7 @@ impl<T> Node<T> {
                 }
 
                 // otherwise, create the wildcard node
-                let last = current.insert_child(prefix, &route, val)?;
+                let last = current.insert_child(prefix, val)?;
                 last.param_remapping = param_remapping;
                 return Ok(());
             }
@@ -197,12 +197,7 @@ impl<T> Node<T> {
     }
 
     // insert a child node at this node
-    fn insert_child(
-        &mut self,
-        mut prefix: &[u8],
-        route: &[u8],
-        val: T,
-    ) -> Result<&mut Node<T>, InsertError> {
+    fn insert_child(&mut self, mut prefix: &[u8], val: T) -> Result<&mut Node<T>, InsertError> {
         let mut current = self;
 
         loop {
@@ -221,11 +216,6 @@ impl<T> Node<T> {
             if wildcard[1] == b'*' {
                 // "/foo/*x/bar"
                 if wildcard_index + wildcard.len() != prefix.len() {
-                    return Err(InsertError::InvalidCatchAll);
-                }
-
-                // "*x" without leading `/`
-                if prefix == route && route[0] != b'/' {
                     return Err(InsertError::InvalidCatchAll);
                 }
 

@@ -104,6 +104,21 @@ macro_rules! p {
     };
 }
 
+// https://github.com/ibraheemdev/matchit/issues/42
+#[test]
+fn bare_catchall() {
+    MatchTest {
+        routes: vec!["{*foo}", "foo/{*bar}"],
+        matches: vec![
+            ("x/y", "{*foo}", p! { "foo" => "x/y" }),
+            ("/x/y", "{*foo}", p! { "foo" => "/x/y" }),
+            ("/foo/x/y", "{*foo}", p! { "foo" => "/foo/x/y" }),
+            ("foo/x/y", "foo/{*bar}", p! { "bar" => "x/y" }),
+        ],
+    }
+    .run()
+}
+
 #[test]
 fn normalized() {
     MatchTest {
