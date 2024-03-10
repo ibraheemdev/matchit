@@ -1,4 +1,4 @@
-use crate::escape::{UnescapedRef, UnscapedRoute};
+use crate::escape::{UnescapedRef, UnescapedRoute};
 use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
@@ -30,7 +30,7 @@ pub struct Node<T> {
     value: Option<UnsafeCell<T>>,
     pub(crate) param_remapping: ParamRemapping,
     pub(crate) node_type: NodeType,
-    pub(crate) prefix: UnscapedRoute,
+    pub(crate) prefix: UnescapedRoute,
     pub(crate) children: Vec<Self>,
 }
 
@@ -41,7 +41,7 @@ unsafe impl<T: Sync> Sync for Node<T> {}
 impl<T> Node<T> {
     pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into().into_bytes();
-        let route = UnscapedRoute::new(route);
+        let route = UnescapedRoute::new(route);
         let (route, param_remapping) = normalize_params(route)?;
         let mut prefix = route.as_ref();
 
@@ -61,7 +61,10 @@ impl<T> Node<T> {
             // find the longest common prefix
             let len = min(prefix.len(), current.prefix.len());
             let common_prefix = (0..len)
-                .find(|&i| prefix[i] != current.prefix[i])
+                .find(|&i| {
+                    prefix[i] != current.prefix[i]
+                        || prefix.is_escaped(i) != current.prefix.is_escaped(i)
+                })
                 .unwrap_or(len);
 
             // the common prefix is a substring of the current node's prefix, split the node
@@ -105,6 +108,11 @@ impl<T> Node<T> {
                 for mut i in 0..current.indices.len() {
                     // found a match
                     if next == current.indices[i] {
+                        // the indice matches literally, but it's actually the start of a wildcard
+                        if matches!(next, b'{' | b'}') && !prefix.is_escaped(0) {
+                            continue;
+                        }
+
                         i = current.update_child_priority(i);
                         current = &mut current.children[i];
                         continue 'walk;
@@ -112,7 +120,9 @@ impl<T> Node<T> {
                 }
 
                 // not a wildcard and there is no matching child node, create a new one
-                if !matches!(next, b'{') && current.node_type != NodeType::CatchAll {
+                if (!matches!(next, b'{') || prefix.is_escaped(0))
+                    && current.node_type != NodeType::CatchAll
+                {
                     current.indices.push(next);
                     let mut child = current.add_child(Node::default());
                     child = current.update_child_priority(child);
@@ -484,9 +494,11 @@ type ParamRemapping = Vec<Vec<u8>>;
 
 /// Returns `path` with normalized route parameters, and a parameter remapping
 /// to store at the leaf node for this route.
+///
+/// Note that the parameter remapping may contain unescaped characters.
 fn normalize_params(
-    mut path: UnscapedRoute,
-) -> Result<(UnscapedRoute, ParamRemapping), InsertError> {
+    mut path: UnescapedRoute,
+) -> Result<(UnescapedRoute, ParamRemapping), InsertError> {
     let mut start = 0;
     let mut original = ParamRemapping::new();
 
@@ -532,7 +544,7 @@ fn normalize_params(
 }
 
 /// Restores `route` to it's original, denormalized form.
-pub(crate) fn denormalize_params(route: &mut UnscapedRoute, params: &ParamRemapping) {
+pub(crate) fn denormalize_params(route: &mut UnescapedRoute, params: &ParamRemapping) {
     let mut start = 0;
     let mut i = 0;
 
@@ -588,6 +600,10 @@ fn find_wildcard(path: UnescapedRef<'_>) -> Result<Option<Range<usize>>, InsertE
         for (i, &c) in path.iter().enumerate().skip(start + 2) {
             match c {
                 b'}' => {
+                    if path.is_escaped(i) {
+                        continue;
+                    }
+
                     if path.get(i - 1) == Some(&b'*') {
                         return Err(InsertError::InvalidParam);
                     }
@@ -640,7 +656,7 @@ impl<T> Default for Node<T> {
     fn default() -> Self {
         Self {
             param_remapping: ParamRemapping::new(),
-            prefix: UnscapedRoute::default(),
+            prefix: UnescapedRoute::default(),
             wild_child: false,
             node_type: NodeType::Static,
             indices: Vec::new(),
@@ -673,14 +689,14 @@ const _: () = {
                 .map(|x| std::str::from_utf8(x).unwrap())
                 .collect::<Vec<_>>();
 
-            let mut fmt = f.debug_struct("Node");
-            fmt.field("value", &value);
-            fmt.field("prefix", &std::str::from_utf8(&self.prefix));
-            fmt.field("node_type", &self.node_type);
-            fmt.field("children", &self.children);
-            fmt.field("param_names", &param_names);
-            fmt.field("indices", &indices);
-            fmt.finish()
+            f.debug_struct("Node")
+                .field("value", &value)
+                .field("prefix", &self.prefix)
+                .field("node_type", &self.node_type)
+                .field("children", &self.children)
+                .field("param_names", &param_names)
+                .field("indices", &indices)
+                .finish()
         }
     }
 };

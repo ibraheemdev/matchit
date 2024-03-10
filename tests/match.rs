@@ -75,7 +75,7 @@ impl MatchTest {
         let mut router = Router::new();
 
         for route in self.routes {
-            router.insert(route, route.to_owned()).unwrap();
+            assert_eq!(router.insert(route, route.to_owned()), Ok(()), "{route}");
         }
 
         router.check_priorities().unwrap();
@@ -526,6 +526,56 @@ fn catchall_overlap() {
         ],
     }
     .run();
+}
+
+#[test]
+fn escaped() {
+    MatchTest {
+        routes: vec![
+            "/",
+            "/{{",
+            "/}}",
+            "/{{x",
+            "/}}y{{",
+            "/xy{{",
+            "/{{/xyz",
+            "/{ba{{r}",
+            "/{ba{{r}/",
+            "/{ba{{r}/x",
+            "/baz/{xxx}",
+            "/baz/{xxx}/xy{{",
+            "/baz/{xxx}/}}xy{{{{",
+            "/{{/{x}",
+            "/xxx/",
+            "/xxx/{x}}{{}}}}{{}}{{{{}}y}",
+        ],
+        matches: vec![
+            ("/", "/", p! {}),
+            ("/{", "/{{", p! {}),
+            ("/}", "/}}", p! {}),
+            ("/{x", "/{{x", p! {}),
+            ("/}y{", "/}}y{{", p! {}),
+            ("/xy{", "/xy{{", p! {}),
+            ("/{/xyz", "/{{/xyz", p! {}),
+            ("/foo", "/{ba{{r}", p! { "ba{r" => "foo" }),
+            ("/{{", "/{ba{{r}", p! { "ba{r" => "{{" }),
+            ("/{{}}/", "/{ba{{r}/", p! { "ba{r" => "{{}}" }),
+            ("/{{}}{{/x", "/{ba{{r}/x", p! { "ba{r" => "{{}}{{" }),
+            ("/baz/x", "/baz/{xxx}", p! { "xxx" => "x" }),
+            ("/baz/x/xy{", "/baz/{xxx}/xy{{", p! { "xxx" => "x" }),
+            ("/baz/x/xy{{", "", Err(())),
+            ("/baz/x/}xy{{", "/baz/{xxx}/}}xy{{{{", p! { "xxx" => "x" }),
+            ("/{/{{", "/{{/{x}", p! { "x" => "{{" }),
+            ("/xxx", "/{ba{{r}", p! { "ba{r" => "xxx" }),
+            ("/xxx/", "/xxx/", p!()),
+            (
+                "/xxx/foo",
+                "/xxx/{x}}{{}}}}{{}}{{{{}}y}",
+                p! { "x}{}}{}{{}y" => "foo" },
+            ),
+        ],
+    }
+    .run()
 }
 
 #[test]
