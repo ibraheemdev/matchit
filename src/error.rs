@@ -14,10 +14,12 @@ pub enum InsertError {
     },
     /// Only one parameter per route segment is allowed.
     ///
-    /// Prefixes are allowed before a parmeter, but not after it. For example,
+    /// Static segments are also allowed before a parameter, but not after it. For example,
     /// `/foo-{bar}` is a valid route, but `/{bar}-foo` is not.
     InvalidParamSegment,
-    /// Parameters must be registered with a valid name, and matching braces.
+    /// Parameters must be registered with a valid name and matching braces.
+    ///
+    /// Note you can use `{{` or `}}` to escape literal brackets.
     InvalidParam,
     /// Catch-all parameters are only allowed at the end of a path.
     InvalidCatchAll,
@@ -95,10 +97,10 @@ impl InsertError {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let mut router = Router::new();
 /// router.insert("/home", "Welcome!")?;
-/// router.insert("/blog/", "Our blog.")?;
+/// router.insert("/blog", "Our blog.")?;
 ///
 /// // no routes match
-/// if let Err(err) = router.at("/foobar") {
+/// if let Err(err) = router.at("/blo") {
 ///     assert_eq!(err, MatchError::NotFound);
 /// }
 /// # Ok(())

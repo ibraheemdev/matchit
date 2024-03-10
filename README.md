@@ -24,11 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Parameters
 
-Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters:
+Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters.
 
 ### Named Parameters
 
-Named parameters like `/{id}` match anything until the next `/` or the end of the path:
+Named parameters like `/{id}` match anything until the next `/` or the end of the path.
 
 ```rust,ignore
 let mut m = Router::new();
@@ -39,9 +39,11 @@ assert_eq!(m.at("/users/23")?.params.get("id"), Some("23"));
 assert!(m.at("/users").is_err());
 ```
 
+Note that named parameters must be followed by a `/` or the end of the route. Dynamic suffixes are not currently supported.
+
 ### Catch-all Parameters
 
-Catch-all parameters start with `*` and match anything until the end of the path. They must always be at the **end** of the route:
+Catch-all parameters start with `*` and match anything until the end of the path. They must always be at the **end** of the route.
 
 ```rust,ignore
 let mut m = Router::new();
@@ -52,6 +54,22 @@ assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 
 // note that this will not match
 assert_eq!(m.at("/").is_err());
+```
+
+### Escaping Parameters
+
+The literal characters `{` and `}` may be included in a static route by escaping them with the same character. For example, the `{` character is escaped with `{{` and the `}` character is escaped with `}}`.
+
+```rust,ignore
+let mut m = Router::new();
+m.insert("/{{hello}}", true)?;
+m.insert("/{hello}", true)?;
+
+// match the static route
+assert!(m.at("/{hello}")?.value);
+
+// match the dynamic route
+assert_eq!(m.at("/hello")?.params.get("hello"), Some("hello"));
 ```
 
 ## Routing Priority
@@ -67,7 +85,7 @@ m.insert("/{*filepath}", "...").unwrap();  // priority: 2
 
 ## How does it work?
 
-The router takes advantage of the fact that URL routes generally follow a hierarchical structure. Routes are stored them in a radix trie that makes heavy use of common prefixes:
+The router takes advantage of the fact that URL routes generally follow a hierarchical structure. Routes are stored them in a radix trie that makes heavy use of common prefixes.
 
 ```text
 Priority   Path             Value
