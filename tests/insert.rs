@@ -211,6 +211,13 @@ fn invalid_param() {
         ("x{y", Err(InsertError::InvalidParam)),
         ("x}", Err(InsertError::InvalidParam)),
         ("/{foo}s", Err(InsertError::InvalidParamSegment)),
+    ])
+    .run();
+}
+
+#[test]
+fn escaped_param() {
+    InsertTest(vec![
         ("{{", Ok(())),
         ("}}", Ok(())),
         ("xx}}", Ok(())),
