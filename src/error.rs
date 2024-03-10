@@ -1,4 +1,4 @@
-use crate::escape::{UnescapedRef, UnscapedRoute};
+use crate::escape::{UnescapedRef, UnescapedRoute};
 use crate::tree::{denormalize_params, Node};
 
 use std::fmt;
@@ -49,7 +49,7 @@ impl std::error::Error for InsertError {}
 
 impl InsertError {
     pub(crate) fn conflict<T>(
-        route: &UnscapedRoute,
+        route: &UnescapedRoute,
         prefix: UnescapedRef<'_>,
         current: &Node<T>,
     ) -> Self {

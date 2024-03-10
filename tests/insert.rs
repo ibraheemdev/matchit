@@ -7,7 +7,7 @@ impl InsertTest {
         let mut router = Router::new();
         for (route, expected) in self.0 {
             let got = router.insert(route, route.to_owned());
-            assert_eq!(got, expected);
+            assert_eq!(got, expected, "{route}");
         }
     }
 }
@@ -218,6 +218,14 @@ fn invalid_param() {
         ("}}yy{{}}", Ok(())),
         ("}}yy{{}}{{}}y{{", Ok(())),
         ("}}yy{{}}{{}}y{{", Err(conflict("}yy{}{}y{"))),
+        ("/{{yy", Ok(())),
+        ("/{yy}", Ok(())),
+        ("/foo", Ok(())),
+        ("/foo/{{", Ok(())),
+        ("/foo/{{/{x}", Ok(())),
+        ("/foo/{ba{{r}", Ok(())),
+        ("/bar/{ba}}r}", Ok(())),
+        ("/xxx/{x{{}}y}", Ok(())),
     ])
     .run()
 }
