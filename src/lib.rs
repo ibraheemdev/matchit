@@ -57,7 +57,7 @@
 //! assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 //! assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 //!
-//! // note that this would not match
+//! // note that this will not match
 //! assert!(m.at("/").is_err());
 //!
 //! # Ok(())
@@ -91,8 +91,8 @@
 //! 2          |├earch\         2
 //! 1          |└upport\        3
 //! 2          ├blog\           4
-//! 1          |    └:post      None
-//! 1          |         └\     5
+//! 1          |    └{post}     None
+//! 1          |          └\    5
 //! 2          ├about-us\       6
 //! 1          |        └team\  7
 //! 1          └contact\        8
