@@ -109,10 +109,10 @@ fn duplicates() {
 #[test]
 fn unnamed_param() {
     InsertTest(vec![
-        ("/{}", Err(InsertError::InvalidParamName)),
-        ("/user{}/", Err(InsertError::InvalidParamName)),
-        ("/cmd/{}/", Err(InsertError::InvalidParamName)),
-        ("/src/{*}", Err(InsertError::InvalidParamName)),
+        ("/{}", Err(InsertError::InvalidParam)),
+        ("/user{}/", Err(InsertError::InvalidParam)),
+        ("/cmd/{}/", Err(InsertError::InvalidParam)),
+        ("/src/{*}", Err(InsertError::InvalidParam)),
     ])
     .run()
 }
@@ -120,9 +120,9 @@ fn unnamed_param() {
 #[test]
 fn double_params() {
     InsertTest(vec![
-        ("/{foo}{bar}", Err(InsertError::InvalidParam)),
-        ("/{foo}{bar}/", Err(InsertError::InvalidParam)),
-        ("/{foo}{{*bar}/", Err(InsertError::InvalidParam)),
+        ("/{foo}{bar}", Err(InsertError::InvalidParamSegment)),
+        ("/{foo}{bar}/", Err(InsertError::InvalidParamSegment)),
+        ("/{foo}{{*bar}/", Err(InsertError::InvalidParamSegment)),
     ])
     .run()
 }
@@ -199,6 +199,25 @@ fn duplicate_conflict() {
         ("/hey/users", Ok(())),
         ("/hey/user", Ok(())),
         ("/hey/user", Err(conflict("/hey/user"))),
+    ])
+    .run()
+}
+
+#[test]
+fn invalid_param() {
+    InsertTest(vec![
+        ("{", Err(InsertError::InvalidParam)),
+        ("}", Err(InsertError::InvalidParam)),
+        ("x{y", Err(InsertError::InvalidParam)),
+        ("x}", Err(InsertError::InvalidParam)),
+        ("/{foo}s", Err(InsertError::InvalidParamSegment)),
+        ("{{", Ok(())),
+        ("}}", Ok(())),
+        ("xx}}", Ok(())),
+        ("}}yy", Ok(())),
+        ("}}yy{{}}", Ok(())),
+        ("}}yy{{}}{{}}y{{", Ok(())),
+        ("}}yy{{}}{{}}y{{", Err(conflict("}yy{}{}y{"))),
     ])
     .run()
 }

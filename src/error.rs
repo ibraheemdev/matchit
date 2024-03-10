@@ -1,3 +1,4 @@
+use crate::escape::{UnescapedRef, UnscapedRoute};
 use crate::tree::{denormalize_params, Node};
 
 use std::fmt;
@@ -15,9 +16,9 @@ pub enum InsertError {
     ///
     /// Prefixes are allowed before a parmeter, but not after it. For example,
     /// `/foo-{bar}` is a valid route, but `/{bar}-foo` is not.
+    InvalidParamSegment,
+    /// Parameters must be registered with a valid name, and matching braces.
     InvalidParam,
-    /// Parameters must be registered with a valid name.
-    InvalidParamName,
     /// Catch-all parameters are only allowed at the end of a path.
     InvalidCatchAll,
 }
@@ -32,8 +33,10 @@ impl fmt::Display for InsertError {
                     with
                 )
             }
-            Self::InvalidParam => write!(f, "only one parameter is allowed per path segment"),
-            Self::InvalidParamName => write!(f, "parameters must be registered with a valid name"),
+            Self::InvalidParamSegment => {
+                write!(f, "only one parameter is allowed per path segment")
+            }
+            Self::InvalidParam => write!(f, "parameters must be registered with a valid name"),
             Self::InvalidCatchAll => write!(
                 f,
                 "catch-all parameters are only allowed at the end of a route"
@@ -45,20 +48,25 @@ impl fmt::Display for InsertError {
 impl std::error::Error for InsertError {}
 
 impl InsertError {
-    pub(crate) fn conflict<T>(route: &[u8], prefix: &[u8], current: &Node<T>) -> Self {
+    pub(crate) fn conflict<T>(
+        route: &UnscapedRoute,
+        prefix: UnescapedRef<'_>,
+        current: &Node<T>,
+    ) -> Self {
+        let mut route = route.clone();
+
         // The new route would have had to replace the current node in the tree.
-        if prefix == current.prefix {
-            let mut route = route.to_owned();
+        if prefix.inner() == current.prefix.inner() {
             denormalize_params(&mut route, &current.param_remapping);
             return InsertError::Conflict {
-                with: String::from_utf8(route).unwrap(),
+                with: String::from_utf8(route.into_inner()).unwrap(),
             };
         }
 
-        let mut route = route[..route.len() - prefix.len()].to_owned();
+        route.truncate(route.len() - prefix.len());
 
         if !route.ends_with(&current.prefix) {
-            route.extend_from_slice(&current.prefix);
+            route.append(&current.prefix);
         }
 
         let mut last = current;
@@ -68,14 +76,14 @@ impl InsertError {
 
         let mut current = current.children.first();
         while let Some(node) = current {
-            route.extend_from_slice(&node.prefix);
+            route.append(&node.prefix);
             current = node.children.first();
         }
 
         denormalize_params(&mut route, &last.param_remapping);
 
         InsertError::Conflict {
-            with: String::from_utf8(route).unwrap(),
+            with: String::from_utf8(route.into_inner()).unwrap(),
         }
     }
 }

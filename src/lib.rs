@@ -103,6 +103,7 @@
 #![deny(rust_2018_idioms, clippy::all)]
 
 mod error;
+mod escape;
 mod params;
 mod router;
 mod tree;
