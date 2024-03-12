@@ -217,7 +217,7 @@ impl<T> Node<T> {
         }
 
         // Specifice case if we are removing the root node
-        if path == current.prefix {
+        if path == current.prefix.inner() {
             let val = current.value.take().map(UnsafeCell::into_inner);
             // if the root node has no children, we can just reset it
             if current.children.is_empty() {

@@ -67,27 +67,6 @@ impl<T> Router<T> {
         }
     }
 
-    /// Remove a given route from the router.
-    /// Returns the value stored under the route if it was found.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use matchit::Router;
-    /// let mut router = Router::new();
-    /// router.insert("/home", "Welcome!");
-    ///
-    /// assert_eq!(router.remove("/home"), Some("Welcome!"));
-    /// assert_eq!(router.remove("/home"), None);
-    ///
-    /// router.insert("/home/:id", "Hello!");
-    /// assert_eq!(router.remove("/home/:id"), Some("Hello!"));
-    /// assert_eq!(router.remove("/home/:id"), None);
-    /// ```
-    pub fn remove(&mut self, path: &str) -> Option<T> {
-        self.root.remove(path.as_bytes())
-    }
-
     /// Tries to find a value in the router matching the given path,
     /// returning a mutable reference.
     ///
