@@ -1,15 +1,17 @@
+use crate::escape::{UnescapedRef, UnescapedRoute};
 use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
 use std::mem;
+use std::ops::Range;
 
 /// The types of nodes the tree can hold
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
 pub(crate) enum NodeType {
     /// The root path
     Root,
-    /// A route parameter, ex: `/:id`.
+    /// A route parameter, ex: `/{id}`.
     Param,
     /// A catchall parameter, ex: `/*file`
     CatchAll,
@@ -28,7 +30,7 @@ pub struct Node<T> {
     value: Option<UnsafeCell<T>>,
     pub(crate) param_remapping: ParamRemapping,
     pub(crate) node_type: NodeType,
-    pub(crate) prefix: Vec<u8>,
+    pub(crate) prefix: UnescapedRoute,
     pub(crate) children: Vec<Self>,
 }
 
@@ -39,6 +41,7 @@ unsafe impl<T: Sync> Sync for Node<T> {}
 impl<T> Node<T> {
     pub fn insert(&mut self, route: impl Into<String>, val: T) -> Result<(), InsertError> {
         let route = route.into().into_bytes();
+        let route = UnescapedRoute::new(route);
         let (route, param_remapping) = normalize_params(route)?;
         let mut prefix = route.as_ref();
 
@@ -46,7 +49,7 @@ impl<T> Node<T> {
 
         // the tree is empty
         if self.prefix.is_empty() && self.children.is_empty() {
-            let last = self.insert_child(prefix, &route, val)?;
+            let last = self.insert_child(prefix, val)?;
             last.param_remapping = param_remapping;
             self.node_type = NodeType::Root;
             return Ok(());
@@ -58,13 +61,16 @@ impl<T> Node<T> {
             // find the longest common prefix
             let len = min(prefix.len(), current.prefix.len());
             let common_prefix = (0..len)
-                .find(|&i| prefix[i] != current.prefix[i])
+                .find(|&i| {
+                    prefix[i] != current.prefix[i]
+                        || prefix.is_escaped(i) != current.prefix.is_escaped(i)
+                })
                 .unwrap_or(len);
 
             // the common prefix is a substring of the current node's prefix, split the node
             if common_prefix < current.prefix.len() {
                 let child = Node {
-                    prefix: current.prefix[common_prefix..].to_owned(),
+                    prefix: current.prefix.slice_off(common_prefix),
                     children: mem::take(&mut current.children),
                     wild_child: current.wild_child,
                     indices: current.indices.clone(),
@@ -77,13 +83,13 @@ impl<T> Node<T> {
                 // the current node now holds only the common prefix
                 current.children = vec![child];
                 current.indices = vec![current.prefix[common_prefix]];
-                current.prefix = prefix[..common_prefix].to_owned();
+                current.prefix = current.prefix.slice_until(common_prefix);
                 current.wild_child = false;
             }
 
             // the route has a common prefix, search deeper
             if prefix.len() > common_prefix {
-                prefix = &prefix[common_prefix..];
+                prefix = prefix.slice_off(common_prefix);
 
                 let next = prefix[0];
 
@@ -102,6 +108,11 @@ impl<T> Node<T> {
                 for mut i in 0..current.indices.len() {
                     // found a match
                     if next == current.indices[i] {
+                        // the indice matches literally, but it's actually the start of a wildcard
+                        if matches!(next, b'{' | b'}') && !prefix.is_escaped(0) {
+                            continue;
+                        }
+
                         i = current.update_child_priority(i);
                         current = &mut current.children[i];
                         continue 'walk;
@@ -109,13 +120,15 @@ impl<T> Node<T> {
                 }
 
                 // not a wildcard and there is no matching child node, create a new one
-                if !matches!(next, b':' | b'*') && current.node_type != NodeType::CatchAll {
+                if (!matches!(next, b'{') || prefix.is_escaped(0))
+                    && current.node_type != NodeType::CatchAll
+                {
                     current.indices.push(next);
                     let mut child = current.add_child(Node::default());
                     child = current.update_child_priority(child);
 
                     // insert into the new node
-                    let last = current.children[child].insert_child(prefix, &route, val)?;
+                    let last = current.children[child].insert_child(prefix, val)?;
                     last.param_remapping = param_remapping;
                     return Ok(());
                 }
@@ -128,7 +141,7 @@ impl<T> Node<T> {
 
                     // make sure the wildcard matches
                     if prefix.len() < current.prefix.len()
-                        || current.prefix != prefix[..current.prefix.len()]
+                        || *current.prefix != prefix[..current.prefix.len()]
                         // catch-alls cannot have children 
                         || current.node_type == NodeType::CatchAll
                         // check for longer wildcard, e.g. :name and :names
@@ -142,7 +155,7 @@ impl<T> Node<T> {
                 }
 
                 // otherwise, create the wildcard node
-                let last = current.insert_child(prefix, &route, val)?;
+                let last = current.insert_child(prefix, val)?;
                 last.param_remapping = param_remapping;
                 return Ok(());
             }
@@ -273,15 +286,9 @@ impl<T> Node<T> {
             updated -= 1;
         }
 
-        // build new index list
+        // update the index position
         if updated != i {
-            self.indices = [
-                &self.indices[..updated],  // unchanged prefix, might be empty
-                &self.indices[i..=i],      // the index char we move
-                &self.indices[updated..i], // rest without char at 'pos'
-                &self.indices[i + 1..],
-            ]
-            .concat();
+            self.indices[updated..=i].rotate_right(1);
         }
 
         updated
@@ -290,16 +297,15 @@ impl<T> Node<T> {
     // insert a child node at this node
     fn insert_child(
         &mut self,
-        mut prefix: &[u8],
-        route: &[u8],
+        mut prefix: UnescapedRef<'_>,
         val: T,
     ) -> Result<&mut Node<T>, InsertError> {
         let mut current = self;
 
         loop {
             // search for a wildcard segment
-            let (wildcard, wildcard_index) = match find_wildcard(prefix)? {
-                Some((w, i)) => (w, i),
+            let wildcard = match find_wildcard(prefix)? {
+                Some(w) => w,
                 // no wildcard, simply use the current node
                 None => {
                     current.value = Some(UnsafeCell::new(val));
@@ -308,59 +314,17 @@ impl<T> Node<T> {
                 }
             };
 
-            // regular route parameter
-            if wildcard[0] == b':' {
-                // insert prefix before the current wildcard
-                if wildcard_index > 0 {
-                    current.prefix = prefix[..wildcard_index].to_owned();
-                    prefix = &prefix[wildcard_index..];
-                }
-
-                let child = Self {
-                    node_type: NodeType::Param,
-                    prefix: wildcard.to_owned(),
-                    ..Self::default()
-                };
-
-                let child = current.add_child(child);
-                current.wild_child = true;
-                current = &mut current.children[child];
-                current.priority += 1;
-
-                // if the route doesn't end with the wildcard, then there
-                // will be another non-wildcard subroute starting with '/'
-                if wildcard.len() < prefix.len() {
-                    prefix = &prefix[wildcard.len()..];
-                    let child = Self {
-                        priority: 1,
-                        ..Self::default()
-                    };
-
-                    let child = current.add_child(child);
-                    current = &mut current.children[child];
-                    continue;
-                }
-
-                // otherwise we're done. Insert the value in the new leaf
-                current.value = Some(UnsafeCell::new(val));
-                return Ok(current);
-
             // catch-all route
-            } else if wildcard[0] == b'*' {
+            if prefix[wildcard.clone()][1] == b'*' {
                 // "/foo/*x/bar"
-                if wildcard_index + wildcard.len() != prefix.len() {
-                    return Err(InsertError::InvalidCatchAll);
-                }
-
-                // "*x" without leading `/`
-                if prefix == route && route[0] != b'/' {
+                if wildcard.end != prefix.len() {
                     return Err(InsertError::InvalidCatchAll);
                 }
 
                 // insert prefix before the current wildcard
-                if wildcard_index > 0 {
-                    current.prefix = prefix[..wildcard_index].to_owned();
-                    prefix = &prefix[wildcard_index..];
+                if wildcard.start > 0 {
+                    current.prefix = prefix.slice_until(wildcard.start).to_owned();
+                    prefix = prefix.slice_off(wildcard.start);
                 }
 
                 let child = Self {
@@ -375,6 +339,41 @@ impl<T> Node<T> {
                 current.wild_child = true;
 
                 return Ok(&mut current.children[i]);
+            } else if prefix[wildcard.clone()][0] == b'{' {
+                // insert prefix before the current wildcard
+                if wildcard.start > 0 {
+                    current.prefix = prefix.slice_until(wildcard.start).to_owned();
+                    prefix = prefix.slice_off(wildcard.start);
+                }
+
+                let child = Self {
+                    node_type: NodeType::Param,
+                    prefix: prefix.slice_until(wildcard.len()).to_owned(),
+                    ..Self::default()
+                };
+
+                let child = current.add_child(child);
+                current.wild_child = true;
+                current = &mut current.children[child];
+                current.priority += 1;
+
+                // if the route doesn't end with the wildcard, then there
+                // will be another non-wildcard subroute starting with '/'
+                if wildcard.len() < prefix.len() {
+                    prefix = prefix.slice_off(wildcard.len());
+                    let child = Self {
+                        priority: 1,
+                        ..Self::default()
+                    };
+
+                    let child = current.add_child(child);
+                    current = &mut current.children[child];
+                    continue;
+                }
+
+                // otherwise we're done. Insert the value in the new leaf
+                current.value = Some(UnsafeCell::new(val));
+                return Ok(current);
             }
         }
     }
@@ -429,7 +428,7 @@ impl<T> Node<T> {
                 let (prefix, rest) = path.split_at(current.prefix.len());
 
                 // the prefix matches
-                if prefix == current.prefix {
+                if *prefix == *current.prefix {
                     let first = rest[0];
                     let consumed = path;
                     path = rest;
@@ -448,14 +447,6 @@ impl<T> Node<T> {
                                 });
                             }
 
-                            // child won't match because of an extra trailing slash
-                            if path == b"/"
-                                && current.children[i].prefix != b"/"
-                                && current.value.is_some()
-                            {
-                                return Err(MatchError::ExtraTrailingSlash);
-                            }
-
                             // continue with the child node
                             current = &current.children[i];
                             continue 'walk;
@@ -464,15 +455,8 @@ impl<T> Node<T> {
 
                     // we didn't find a match and there are no children with wildcards, there is no match
                     if !current.wild_child {
-                        // extra trailing slash
-                        if path == b"/" && current.value.is_some() {
-                            return Err(MatchError::ExtraTrailingSlash);
-                        }
-
                         // try backtracking
-                        if path != b"/" {
-                            try_backtrack!();
-                        }
+                        try_backtrack!();
 
                         // nothing found
                         return Err(MatchError::NotFound);
@@ -489,16 +473,8 @@ impl<T> Node<T> {
                                     let (param, rest) = path.split_at(i);
 
                                     if let [child] = current.children.as_slice() {
-                                        // child won't match because of an extra trailing slash
-                                        if rest == b"/"
-                                            && child.prefix != b"/"
-                                            && current.value.is_some()
-                                        {
-                                            return Err(MatchError::ExtraTrailingSlash);
-                                        }
-
                                         // store the parameter value
-                                        params.push(&current.prefix[1..], param);
+                                        params.push(b"", param);
 
                                         // continue with the child node
                                         path = rest;
@@ -507,50 +483,28 @@ impl<T> Node<T> {
                                         continue 'walk;
                                     }
 
-                                    // this node has no children yet the path has more segments...
-                                    // either the path has an extra trailing slash or there is no match
-                                    if path.len() == i + 1 {
-                                        return Err(MatchError::ExtraTrailingSlash);
-                                    }
-
                                     // try backtracking
-                                    if path != b"/" {
-                                        try_backtrack!();
-                                    }
+                                    try_backtrack!();
 
                                     return Err(MatchError::NotFound);
                                 }
                                 // this is the last path segment
                                 None => {
                                     // store the parameter value
-                                    params.push(&current.prefix[1..], path);
+                                    params.push(b"", path);
 
                                     // found the matching value
                                     if let Some(ref value) = current.value {
                                         // remap parameter keys
                                         params.for_each_key_mut(|(i, key)| {
-                                            *key = &current.param_remapping[i][1..]
+                                            *key = &current.param_remapping[i]
                                         });
 
                                         return Ok((value, params));
                                     }
 
-                                    // check the child node in case the path is missing a trailing slash
-                                    if let [child] = current.children.as_slice() {
-                                        current = child;
-
-                                        if (current.prefix == b"/" && current.value.is_some())
-                                            || (current.prefix.is_empty()
-                                                && current.indices == b"/")
-                                        {
-                                            return Err(MatchError::MissingTrailingSlash);
-                                        }
-
-                                        // no match, try backtracking
-                                        if path != b"/" {
-                                            try_backtrack!();
-                                        }
-                                    }
+                                    // no match, try backtracking
+                                    try_backtrack!();
 
                                     // this node doesn't have the value, no match
                                     return Err(MatchError::NotFound);
@@ -564,11 +518,11 @@ impl<T> Node<T> {
                                 Some(ref value) => {
                                     // remap parameter keys
                                     params.for_each_key_mut(|(i, key)| {
-                                        *key = &current.param_remapping[i][1..]
+                                        *key = &current.param_remapping[i]
                                     });
 
                                     // store the final catch-all parameter
-                                    params.push(&current.prefix[1..], path);
+                                    params.push(&current.prefix[2..current.prefix.len() - 1], path);
 
                                     Ok((value, params))
                                 }
@@ -581,44 +535,21 @@ impl<T> Node<T> {
             }
 
             // this is it, we should have reached the node containing the value
-            if path == current.prefix {
+            if *path == *current.prefix {
                 if let Some(ref value) = current.value {
                     // remap parameter keys
-                    params.for_each_key_mut(|(i, key)| *key = &current.param_remapping[i][1..]);
+                    params.for_each_key_mut(|(i, key)| *key = &current.param_remapping[i]);
                     return Ok((value, params));
                 }
 
                 // nope, try backtracking
                 try_backtrack!();
 
-                // TODO: does this *always* means there is an extra trailing slash?
-                if path == b"/" && current.wild_child && current.node_type != NodeType::Root {
-                    return Err(MatchError::unsure(full_path));
-                }
-
-                if !backtracking {
-                    // check if the path is missing a trailing slash
-                    if let Some(i) = current.indices.iter().position(|&c| c == b'/') {
-                        current = &current.children[i];
-
-                        if current.prefix.len() == 1 && current.value.is_some() {
-                            return Err(MatchError::MissingTrailingSlash);
-                        }
-                    }
-                }
-
                 return Err(MatchError::NotFound);
             }
 
-            // nothing matches, check for a missing trailing slash
-            if current.prefix.split_last() == Some((&b'/', path)) && current.value.is_some() {
-                return Err(MatchError::MissingTrailingSlash);
-            }
-
             // last chance, try backtracking
-            if path != b"/" {
-                try_backtrack!();
-            }
+            try_backtrack!();
 
             return Err(MatchError::NotFound);
         }
@@ -648,7 +579,11 @@ type ParamRemapping = Vec<Vec<u8>>;
 
 /// Returns `path` with normalized route parameters, and a parameter remapping
 /// to store at the leaf node for this route.
-fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamRemapping), InsertError> {
+///
+/// Note that the parameter remapping may contain unescaped characters.
+fn normalize_params(
+    mut path: UnescapedRoute,
+) -> Result<(UnescapedRoute, ParamRemapping), InsertError> {
     let mut start = 0;
     let mut original = ParamRemapping::new();
 
@@ -656,32 +591,32 @@ fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamRemapping), Inse
     let mut next = b'a';
 
     loop {
-        let (wildcard, mut wildcard_index) = match find_wildcard(&path[start..])? {
-            Some((w, i)) => (w, i),
+        let mut wildcard = match find_wildcard(path.as_ref().slice_off(start))? {
+            Some(w) => w,
             None => return Ok((path, original)),
         };
 
+        wildcard.start += start;
+        wildcard.end += start;
+
         // makes sure the param has a valid name
         if wildcard.len() < 2 {
-            return Err(InsertError::UnnamedParam);
+            return Err(InsertError::InvalidParam);
         }
 
         // don't need to normalize catch-all parameters
-        if wildcard[0] == b'*' {
-            start += wildcard_index + wildcard.len();
+        if path[wildcard.clone()][1] == b'*' {
+            start = wildcard.end;
             continue;
         }
 
-        wildcard_index += start;
-
         // normalize the parameter
-        let removed = path.splice(
-            (wildcard_index)..(wildcard_index + wildcard.len()),
-            vec![b':', next],
-        );
+        let removed = path.splice(wildcard.clone(), vec![b'{', next, b'}']);
 
         // remember the original name for remappings
-        original.push(removed.collect());
+        let mut removed = removed.skip(1).collect::<Vec<_>>();
+        removed.pop();
+        original.push(removed);
 
         // get the next key
         next += 1;
@@ -689,57 +624,90 @@ fn normalize_params(mut path: Vec<u8>) -> Result<(Vec<u8>, ParamRemapping), Inse
             panic!("too many route parameters");
         }
 
-        start = wildcard_index + 2;
+        start = wildcard.start + 3;
     }
 }
 
 /// Restores `route` to it's original, denormalized form.
-pub(crate) fn denormalize_params(route: &mut Vec<u8>, params: &ParamRemapping) {
+pub(crate) fn denormalize_params(route: &mut UnescapedRoute, params: &ParamRemapping) {
     let mut start = 0;
     let mut i = 0;
 
     loop {
         // find the next wildcard
-        let (wildcard, mut wildcard_index) = match find_wildcard(&route[start..]).unwrap() {
-            Some((w, i)) => (w, i),
+        let mut wildcard = match find_wildcard(route.as_ref().slice_off(start)).unwrap() {
+            Some(w) => w,
             None => return,
         };
 
-        wildcard_index += start;
+        wildcard.start += start;
+        wildcard.end += start;
 
-        let next = match params.get(i) {
+        let mut next = match params.get(i) {
             Some(param) => param.clone(),
             None => return,
         };
 
+        next.insert(0, b'{');
+        next.push(b'}');
+
         // denormalize this parameter
-        route.splice(
-            (wildcard_index)..(wildcard_index + wildcard.len()),
-            next.clone(),
-        );
+        let _ = route.splice(wildcard.clone(), next.clone());
 
         i += 1;
-        start = wildcard_index + 2;
+        start = wildcard.start + next.len();
     }
 }
 
 // Searches for a wildcard segment and checks the path for invalid characters.
-fn find_wildcard(path: &[u8]) -> Result<Option<(&[u8], usize)>, InsertError> {
+fn find_wildcard(path: UnescapedRef<'_>) -> Result<Option<Range<usize>>, InsertError> {
     for (start, &c) in path.iter().enumerate() {
-        // a wildcard starts with ':' (param) or '*' (catch-all)
-        if c != b':' && c != b'*' {
+        // unescaped closing brace without opening brace
+        if c == b'}' && !path.is_escaped(start) {
+            return Err(InsertError::InvalidParam);
+        }
+
+        // keep going till we find an opening brace
+        if c != b'{' {
             continue;
         }
 
-        for (end, &c) in path[start + 1..].iter().enumerate() {
+        // escaped opening brace
+        if path.is_escaped(start) {
+            continue;
+        }
+
+        // empty '{}' without parameter name
+        if path.get(start + 1) == Some(&b'}') {
+            return Err(InsertError::InvalidParam);
+        }
+
+        for (i, &c) in path.iter().enumerate().skip(start + 2) {
             match c {
-                b'/' => return Ok(Some((&path[start..start + 1 + end], start))),
-                b':' | b'*' => return Err(InsertError::TooManyParams),
+                b'}' => {
+                    if path.is_escaped(i) {
+                        continue;
+                    }
+
+                    if path.get(i - 1) == Some(&b'*') {
+                        return Err(InsertError::InvalidParam);
+                    }
+
+                    if let Some(&c) = path.get(i + 1) {
+                        // prefixes after params are currently unsupported
+                        if c != b'/' {
+                            return Err(InsertError::InvalidParamSegment);
+                        }
+                    }
+
+                    return Ok(Some(start..i + 1));
+                }
+                b'*' | b'/' => return Err(InsertError::InvalidParam),
                 _ => {}
             }
         }
 
-        return Ok(Some((&path[start..], start)));
+        return Err(InsertError::InvalidParam);
     }
 
     Ok(None)
@@ -773,7 +741,7 @@ impl<T> Default for Node<T> {
     fn default() -> Self {
         Self {
             param_remapping: ParamRemapping::new(),
-            prefix: Vec::new(),
+            prefix: UnescapedRoute::default(),
             wild_child: false,
             node_type: NodeType::Static,
             indices: Vec::new(),
@@ -831,14 +799,14 @@ const _: () = {
                 .map(|x| std::str::from_utf8(x).unwrap())
                 .collect::<Vec<_>>();
 
-            let mut fmt = f.debug_struct("Node");
-            fmt.field("value", &value);
-            fmt.field("prefix", &std::str::from_utf8(&self.prefix));
-            fmt.field("node_type", &self.node_type);
-            fmt.field("children", &self.children);
-            fmt.field("param_names", &param_names);
-            fmt.field("indices", &indices);
-            fmt.finish()
+            f.debug_struct("Node")
+                .field("value", &value)
+                .field("prefix", &self.prefix)
+                .field("node_type", &self.node_type)
+                .field("children", &self.children)
+                .field("param_names", &param_names)
+                .field("indices", &indices)
+                .finish()
         }
     }
 };

@@ -1,6 +1,6 @@
 //! # `matchit`
 //!
-//! [![Documentation](https://img.shields.io/badge/docs-0.7.3-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
+//! [![Documentation](https://img.shields.io/badge/docs-0.8.0-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
 //! [![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 //! [![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
 //!
@@ -12,7 +12,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut router = Router::new();
 //! router.insert("/home", "Welcome!")?;
-//! router.insert("/users/:id", "A User")?;
+//! router.insert("/users/{id}", "A User")?;
 //!
 //! let matched = router.at("/users/978")?;
 //! assert_eq!(matched.params.get("id"), Some("978"));
@@ -23,17 +23,17 @@
 //!
 //! ## Parameters
 //!
-//! Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters:
+//! Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters.
 //!
 //! ### Named Parameters
 //!
-//! Named parameters like `/:id` match anything until the next `/` or the end of the path:
+//! Named parameters like `/{id}` match anything until the next `/` or the end of the path.
 //!
 //! ```rust
 //! # use matchit::Router;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut m = Router::new();
-//! m.insert("/users/:id", true)?;
+//! m.insert("/users/{id}", true)?;
 //!
 //! assert_eq!(m.at("/users/1")?.params.get("id"), Some("1"));
 //! assert_eq!(m.at("/users/23")?.params.get("id"), Some("23"));
@@ -43,23 +43,46 @@
 //! # }
 //! ```
 //!
+//! Note that named parameters must be followed by a `/` or the end of the route. Dynamic suffixes are not currently supported.
+//!
 //! ### Catch-all Parameters
 //!
 //! Catch-all parameters start with `*` and match anything until the end of the path.
-//! They must always be at the **end** of the route:
+//! They must always be at the **end** of the route.
 //!
 //! ```rust
 //! # use matchit::Router;
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut m = Router::new();
-//! m.insert("/*p", true)?;
+//! m.insert("/{*p}", true)?;
 //!
 //! assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 //! assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 //!
-//! // note that this would not match
+//! // note that this will not match
 //! assert!(m.at("/").is_err());
 //!
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ### Escaping Parameters
+//!
+//! The literal characters `{` and `}` may be included in a static route by escaping them with the same character.
+//! For example, the `{` character is escaped with `{{` and the `}` character is escaped with `}}`.
+//!
+//! ```rust
+//! # use matchit::Router;
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut m = Router::new();
+//! m.insert("/{{hello}}", true)?;
+//! m.insert("/{hello}", true)?;
+//!
+//! // match the static route
+//! assert!(m.at("/{hello}")?.value);
+//!
+//! // match the dynamic route
+//! assert_eq!(m.at("/hello")?.params.get("hello"), Some("hello"));
 //! # Ok(())
 //! # }
 //! ```
@@ -74,7 +97,7 @@
 //! let mut m = Router::new();
 //! m.insert("/", "Welcome!").unwrap()    ;  // priority: 1
 //! m.insert("/about", "About Me").unwrap(); // priority: 1
-//! m.insert("/*filepath", "...").unwrap();  // priority: 2
+//! m.insert("/{*filepath}", "...").unwrap();  // priority: 2
 //!
 //! # Ok(())
 //! # }
@@ -91,8 +114,8 @@
 //! 2          |├earch\         2
 //! 1          |└upport\        3
 //! 2          ├blog\           4
-//! 1          |    └:post      None
-//! 1          |         └\     5
+//! 1          |    └{post}     None
+//! 1          |          └\    5
 //! 2          ├about-us\       6
 //! 1          |        └team\  7
 //! 1          └contact\        8
@@ -103,6 +126,7 @@
 #![deny(rust_2018_idioms, clippy::all)]
 
 mod error;
+mod escape;
 mod params;
 mod router;
 mod tree;
