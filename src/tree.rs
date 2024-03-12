@@ -175,20 +175,29 @@ impl<T> Node<T> {
 
     /// Removes a route from the tree, returning the value if the route existed.
     /// The provided path should be the same as the one used to insert the route (including wildcards).
-    pub fn remove(&mut self, full_path: &[u8]) -> Option<T> {
+    pub fn remove(&mut self, full_path: impl Into<String>) -> Option<T> {
         let mut current = self;
-        let full_path = normalize_params(full_path.to_vec()).unwrap().0;
-        let mut path = full_path.as_slice();
+        let unescaped = UnescapedRoute::new(full_path.into().into_bytes());
+        let full_path = normalize_params(unescaped).ok()?.0.into_inner();
+        let mut path: &[u8] = full_path.as_ref();
 
         fn drop_child<T>(node: &mut Node<T>, i: usize) -> Option<T> {
             // if the node we are dropping doesn't have any children, we can remove it
             let val = if node.children[i].children.is_empty() {
                 // if the parent node only has one child there are no indices
                 if node.children.len() == 1 && node.indices.is_empty() {
+                    node.wild_child = false;
                     node.children.remove(0).value.take()
                 } else {
-                    node.indices.remove(i);
-                    node.children.remove(i).value.take()
+                    let child = node.children.remove(i);
+                    // Indices are only used for static nodes
+                    if child.node_type == NodeType::Static {
+                        node.indices.remove(i);
+                    } else {
+                        // It was a dynamic node, we remove the wildcard child flag
+                        node.wild_child = false;
+                    }
+                    child.value
                 }
             } else {
                 node.children[i].value.take()
@@ -198,7 +207,17 @@ impl<T> Node<T> {
         }
 
         // Specifice case if we are removing the root node
-        if path == current.prefix {
+        if path == current.prefix.inner() {
+            let val = current.value.take().map(UnsafeCell::into_inner);
+            // if the root node has no children, we can just reset it
+            if current.children.is_empty() {
+                *current = Self::default();
+            }
+            return val;
+        }
+
+        // Specifice case if we are removing the root node
+        if path == current.prefix.inner() {
             let val = current.value.take().map(UnsafeCell::into_inner);
             // if the root node has no children, we can just reset it
             if current.children.is_empty() {
@@ -212,13 +231,13 @@ impl<T> Node<T> {
             if path.len() > current.prefix.len() {
                 let (prefix, rest) = path.split_at(current.prefix.len());
                 // the prefix matches
-                if prefix == current.prefix {
+                if prefix == current.prefix.inner() {
                     let first = rest[0];
                     path = rest;
 
                     // If there is only one child we can continue with the child node
                     if current.children.len() == 1 {
-                        if current.children[0].prefix == rest {
+                        if current.children[0].prefix.inner() == rest {
                             return drop_child(current, 0);
                         } else {
                             current = &mut current.children[0];
@@ -229,7 +248,7 @@ impl<T> Node<T> {
                     // If there are many we get the index of the child matching the first byte
                     if let Some(i) = current.indices.iter().position(|&c| c == first) {
                         // continue with the child node
-                        if current.children[i].prefix == rest {
+                        if current.children[i].prefix.inner() == rest {
                             return drop_child(current, i);
                         } else {
                             current = &mut current.children[i];
@@ -240,11 +259,13 @@ impl<T> Node<T> {
                     // If this node has a wildcard child and that it matches our standardized path
                     // we continue with that
                     if current.wild_child
-                        && rest[0] == b':'
-                        && current.indices.last() == Some(&rest[1])
+                        && !current.children.is_empty()
+                        && rest.len() > 2
+                        && rest[0] == b'{'
+                        && rest[2] == b'}'
                     {
                         // continue with the wildcard child
-                        if current.children.last_mut().unwrap().prefix == rest {
+                        if current.children.last_mut().unwrap().prefix.inner() == rest {
                             return drop_child(current, current.children.len() - 1);
                         } else {
                             current = current.children.last_mut().unwrap();
@@ -810,20 +831,3 @@ const _: () = {
         }
     }
 };
-
-#[cfg(test)]
-mod test {
-    use super::normalize_params;
-
-    #[test]
-    fn test_normalization() {
-        let path = "/users/:azda/test/:test";
-        let (a, b) = normalize_params(path.to_string().into_bytes()).unwrap();
-        let a1 = std::str::from_utf8(&a).unwrap();
-        let b1 = std::str::from_utf8(&b[0]).unwrap();
-        let b2 = std::str::from_utf8(&b[1]).unwrap();
-        assert_eq!(a1, "/users/:a/test/:b");
-        assert_eq!(b1, ":azda");
-        assert_eq!(b2, ":test");
-    }
-}
