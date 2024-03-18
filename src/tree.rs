@@ -178,10 +178,14 @@ impl<T> Node<T> {
     pub fn remove(&mut self, full_path: impl Into<String>) -> Option<T> {
         let mut current = self;
         let unescaped = UnescapedRoute::new(full_path.into().into_bytes());
-        let full_path = normalize_params(unescaped).ok()?.0.into_inner();
+        let (full_path, param_remapping) = normalize_params(unescaped).ok()?;
+        let full_path = full_path.into_inner();
         let mut path: &[u8] = full_path.as_ref();
 
-        fn drop_child<T>(node: &mut Node<T>, i: usize) -> Option<T> {
+        let drop_child = |node: &mut Node<T>, i: usize| -> Option<T> {
+            if node.children[i].param_remapping != param_remapping {
+                return None;
+            }
             // if the node we are dropping doesn't have any children, we can remove it
             let val = if node.children[i].children.is_empty() {
                 // if the parent node only has one child there are no indices
@@ -204,7 +208,7 @@ impl<T> Node<T> {
             };
 
             val.map(UnsafeCell::into_inner)
-        }
+        };
 
         // Specifice case if we are removing the root node
         if path == current.prefix.inner() {
