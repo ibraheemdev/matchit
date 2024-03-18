@@ -98,7 +98,10 @@ impl<T> Router<T> {
     }
 
     /// Remove a given route from the router.
+    ///
     /// Returns the value stored under the route if it was found.
+    ///
+    /// If the route was not found or if the route is incorrect, `None` is returned.
     ///
     /// # Examples
     ///
@@ -113,6 +116,16 @@ impl<T> Router<T> {
     /// router.insert("/home/{id}/", "Hello!");
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     /// assert_eq!(router.remove("/home/{id}/"), None);
+    ///
+    /// router.insert("/home/{id}/", "Hello!");
+    /// // Bad route
+    /// assert_eq!(router.remove("/home/{user}"), None);
+    /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
+    ///
+    /// router.insert("/home/{id}/", "Hello!");
+    /// // Ill-formed route
+    /// assert_eq!(router.remove("/home/{id"), None);
+    /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     /// ```
     pub fn remove(&mut self, path: impl Into<String>) -> Option<T> {
         self.root.remove(path)
