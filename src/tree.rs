@@ -3,8 +3,8 @@ use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
-use std::mem;
 use std::ops::Range;
+use std::{fmt, mem};
 
 /// The types of nodes the tree can hold
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
@@ -70,7 +70,7 @@ impl<T> Node<T> {
             // the common prefix is a substring of the current node's prefix, split the node
             if common_prefix < current.prefix.len() {
                 let child = Node {
-                    prefix: current.prefix.slice_off(common_prefix),
+                    prefix: current.prefix.as_ref().slice_off(common_prefix).to_owned(),
                     children: mem::take(&mut current.children),
                     wild_child: current.wild_child,
                     indices: current.indices.clone(),
@@ -83,7 +83,11 @@ impl<T> Node<T> {
                 // the current node now holds only the common prefix
                 current.children = vec![child];
                 current.indices = vec![current.prefix[common_prefix]];
-                current.prefix = current.prefix.slice_until(common_prefix);
+                current.prefix = current
+                    .prefix
+                    .as_ref()
+                    .slice_until(common_prefix)
+                    .to_owned();
                 current.wild_child = false;
             }
 
@@ -582,13 +586,8 @@ fn find_wildcard(path: UnescapedRef<'_>) -> Result<Option<Range<usize>>, InsertE
             return Err(InsertError::InvalidParam);
         }
 
-        // keep going till we find an opening brace
-        if c != b'{' {
-            continue;
-        }
-
-        // escaped opening brace
-        if path.is_escaped(start) {
+        // keep going till we find an unescaped opening brace
+        if c != b'{' || path.is_escaped(start) {
             continue;
         }
 
@@ -667,36 +666,38 @@ impl<T> Default for Node<T> {
     }
 }
 
-#[cfg(test)]
-const _: () = {
-    use std::fmt::{self, Debug, Formatter};
+// visualize the tree structure when debugging
+impl<T> fmt::Debug for Node<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // safety: we only expose &mut T through &mut self
+        let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
 
-    // visualize the tree structure when debugging
-    impl<T: Debug> Debug for Node<T> {
-        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-            // safety: we only expose &mut T through &mut self
-            let value = unsafe { self.value.as_ref().map(|x| &*x.get()) };
+        let mut f = f.debug_struct("Node");
+        f.field("value", &value)
+            .field("prefix", &self.prefix)
+            .field("node_type", &self.node_type)
+            .field("children", &self.children);
 
+        #[cfg(test)]
+        {
             let indices = self
                 .indices
                 .iter()
                 .map(|&x| char::from_u32(x as _))
                 .collect::<Vec<_>>();
 
-            let param_names = self
+            let params = self
                 .param_remapping
                 .iter()
                 .map(|x| std::str::from_utf8(x).unwrap())
                 .collect::<Vec<_>>();
 
-            f.debug_struct("Node")
-                .field("value", &value)
-                .field("prefix", &self.prefix)
-                .field("node_type", &self.node_type)
-                .field("children", &self.children)
-                .field("param_names", &param_names)
-                .field("indices", &indices)
-                .finish()
+            f.field("indices", &indices).field("params", &params);
         }
+
+        f.finish()
     }
-};
+}

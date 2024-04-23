@@ -34,32 +34,6 @@ impl UnescapedRoute {
         self.escaped.contains(&i)
     }
 
-    /// Slices the route with `start..`.
-    pub fn slice_off(&self, start: usize) -> UnescapedRoute {
-        let mut escaped = Vec::new();
-        for &i in &self.escaped {
-            if i >= start {
-                escaped.push(i - start);
-            }
-        }
-
-        UnescapedRoute {
-            inner: self.inner[start..].to_owned(),
-            escaped,
-        }
-    }
-
-    /// Slices the route with `..end`.
-    pub fn slice_until(&self, end: usize) -> UnescapedRoute {
-        let mut escaped = self.escaped.clone();
-        escaped.retain(|&i| i < end);
-
-        UnescapedRoute {
-            inner: self.inner[..end].to_owned(),
-            escaped,
-        }
-    }
-
     /// Replaces the characters in the given range.
     pub fn splice(
         &mut self,
@@ -125,10 +99,7 @@ impl std::ops::Deref for UnescapedRoute {
 
 impl fmt::Debug for UnescapedRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("UnescapedRoute")
-            .field("inner", &std::str::from_utf8(&self.inner))
-            .field("escaped", &self.escaped)
-            .finish()
+        fmt::Debug::fmt(std::str::from_utf8(&self.inner).unwrap(), f)
     }
 }
 
