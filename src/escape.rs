@@ -108,6 +108,7 @@ impl fmt::Debug for UnescapedRoute {
 pub struct UnescapedRef<'a> {
     pub inner: &'a [u8],
     escaped: &'a [usize],
+    // An offset applied to each escaped index.
     offset: isize,
 }
 
@@ -116,9 +117,11 @@ impl<'a> UnescapedRef<'a> {
     pub fn to_owned(self) -> UnescapedRoute {
         let mut escaped = Vec::new();
         for &i in self.escaped {
-            let i = i.wrapping_add_signed(-self.offset);
-            if i < self.inner.len() {
-                escaped.push(i);
+            let i = i.checked_add_signed(self.offset);
+
+            match i {
+                Some(i) if i < self.inner.len() => escaped.push(i),
+                _ => {}
             }
         }
 
@@ -130,7 +133,11 @@ impl<'a> UnescapedRef<'a> {
 
     /// Returns true if the character at the given index was escaped.
     pub fn is_escaped(&self, i: usize) -> bool {
-        self.escaped.contains(&(i.wrapping_add_signed(self.offset)))
+        if let Some(i) = i.checked_add_signed(-self.offset) {
+            return self.escaped.contains(&i);
+        }
+
+        false
     }
 
     /// Slices the route with `start..`.
@@ -138,7 +145,7 @@ impl<'a> UnescapedRef<'a> {
         UnescapedRef {
             inner: &self.inner[start..],
             escaped: self.escaped,
-            offset: self.offset + (start as isize),
+            offset: self.offset - (start as isize),
         }
     }
 
