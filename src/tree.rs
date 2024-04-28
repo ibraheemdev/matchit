@@ -177,8 +177,8 @@ impl<T> Node<T> {
         }
     }
 
-    /// Removes a route from the tree, returning the value if the route existed.
-    /// The provided path should be the same as the one used to insert the route (including wildcards).
+    /// removes a route from the tree, returning the value if the route existed.
+    /// the provided path should be the same as the one used to insert the route (including wildcards).
     pub fn remove(&mut self, full_path: impl Into<String>) -> Option<T> {
         let mut current = self;
         let unescaped = UnescapedRoute::new(full_path.into().into_bytes());
@@ -198,11 +198,11 @@ impl<T> Node<T> {
                     node.children.remove(0).value.take()
                 } else {
                     let child = node.children.remove(i);
-                    // Indices are only used for static nodes
+                    // indices are only used for static nodes
                     if child.node_type == NodeType::Static {
                         node.indices.remove(i);
                     } else {
-                        // It was a dynamic node, we remove the wildcard child flag
+                        // it was a dynamic node, we remove the wildcard child flag
                         node.wild_child = false;
                     }
                     child.value
@@ -214,7 +214,7 @@ impl<T> Node<T> {
             val.map(UnsafeCell::into_inner)
         };
 
-        // Specific case if we are removing the root node
+        // specific case if we are removing the root node
         if path == current.prefix.inner() {
             let val = current.value.take().map(UnsafeCell::into_inner);
             // if the root node has no children, we can just reset it
@@ -233,7 +233,7 @@ impl<T> Node<T> {
                     let first = rest[0];
                     path = rest;
 
-                    // If there is only one child we can continue with the child node
+                    // if there is only one child we can continue with the child node
                     if current.children.len() == 1 {
                         if current.children[0].prefix.inner() == rest {
                             return drop_child(current, 0);
@@ -243,7 +243,7 @@ impl<T> Node<T> {
                         }
                     }
 
-                    // If there are many we get the index of the child matching the first byte
+                    // if there are many we get the index of the child matching the first byte
                     if let Some(i) = current.indices.iter().position(|&c| c == first) {
                         // continue with the child node
                         if current.children[i].prefix.inner() == rest {
@@ -254,7 +254,7 @@ impl<T> Node<T> {
                         }
                     }
 
-                    // If this node has a wildcard child and that it matches our standardized path
+                    // if this node has a wildcard child and that it matches our standardized path
                     // we continue with that
                     if current.wild_child
                         && !current.children.is_empty()
