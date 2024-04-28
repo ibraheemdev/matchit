@@ -105,8 +105,8 @@ impl<T> Router<T> {
     /// ```rust
     /// # use matchit::Router;
     /// let mut router = Router::new();
-    /// router.insert("/home", "Welcome!");
     ///
+    /// router.insert("/home", "Welcome!");
     /// assert_eq!(router.remove("/home"), Some("Welcome!"));
     /// assert_eq!(router.remove("/home"), None);
     ///
@@ -115,7 +115,7 @@ impl<T> Router<T> {
     /// assert_eq!(router.remove("/home/{id}/"), None);
     ///
     /// router.insert("/home/{id}/", "Hello!");
-    /// // unknown route
+    /// // the route does not match
     /// assert_eq!(router.remove("/home/{user}"), None);
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     ///

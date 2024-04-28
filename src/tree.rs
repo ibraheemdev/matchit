@@ -183,36 +183,7 @@ impl<T> Node<T> {
         let mut current = self;
         let unescaped = UnescapedRoute::new(full_path.into().into_bytes());
         let (full_path, param_remapping) = normalize_params(unescaped).ok()?;
-        let full_path = full_path.into_inner();
-        let mut path: &[u8] = full_path.as_ref();
-
-        let drop_child = |node: &mut Node<T>, i: usize| -> Option<T> {
-            if node.children[i].param_remapping != param_remapping {
-                return None;
-            }
-            // if the node we are dropping doesn't have any children, we can remove it
-            let val = if node.children[i].children.is_empty() {
-                // if the parent node only has one child there are no indices
-                if node.children.len() == 1 && node.indices.is_empty() {
-                    node.wild_child = false;
-                    node.children.remove(0).value.take()
-                } else {
-                    let child = node.children.remove(i);
-                    // indices are only used for static nodes
-                    if child.node_type == NodeType::Static {
-                        node.indices.remove(i);
-                    } else {
-                        // it was a dynamic node, we remove the wildcard child flag
-                        node.wild_child = false;
-                    }
-                    child.value
-                }
-            } else {
-                node.children[i].value.take()
-            };
-
-            val.map(UnsafeCell::into_inner)
-        };
+        let mut path: &[u8] = full_path.inner();
 
         // specific case if we are removing the root node
         if path == current.prefix.inner() {
@@ -221,6 +192,7 @@ impl<T> Node<T> {
             if current.children.is_empty() {
                 *current = Self::default();
             }
+
             return val;
         }
 
@@ -228,6 +200,7 @@ impl<T> Node<T> {
             // the path is longer than this node's prefix, we are expecting a child node
             if path.len() > current.prefix.len() {
                 let (prefix, rest) = path.split_at(current.prefix.len());
+
                 // the prefix matches
                 if prefix == current.prefix.inner() {
                     let first = rest[0];
@@ -236,45 +209,74 @@ impl<T> Node<T> {
                     // if there is only one child we can continue with the child node
                     if current.children.len() == 1 {
                         if current.children[0].prefix.inner() == rest {
-                            return drop_child(current, 0);
-                        } else {
-                            current = &mut current.children[0];
-                            continue 'walk;
+                            return current.remove_child(0, &param_remapping);
                         }
+
+                        current = &mut current.children[0];
+                        continue 'walk;
                     }
 
                     // if there are many we get the index of the child matching the first byte
                     if let Some(i) = current.indices.iter().position(|&c| c == first) {
                         // continue with the child node
                         if current.children[i].prefix.inner() == rest {
-                            return drop_child(current, i);
-                        } else {
-                            current = &mut current.children[i];
-                            continue 'walk;
+                            return current.remove_child(i, &param_remapping);
                         }
+
+                        current = &mut current.children[i];
+                        continue 'walk;
                     }
 
                     // if this node has a wildcard child and that it matches our standardized path
                     // we continue with that
                     if current.wild_child
                         && !current.children.is_empty()
-                        && rest.len() > 2
-                        && rest[0] == b'{'
-                        && rest[2] == b'}'
+                        && rest.first().zip(rest.get(2)) == Some((&b'{', &b'}'))
                     {
                         // continue with the wildcard child
                         if current.children.last_mut().unwrap().prefix.inner() == rest {
-                            return drop_child(current, current.children.len() - 1);
-                        } else {
-                            current = current.children.last_mut().unwrap();
-                            continue 'walk;
+                            return current
+                                .remove_child(current.children.len() - 1, &param_remapping);
                         }
+
+                        current = current.children.last_mut().unwrap();
+                        continue 'walk;
                     }
                 }
             }
 
             return None;
         }
+    }
+
+    /// remove the i'th child of this node
+    fn remove_child(&mut self, i: usize, param_remapping: &ParamRemapping) -> Option<T> {
+        if self.children[i].param_remapping != *param_remapping {
+            return None;
+        }
+
+        // if the node we are dropping doesn't have any children, we can remove it
+        let val = if self.children[i].children.is_empty() {
+            // if the parent self only has one child there are no indices
+            if self.children.len() == 1 && self.indices.is_empty() {
+                self.wild_child = false;
+                self.children.remove(0).value.take()
+            } else {
+                let child = self.children.remove(i);
+                // indices are only used for static selfs
+                if child.node_type == NodeType::Static {
+                    self.indices.remove(i);
+                } else {
+                    // it was a dynamic self, we remove the wildcard child flag
+                    self.wild_child = false;
+                }
+                child.value
+            }
+        } else {
+            self.children[i].value.take()
+        };
+
+        val.map(UnsafeCell::into_inner)
     }
 
     // add a child node, keeping wildcards at the end
