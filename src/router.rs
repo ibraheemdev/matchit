@@ -96,6 +96,40 @@ impl<T> Router<T> {
         }
     }
 
+    /// Remove a given route from the router.
+    ///
+    /// Returns the value stored under the route if it was found.
+    ///
+    /// If the route was not found or if the route is incorrect, `None` is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use matchit::Router;
+    /// let mut router = Router::new();
+    /// router.insert("/home", "Welcome!");
+    ///
+    /// assert_eq!(router.remove("/home"), Some("Welcome!"));
+    /// assert_eq!(router.remove("/home"), None);
+    ///
+    /// router.insert("/home/{id}/", "Hello!");
+    /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
+    /// assert_eq!(router.remove("/home/{id}/"), None);
+    ///
+    /// router.insert("/home/{id}/", "Hello!");
+    /// // Bad route
+    /// assert_eq!(router.remove("/home/{user}"), None);
+    /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
+    ///
+    /// router.insert("/home/{id}/", "Hello!");
+    /// // Ill-formed route
+    /// assert_eq!(router.remove("/home/{id"), None);
+    /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
+    /// ```
+    pub fn remove(&mut self, path: impl Into<String>) -> Option<T> {
+        self.root.remove(path)
+    }
+
     #[cfg(feature = "__test_helpers")]
     pub fn check_priorities(&self) -> Result<u32, (u32, u32)> {
         self.root.check_priorities()
