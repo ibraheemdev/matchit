@@ -210,6 +210,23 @@ fn overlapping_routes() {
 }
 
 #[test]
+fn trailing_slash() {
+    RemoveTest {
+        routes: vec!["/{home}/", "/foo"],
+        ops: vec![
+            (Remove, "/", None),
+            (Remove, "/{home}", None),
+            (Remove, "/foo/", None),
+            (Remove, "/foo", Some("/foo")),
+            (Remove, "/{home}", None),
+            (Remove, "/{home}/", Some("/{home}/")),
+        ],
+        remaining: vec![],
+    }
+    .run();
+}
+
+#[test]
 fn remove_root() {
     RemoveTest {
         routes: vec!["/"],
