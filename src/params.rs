@@ -201,6 +201,15 @@ impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
         }
     }
 }
+impl ExactSizeIterator for ParamsIter<'_, '_, '_> {
+    fn len(&self) -> usize {
+        match self.kind {
+            ParamsIterKind::None => 0,
+            ParamsIterKind::Small(ref iter) => iter.len(),
+            ParamsIterKind::Large(ref iter) => iter.len(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
