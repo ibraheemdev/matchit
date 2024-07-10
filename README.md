@@ -1,8 +1,8 @@
 # `matchit`
 
-[![Documentation](https://img.shields.io/badge/docs-0.8.3-4d76ae?style=for-the-badge)](https://docs.rs/matchit)
-[![Version](https://img.shields.io/crates/v/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
-[![License](https://img.shields.io/crates/l/matchit?style=for-the-badge)](https://crates.io/crates/matchit)
+[<img alt="crates.io" src="https://img.shields.io/crates/v/matchit?style=for-the-badge" height="25">](https://crates.io/crates/matchit)
+[<img alt="github" src="https://img.shields.io/badge/github-matchit-blue?style=for-the-badge" height="25">](https://github.com/ibraheemdev/matchit)
+[<img alt="docs.rs" src="https://img.shields.io/docsrs/matchit?style=for-the-badge" height="25">](https://docs.rs/matchit)
 
 A high performance, zero-copy URL router.
 
@@ -24,11 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Parameters
 
-Along with static routes, the router also supports dynamic route segments. These can either be named or catch-all parameters.
+The router supports dynamic route segments. These can either be named or catch-all parameters.
 
-### Named Parameters
-
-Named parameters like `/{id}` match anything until the next `/` or the end of the path.
+Named parameters like `/{id}` match anything until the next `/` or the end of the path. Note that named parameters must be followed
+by a `/` or the end of the route. Dynamic suffixes are not currently supported.
 
 ```rust,ignore
 let mut m = Router::new();
@@ -38,10 +37,6 @@ assert_eq!(m.at("/users/1")?.params.get("id"), Some("1"));
 assert_eq!(m.at("/users/23")?.params.get("id"), Some("23"));
 assert!(m.at("/users").is_err());
 ```
-
-Note that named parameters must be followed by a `/` or the end of the route. Dynamic suffixes are not currently supported.
-
-### Catch-all Parameters
 
 Catch-all parameters start with `*` and match anything until the end of the path. They must always be at the **end** of the route.
 
@@ -55,8 +50,6 @@ assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 // note that this will not match
 assert_eq!(m.at("/").is_err());
 ```
-
-### Escaping Parameters
 
 The literal characters `{` and `}` may be included in a static route by escaping them with the same character. For example, the `{` character is escaped with `{{` and the `}` character is escaped with `}}`.
 
@@ -104,7 +97,7 @@ Priority   Path             Value
 This allows us to reduce the route search to a small number of branches. Child nodes on the same level of the tree are also prioritized
 by the number of children with registered values, increasing the chance of choosing the correct branch of the first try.
 
-# Benchmarks
+## Benchmarks
 
 As it turns out, this method of routing is extremely fast. In a benchmark matching 4 paths against 130 registered routes, `matchit` find the correct routes
 in under 200 nanoseconds, an order of magnitude faster than most other routers. You can view the benchmark code [here](https://github.com/ibraheemdev/matchit/blob/master/benches/bench.rs). 
@@ -129,6 +122,6 @@ Compare Routers/routefinder
 time:   [5.7313 us 5.7405 us 5.7514 us]
 ```
 
-# Credits
+## Credits
 
 A lot of the code in this package was based on Julien Schmidt's [`httprouter`](https://github.com/julienschmidt/httprouter).
