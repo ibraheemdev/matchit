@@ -8,6 +8,11 @@ struct Param<'k, 'v> {
 }
 
 impl<'k, 'v> Param<'k, 'v> {
+    const EMPTY: Param<'static, 'static> = Param {
+        key: b"",
+        value: b"",
+    };
+
     // this could be from_utf8_unchecked, but we'll keep this safe for now
     fn key_str(&self) -> &'k str {
         std::str::from_utf8(self.key).unwrap()
@@ -47,7 +52,6 @@ const SMALL: usize = 3;
 
 #[derive(PartialEq, Eq, Ord, PartialOrd, Clone)]
 enum ParamsKind<'k, 'v> {
-    None,
     Small([Param<'k, 'v>; SMALL], usize),
     Large(Vec<Param<'k, 'v>>),
 }
@@ -55,28 +59,22 @@ enum ParamsKind<'k, 'v> {
 impl<'k, 'v> Params<'k, 'v> {
     pub(crate) fn new() -> Self {
         Self {
-            kind: ParamsKind::None,
+            kind: ParamsKind::Small([Param::EMPTY; 3], 0),
         }
     }
 
     /// Returns the number of parameters.
     pub fn len(&self) -> usize {
-        match &self.kind {
-            ParamsKind::None => 0,
-            ParamsKind::Small(_, len) => *len,
-            ParamsKind::Large(vec) => vec.len(),
+        match self.kind {
+            ParamsKind::Small(_, len) => len,
+            ParamsKind::Large(ref vec) => vec.len(),
         }
     }
 
     pub(crate) fn truncate(&mut self, n: usize) {
         match &mut self.kind {
-            ParamsKind::None => {}
-            ParamsKind::Small(_, len) => {
-                *len = n;
-            }
-            ParamsKind::Large(vec) => {
-                vec.truncate(n);
-            }
+            ParamsKind::Small(_, len) => *len = n,
+            ParamsKind::Large(vec) => vec.truncate(n),
         }
     }
 
@@ -85,7 +83,6 @@ impl<'k, 'v> Params<'k, 'v> {
         let key = key.as_ref().as_bytes();
 
         match &self.kind {
-            ParamsKind::None => None,
             ParamsKind::Small(arr, len) => arr
                 .iter()
                 .take(*len)
@@ -105,10 +102,9 @@ impl<'k, 'v> Params<'k, 'v> {
 
     /// Returns `true` if there are no parameters in the list.
     pub fn is_empty(&self) -> bool {
-        match &self.kind {
-            ParamsKind::None => true,
-            ParamsKind::Small(_, len) => *len == 0,
-            ParamsKind::Large(vec) => vec.is_empty(),
+        match self.kind {
+            ParamsKind::Small(_, len) => len == 0,
+            ParamsKind::Large(ref vec) => vec.is_empty(),
         }
     }
 
@@ -124,14 +120,12 @@ impl<'k, 'v> Params<'k, 'v> {
 
         let param = Param { key, value };
         match &mut self.kind {
-            ParamsKind::None => {
-                self.kind = ParamsKind::Small([param, Param::default(), Param::default()], 1);
-            }
             ParamsKind::Small(arr, len) => {
                 if *len == SMALL {
                     self.kind = ParamsKind::Large(drain_to_vec(*len, param, arr));
                     return;
                 }
+
                 arr[*len] = param;
                 *len += 1;
             }
@@ -142,7 +136,6 @@ impl<'k, 'v> Params<'k, 'v> {
     // Transform each key.
     pub(crate) fn for_each_key_mut(&mut self, f: impl Fn((usize, &mut &'k [u8]))) {
         match &mut self.kind {
-            ParamsKind::None => {}
             ParamsKind::Small(arr, len) => arr
                 .iter_mut()
                 .take(*len)
@@ -172,7 +165,6 @@ pub struct ParamsIter<'ps, 'k, 'v> {
 impl<'ps, 'k, 'v> ParamsIter<'ps, 'k, 'v> {
     fn new(params: &'ps Params<'k, 'v>) -> Self {
         let kind = match &params.kind {
-            ParamsKind::None => ParamsIterKind::None,
             ParamsKind::Small(arr, len) => ParamsIterKind::Small(arr.iter().take(*len)),
             ParamsKind::Large(vec) => ParamsIterKind::Large(vec.iter()),
         };
@@ -181,7 +173,6 @@ impl<'ps, 'k, 'v> ParamsIter<'ps, 'k, 'v> {
 }
 
 enum ParamsIterKind<'ps, 'k, 'v> {
-    None,
     Small(iter::Take<slice::Iter<'ps, Param<'k, 'v>>>),
     Large(slice::Iter<'ps, Param<'k, 'v>>),
 }
@@ -191,7 +182,6 @@ impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.kind {
-            ParamsIterKind::None => None,
             ParamsIterKind::Small(ref mut iter) => {
                 iter.next().map(|p| (p.key_str(), p.value_str()))
             }
@@ -204,7 +194,6 @@ impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
 impl ExactSizeIterator for ParamsIter<'_, '_, '_> {
     fn len(&self) -> usize {
         match self.kind {
-            ParamsIterKind::None => 0,
             ParamsIterKind::Small(ref iter) => iter.len(),
             ParamsIterKind::Large(ref iter) => iter.len(),
         }
