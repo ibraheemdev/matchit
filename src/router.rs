@@ -23,7 +23,7 @@ impl<T> Router<T> {
         Self::default()
     }
 
-    /// Insert a route.
+    /// Insert a route into the router.
     ///
     /// # Examples
     ///
@@ -37,7 +37,7 @@ impl<T> Router<T> {
     /// # }
     /// ```
     pub fn insert(&mut self, route: impl Into<String>, value: T) -> Result<(), InsertError> {
-        self.root.insert(route, value)
+        self.root.insert(route.into(), value)
     }
 
     /// Tries to find a value in the router matching the given path.
@@ -58,7 +58,7 @@ impl<T> Router<T> {
     pub fn at<'m, 'p>(&'m self, path: &'p str) -> Result<Match<'m, 'p, &'m T>, MatchError> {
         match self.root.at(path.as_bytes()) {
             Ok((value, params)) => Ok(Match {
-                // SAFETY: We only expose &mut T through &mut self
+                // Safety: We only expose `&mut T` through `&mut self`
                 value: unsafe { &*value.get() },
                 params,
             }),
@@ -88,7 +88,7 @@ impl<T> Router<T> {
     ) -> Result<Match<'m, 'p, &'m mut T>, MatchError> {
         match self.root.at(path.as_bytes()) {
             Ok((value, params)) => Ok(Match {
-                // SAFETY: We have &mut self
+                // Safety: We have `&mut self`
                 value: unsafe { &mut *value.get() },
                 params,
             }),
@@ -98,7 +98,8 @@ impl<T> Router<T> {
 
     /// Remove a given route from the router.
     ///
-    /// Returns the value stored under the route if it was found. If the route was not found or invalid, `None` is returned.
+    /// Returns the value stored under the route if it was found.
+    /// If the route was not found or invalid, `None` is returned.
     ///
     /// # Examples
     ///
@@ -125,7 +126,7 @@ impl<T> Router<T> {
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     /// ```
     pub fn remove(&mut self, path: impl Into<String>) -> Option<T> {
-        self.root.remove(path)
+        self.root.remove(path.into())
     }
 
     #[cfg(feature = "__test_helpers")]
@@ -140,6 +141,7 @@ impl<T> Router<T> {
 pub struct Match<'k, 'v, V> {
     /// The value stored under the matched node.
     pub value: V,
+
     /// The route parameters. See [parameters](crate#parameters) for more details.
     pub params: Params<'k, 'v>,
 }

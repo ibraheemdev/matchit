@@ -31,17 +31,17 @@ impl fmt::Display for InsertError {
             Self::Conflict { with } => {
                 write!(
                     f,
-                    "insertion failed due to conflict with previously registered route: {}",
+                    "Insertion failed due to conflict with previously registered route: {}",
                     with
                 )
             }
             Self::InvalidParamSegment => {
-                write!(f, "only one parameter is allowed per path segment")
+                write!(f, "Only one parameter is allowed per path segment")
             }
-            Self::InvalidParam => write!(f, "parameters must be registered with a valid name"),
+            Self::InvalidParam => write!(f, "Parameters must be registered with a valid name"),
             Self::InvalidCatchAll => write!(
                 f,
-                "catch-all parameters are only allowed at the end of a route"
+                "Catch-all parameters are only allowed at the end of a route"
             ),
         }
     }
@@ -50,6 +50,9 @@ impl fmt::Display for InsertError {
 impl std::error::Error for InsertError {}
 
 impl InsertError {
+    /// Returns an error for a route conflict with the given node.
+    ///
+    /// This method attempts to find the full conflicting route.
     pub(crate) fn conflict<T>(
         route: &UnescapedRoute,
         prefix: UnescapedRef<'_>,
@@ -57,35 +60,39 @@ impl InsertError {
     ) -> Self {
         let mut route = route.clone();
 
-        // The new route would have had to replace the current node in the tree.
-        if prefix.inner() == current.prefix.inner() {
-            denormalize_params(&mut route, &current.param_remapping);
+        // The route is conflicting with the current node.
+        if prefix.unescaped() == current.prefix.unescaped() {
+            denormalize_params(&mut route, &current.remapping);
             return InsertError::Conflict {
-                with: String::from_utf8(route.into_inner()).unwrap(),
+                with: String::from_utf8(route.into_unescaped()).unwrap(),
             };
         }
 
+        // Remove the non-matching suffix from the route.
         route.truncate(route.len() - prefix.len());
 
+        // Add the conflicting prefix.
         if !route.ends_with(&current.prefix) {
             route.append(&current.prefix);
         }
 
+        // Add the prefixes of any conflicting children.
+        let mut child = current.children.first();
+        while let Some(node) = child {
+            route.append(&node.prefix);
+            child = node.children.first();
+        }
+
+        // Denormalize any route parameters.
         let mut last = current;
         while let Some(node) = last.children.first() {
             last = node;
         }
+        denormalize_params(&mut route, &last.remapping);
 
-        let mut current = current.children.first();
-        while let Some(node) = current {
-            route.append(&node.prefix);
-            current = node.children.first();
-        }
-
-        denormalize_params(&mut route, &last.param_remapping);
-
+        // Return the conflicting route.
         InsertError::Conflict {
-            with: String::from_utf8(route.into_inner()).unwrap(),
+            with: String::from_utf8(route.into_unescaped()).unwrap(),
         }
     }
 }
@@ -113,7 +120,7 @@ pub enum MatchError {
 
 impl fmt::Display for MatchError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "matching route not found")
+        write!(f, "Matching route not found")
     }
 }
 

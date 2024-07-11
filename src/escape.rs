@@ -1,10 +1,11 @@
 use std::{fmt, ops::Range};
 
-/// An uescaped route that keeps track of the position of escaped characters ('{{' or '}}').
+/// An unescaped route that keeps track of the position of escaped characters ('{{' or '}}').
 ///
 /// Note that this type dereferences to `&[u8]`.
 #[derive(Clone, Default)]
 pub struct UnescapedRoute {
+    // The raw unescaped route.
     inner: Vec<u8>,
     escaped: Vec<usize>,
 }
@@ -40,10 +41,10 @@ impl UnescapedRoute {
         range: Range<usize>,
         replace: Vec<u8>,
     ) -> impl Iterator<Item = u8> + '_ {
-        // ignore any escaped characters in the range being replaced
+        // Ignore any escaped characters in the range being replaced.
         self.escaped.retain(|x| !range.contains(x));
 
-        // update the escaped indices
+        // Update the escaped indices.
         let offset = (replace.len() as isize) - (range.len() as isize);
         for i in &mut self.escaped {
             if *i > range.end {
@@ -78,13 +79,13 @@ impl UnescapedRoute {
         }
     }
 
-    /// Returns a reference to the inner slice.
-    pub fn inner(&self) -> &[u8] {
+    /// Returns a reference to the unescaped slice.
+    pub fn unescaped(&self) -> &[u8] {
         &self.inner
     }
 
-    /// Returns the inner slice.
-    pub fn into_inner(self) -> Vec<u8> {
+    /// Returns the unescaped route.
+    pub fn into_unescaped(self) -> Vec<u8> {
         self.inner
     }
 }
@@ -131,7 +132,7 @@ impl<'a> UnescapedRef<'a> {
         }
     }
 
-    /// Returns true if the character at the given index was escaped.
+    /// Returns `true` if the character at the given index was escaped.
     pub fn is_escaped(&self, i: usize) -> bool {
         if let Some(i) = i.checked_add_signed(-self.offset) {
             return self.escaped.contains(&i);
@@ -158,8 +159,8 @@ impl<'a> UnescapedRef<'a> {
         }
     }
 
-    /// Returns a reference to the inner slice.
-    pub fn inner(&self) -> &[u8] {
+    /// Returns a reference to the unescaped slice.
+    pub fn unescaped(&self) -> &[u8] {
         self.inner
     }
 }

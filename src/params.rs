@@ -3,6 +3,9 @@ use std::{fmt, iter, mem, slice};
 /// A single URL parameter, consisting of a key and a value.
 #[derive(PartialEq, Eq, Ord, PartialOrd, Default, Copy, Clone)]
 struct Param<'k, 'v> {
+    // Keys and values are stored as byte slices internally by the router
+    // to avoid UTF8 checks when slicing, but UTF8 is still respected,
+    // so these slices are valid strings.
     key: &'k [u8],
     value: &'v [u8],
 }
@@ -13,11 +16,12 @@ impl<'k, 'v> Param<'k, 'v> {
         value: b"",
     };
 
-    // this could be from_utf8_unchecked, but we'll keep this safe for now
+    // Returns the parameter key as a string.
     fn key_str(&self) -> &'k str {
         std::str::from_utf8(self.key).unwrap()
     }
 
+    // Returns the parameter value as a string.
     fn value_str(&self) -> &'v str {
         std::str::from_utf8(self.value).unwrap()
     }
@@ -31,12 +35,12 @@ impl<'k, 'v> Param<'k, 'v> {
 /// # router.insert("/users/{id}", true).unwrap();
 /// let matched = router.at("/users/1")?;
 ///
-/// // you can iterate through the keys and values
+/// // Iterate through the keys and values.
 /// for (key, value) in matched.params.iter() {
 ///     println!("key: {}, value: {}", key, value);
 /// }
 ///
-/// // or get a specific value by key
+/// // Get a specific value by name.
 /// let id = matched.params.get("id");
 /// assert_eq!(id, Some("1"));
 /// # Ok(())
@@ -47,9 +51,11 @@ pub struct Params<'k, 'v> {
     kind: ParamsKind<'k, 'v>,
 }
 
-// most routes have 1-3 dynamic parameters, so we can avoid a heap allocation in common cases.
+// Most routes have a small number of dynamic parameters, so we can avoid
+// heap allocations in the common case.
 const SMALL: usize = 3;
 
+// A list of parameters, optimized to avoid allocations when possible.
 #[derive(PartialEq, Eq, Ord, PartialOrd, Clone)]
 enum ParamsKind<'k, 'v> {
     Small([Param<'k, 'v>; SMALL], usize),
@@ -71,6 +77,7 @@ impl<'k, 'v> Params<'k, 'v> {
         }
     }
 
+    // Truncates the parameter list to the given length.
     pub(crate) fn truncate(&mut self, n: usize) {
         match &mut self.kind {
             ParamsKind::Small(_, len) => *len = n,
@@ -133,7 +140,7 @@ impl<'k, 'v> Params<'k, 'v> {
         }
     }
 
-    // Transform each key.
+    // Applies a transformation function to each key.
     pub(crate) fn for_each_key_mut(&mut self, f: impl Fn((usize, &mut &'k [u8]))) {
         match &mut self.kind {
             ParamsKind::Small(arr, len) => arr
@@ -191,6 +198,7 @@ impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
         }
     }
 }
+
 impl ExactSizeIterator for ParamsIter<'_, '_, '_> {
     fn len(&self) -> usize {
         match self.kind {
