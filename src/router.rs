@@ -1,7 +1,7 @@
 use crate::tree::Node;
 use crate::{InsertError, MatchError, Params};
 
-/// A URL router.
+/// A zero-copy URL router.
 ///
 /// See [the crate documentation](crate) for details.
 #[derive(Clone, Debug)]
@@ -55,7 +55,7 @@ impl<T> Router<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn at<'m, 'p>(&'m self, path: &'p str) -> Result<Match<'m, 'p, &'m T>, MatchError> {
+    pub fn at<'path>(&self, path: &'path str) -> Result<Match<'_, 'path, &T>, MatchError> {
         match self.root.at(path.as_bytes()) {
             Ok((value, params)) => Ok(Match {
                 // Safety: We only expose `&mut T` through `&mut self`
@@ -82,10 +82,10 @@ impl<T> Router<T> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn at_mut<'m, 'p>(
-        &'m mut self,
-        path: &'p str,
-    ) -> Result<Match<'m, 'p, &'m mut T>, MatchError> {
+    pub fn at_mut<'path>(
+        &mut self,
+        path: &'path str,
+    ) -> Result<Match<'_, 'path, &mut T>, MatchError> {
         match self.root.at(path.as_bytes()) {
             Ok((value, params)) => Ok(Match {
                 // Safety: We have `&mut self`

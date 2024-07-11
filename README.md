@@ -48,7 +48,7 @@ assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 
 // note that this will not match
-assert_eq!(m.at("/").is_err());
+assert!(m.at("/").is_err());
 ```
 
 The literal characters `{` and `}` may be included in a static route by escaping them with the same character. For example, the `{` character is escaped with `{{` and the `}` character is escaped with `}}`.
