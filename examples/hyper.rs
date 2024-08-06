@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use hyper::body::Incoming;
+use http_body_util::Full;
+use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1::Builder as ConnectionBuilder;
 use hyper::{Method, Request, Response};
 use hyper_util::rt::TokioIo;
@@ -10,7 +11,7 @@ use tower::service_fn;
 use tower::util::BoxCloneService;
 use tower::Service as _;
 
-use self::body::Body;
+type Body = Full<Bytes>;
 
 // GET /
 async fn index(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
@@ -24,7 +25,10 @@ async fn blog(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
 
 // 404 handler
 async fn not_found(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
-    Ok(Response::builder().status(404).body(Body::empty()).unwrap())
+    Ok(Response::builder()
+        .status(404)
+        .body(Body::default())
+        .unwrap())
 }
 
 // We can use `BoxCloneService` to erase the type of each handler service.
@@ -42,7 +46,12 @@ async fn route(router: Arc<Router>, req: Request<Incoming>) -> hyper::Result<Res
     let router = match router.get(req.method()) {
         Some(router) => router,
         // if there are no routes for this method, respond with 405 Method Not Allowed
-        None => return Ok(Response::builder().status(405).body(Body::empty()).unwrap()),
+        None => {
+            return Ok(Response::builder()
+                .status(405)
+                .body(Body::default())
+                .unwrap())
+        }
     };
 
     // find the service for this request path
@@ -97,49 +106,5 @@ async fn main() {
                 println!("Error serving connection: {:?}", err);
             }
         });
-    }
-}
-
-mod body {
-    use std::convert::Infallible;
-    use std::pin::Pin;
-    use std::task::{Context, Poll};
-
-    use hyper::body::{Body as HttpBody, Bytes, Frame};
-
-    pub enum Body {
-        Empty,
-        Once(Option<Bytes>),
-    }
-
-    impl HttpBody for Body {
-        type Data = Bytes;
-        type Error = Infallible;
-
-        fn poll_frame(
-            mut self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
-        ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-            match &mut self.as_mut().get_mut() {
-                Self::Empty => Poll::Ready(None),
-                Self::Once(val) => Poll::Ready(val.take().map(|bytes| Ok(Frame::data(bytes)))),
-            }
-        }
-    }
-
-    impl Body {
-        pub fn empty() -> Self {
-            Self::Empty
-        }
-    }
-
-    impl From<&str> for Body {
-        fn from(s: &str) -> Self {
-            if s.is_empty() {
-                Self::Empty
-            } else {
-                Self::Once(Some(Bytes::from(s.as_bytes().to_vec())))
-            }
-        }
     }
 }
