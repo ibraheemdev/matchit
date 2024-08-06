@@ -1,44 +1,57 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
-use hyper::server::Server;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response};
+use http_body_util::Full;
+use hyper::body::{Bytes, Incoming};
+use hyper::server::conn::http1::Builder as ConnectionBuilder;
+use hyper::{Method, Request, Response};
+use hyper_util::rt::TokioIo;
+use tokio::net::TcpListener;
+use tower::service_fn;
 use tower::util::BoxCloneService;
 use tower::Service as _;
 
+type Body = Full<Bytes>;
+
 // GET /
-async fn index(_req: Request<Body>) -> hyper::Result<Response<Body>> {
+async fn index(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     Ok(Response::new(Body::from("Hello, world!")))
 }
 
 // GET /blog
-async fn blog(_req: Request<Body>) -> hyper::Result<Response<Body>> {
+async fn blog(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     Ok(Response::new(Body::from("...")))
 }
 
 // 404 handler
-async fn not_found(_req: Request<Body>) -> hyper::Result<Response<Body>> {
-    Ok(Response::builder().status(404).body(Body::empty()).unwrap())
+async fn not_found(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
+    Ok(Response::builder()
+        .status(404)
+        .body(Body::default())
+        .unwrap())
 }
 
 // We can use `BoxCloneService` to erase the type of each handler service.
 //
 // We still need a `Mutex` around each service because `BoxCloneService` doesn't
 // require the service to implement `Sync`.
-type Service = Mutex<BoxCloneService<Request<Body>, Response<Body>, hyper::Error>>;
+type Service = Mutex<BoxCloneService<Request<Incoming>, Response<Body>, hyper::Error>>;
 
 // We use a `HashMap` to hold a `Router` for each HTTP method. This allows us
 // to register the same route for multiple methods.
 type Router = HashMap<Method, matchit::Router<Service>>;
 
-async fn route(router: Arc<Router>, req: Request<Body>) -> hyper::Result<Response<Body>> {
+async fn route(router: Arc<Router>, req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     // find the subrouter for this request method
     let router = match router.get(req.method()) {
         Some(router) => router,
         // if there are no routes for this method, respond with 405 Method Not Allowed
-        None => return Ok(Response::builder().status(405).body(Body::empty()).unwrap()),
+        None => {
+            return Ok(Response::builder()
+                .status(405)
+                .body(Body::default())
+                .unwrap())
+        }
     };
 
     // find the service for this request path
@@ -72,16 +85,26 @@ async fn main() {
         .insert("/blog", BoxCloneService::new(service_fn(blog)).into())
         .unwrap();
 
+    let listener = TcpListener::bind(("127.0.0.1", 3000)).await.unwrap();
+
     // boilerplate for the hyper service
     let router = Arc::new(router);
-    let make_service = make_service_fn(|_| {
-        let router = router.clone();
-        async { Ok::<_, Infallible>(service_fn(move |request| route(router.clone(), request))) }
-    });
 
-    // run the server
-    Server::bind(&([127, 0, 0, 1], 3000).into())
-        .serve(make_service)
-        .await
-        .unwrap()
+    loop {
+        let router = router.clone();
+        let (tcp, _) = listener.accept().await.unwrap();
+        tokio::task::spawn(async move {
+            if let Err(err) = ConnectionBuilder::new()
+                .serve_connection(
+                    TokioIo::new(tcp),
+                    hyper::service::service_fn(|request| async {
+                        route(router.clone(), request).await
+                    }),
+                )
+                .await
+            {
+                println!("Error serving connection: {:?}", err);
+            }
+        });
+    }
 }
