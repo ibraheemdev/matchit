@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1::Builder as ConnectionBuilder;
-use hyper::{Method, Request, Response};
+use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tower::service_fn;
@@ -26,7 +26,7 @@ async fn blog(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
 // 404 handler
 async fn not_found(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     Ok(Response::builder()
-        .status(404)
+        .status(StatusCode::NOT_FOUND)
         .body(Body::default())
         .unwrap())
 }
@@ -46,7 +46,7 @@ async fn route(router: Arc<Router>, req: Request<Incoming>) -> hyper::Result<Res
     let Some(router) = router.get(req.method()) else {
         // if there are no routes for this method, respond with 405 Method Not Allowed
         return Ok(Response::builder()
-            .status(405)
+            .status(StatusCode::METHOD_NOT_ALLOWED)
             .body(Body::default())
             .unwrap());
     };
