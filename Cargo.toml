@@ -25,7 +25,8 @@ routefinder = "0.5.2"
 # examples
 tower = { version = "0.4", features = ["make", "util"] }
 tokio = { version = "1", features = ["full"] }
-hyper = { version = "0.14", features = ["full"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 
 [features]
 default = []

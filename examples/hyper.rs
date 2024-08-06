@@ -1,25 +1,29 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 
-use hyper::server::Server;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response};
+use hyper::body::Incoming;
+use hyper::server::conn::http1::Builder as ConnectionBuilder;
+use hyper::{Method, Request, Response};
+use hyper_util::rt::TokioIo;
+use tokio::net::TcpListener;
+use tower::service_fn;
 use tower::util::BoxCloneService;
 use tower::Service as _;
 
+use self::body::Body;
+
 // GET /
-async fn index(_req: Request<Body>) -> hyper::Result<Response<Body>> {
+async fn index(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     Ok(Response::new(Body::from("Hello, world!")))
 }
 
 // GET /blog
-async fn blog(_req: Request<Body>) -> hyper::Result<Response<Body>> {
+async fn blog(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     Ok(Response::new(Body::from("...")))
 }
 
 // 404 handler
-async fn not_found(_req: Request<Body>) -> hyper::Result<Response<Body>> {
+async fn not_found(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     Ok(Response::builder().status(404).body(Body::empty()).unwrap())
 }
 
@@ -27,13 +31,13 @@ async fn not_found(_req: Request<Body>) -> hyper::Result<Response<Body>> {
 //
 // We still need a `Mutex` around each service because `BoxCloneService` doesn't
 // require the service to implement `Sync`.
-type Service = Mutex<BoxCloneService<Request<Body>, Response<Body>, hyper::Error>>;
+type Service = Mutex<BoxCloneService<Request<Incoming>, Response<Body>, hyper::Error>>;
 
 // We use a `HashMap` to hold a `Router` for each HTTP method. This allows us
 // to register the same route for multiple methods.
 type Router = HashMap<Method, matchit::Router<Service>>;
 
-async fn route(router: Arc<Router>, req: Request<Body>) -> hyper::Result<Response<Body>> {
+async fn route(router: Arc<Router>, req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     // find the subrouter for this request method
     let router = match router.get(req.method()) {
         Some(router) => router,
@@ -72,16 +76,70 @@ async fn main() {
         .insert("/blog", BoxCloneService::new(service_fn(blog)).into())
         .unwrap();
 
+    let listener = TcpListener::bind(("127.0.0.1", 3000)).await.unwrap();
+
     // boilerplate for the hyper service
     let router = Arc::new(router);
-    let make_service = make_service_fn(|_| {
-        let router = router.clone();
-        async { Ok::<_, Infallible>(service_fn(move |request| route(router.clone(), request))) }
-    });
 
-    // run the server
-    Server::bind(&([127, 0, 0, 1], 3000).into())
-        .serve(make_service)
-        .await
-        .unwrap()
+    loop {
+        let router = router.clone();
+        let (tcp, _) = listener.accept().await.unwrap();
+        tokio::task::spawn(async move {
+            if let Err(err) = ConnectionBuilder::new()
+                .serve_connection(
+                    TokioIo::new(tcp),
+                    hyper::service::service_fn(|request| async {
+                        route(router.clone(), request).await
+                    }),
+                )
+                .await
+            {
+                println!("Error serving connection: {:?}", err);
+            }
+        });
+    }
+}
+
+mod body {
+    use std::convert::Infallible;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    use hyper::body::{Body as HttpBody, Bytes, Frame};
+
+    pub enum Body {
+        Empty,
+        Once(Option<Bytes>),
+    }
+
+    impl HttpBody for Body {
+        type Data = Bytes;
+        type Error = Infallible;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+            match &mut self.as_mut().get_mut() {
+                Self::Empty => Poll::Ready(None),
+                Self::Once(val) => Poll::Ready(val.take().map(|bytes| Ok(Frame::data(bytes)))),
+            }
+        }
+    }
+
+    impl Body {
+        pub fn empty() -> Self {
+            Self::Empty
+        }
+    }
+
+    impl From<&str> for Body {
+        fn from(s: &str) -> Self {
+            if s.is_empty() {
+                Self::Empty
+            } else {
+                Self::Once(Some(Bytes::from(s.as_bytes().to_vec())))
+            }
+        }
+    }
 }
