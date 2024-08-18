@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1::Builder as ConnectionBuilder;
-use hyper::{Method, Request, Response};
+use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tower::service_fn;
@@ -26,7 +26,7 @@ async fn blog(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
 // 404 handler
 async fn not_found(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     Ok(Response::builder()
-        .status(404)
+        .status(StatusCode::NOT_FOUND)
         .body(Body::default())
         .unwrap())
 }
@@ -43,27 +43,23 @@ type Router = HashMap<Method, matchit::Router<Service>>;
 
 async fn route(router: Arc<Router>, req: Request<Incoming>) -> hyper::Result<Response<Body>> {
     // find the subrouter for this request method
-    let router = match router.get(req.method()) {
-        Some(router) => router,
+    let Some(router) = router.get(req.method()) else {
         // if there are no routes for this method, respond with 405 Method Not Allowed
-        None => {
-            return Ok(Response::builder()
-                .status(405)
-                .body(Body::default())
-                .unwrap())
-        }
+        return Ok(Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(Body::default())
+            .unwrap());
     };
 
     // find the service for this request path
-    match router.at(req.uri().path()) {
-        Ok(found) => {
-            // lock the service for a very short time, just to clone the service
-            let mut service = found.value.lock().unwrap().clone();
-            service.call(req).await
-        }
+    let Ok(found) = router.at(req.uri().path()) else {
         // if we there is no matching service, call the 404 handler
-        Err(_) => not_found(req).await,
-    }
+        return not_found(req).await;
+    };
+
+    // lock the service for a very short time, just to clone the service
+    let mut service = found.value.lock().unwrap().clone();
+    service.call(req).await
 }
 
 #[tokio::main]
