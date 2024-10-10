@@ -562,6 +562,11 @@ impl<T> Node<T> {
                 NodeType::Param => {
                     // Check for more path segments.
                     let i = match path.iter().position(|&c| c == b'/') {
+                        // Double `//` implying an empty parameter, no match.
+                        Some(0) => {
+                            try_backtrack!();
+                            return Err(MatchError::NotFound);
+                        }
                         // Found another segment.
                         Some(i) => i,
                         // This is the last path segment.

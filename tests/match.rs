@@ -579,6 +579,19 @@ fn escaped() {
 }
 
 #[test]
+fn empty_param() {
+    MatchTest {
+        routes: vec!["/y/{foo}", "/x/{foo}/z", "/z/{*xx}"],
+        matches: vec![
+            ("/y/", "", Err(())),
+            ("/x//z", "", Err(())),
+            ("/z/", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+#[test]
 fn basic() {
     MatchTest {
         routes: vec![
