@@ -3,6 +3,7 @@ use crate::{InsertError, MatchError, Params};
 
 use std::cell::UnsafeCell;
 use std::cmp::min;
+use std::collections::VecDeque;
 use std::ops::Range;
 use std::{fmt, mem};
 
@@ -657,6 +658,32 @@ impl<T> Node<T> {
         }
 
         Ok(priority)
+    }
+}
+
+impl<T> Node<T> {
+    /// Iterates over the tree and calls the given visitor function
+    /// with fully resolved path and its value.
+    pub fn for_each<V: FnMut(String, T) -> bool >(self, mut visitor: V)  {
+        let mut queue = VecDeque::new();
+        queue.push_back(self);
+        while let Some(mut node) = queue.pop_front() {
+            if node.children.is_empty() {
+                denormalize_params(&mut node.prefix, &node.remapping);
+                let path = String::from_utf8(node.prefix.into_unescaped()).unwrap();
+                let value = node.value.take().map(UnsafeCell::into_inner);
+                if !visitor(path, value.unwrap()) {
+                    return;
+                }
+            } else {
+                for mut child in node.children {
+                    let mut prefix = node.prefix.clone();
+                    prefix.append(&child.prefix);
+                    child.prefix = prefix;
+                    queue.push_front(child);
+                }
+            }
+        }
     }
 }
 

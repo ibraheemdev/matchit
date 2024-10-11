@@ -133,6 +133,39 @@ impl<T> Router<T> {
     pub fn check_priorities(&self) -> Result<u32, (u32, u32)> {
         self.root.check_priorities()
     }
+
+
+    /// Merge a given router into current one.
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use matchit::Router;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut root = Router::new();
+    /// root.insert("/home", "Welcome!")?;
+    ///
+    /// let mut child = Router::new();
+    /// child.insert("/users/{id}", "A User")?;
+    ///
+    /// root.merge(child)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn merge(&mut self, other: Self) -> Result<(), InsertError> {
+        let mut result = Ok(());
+        other.root.for_each(|path, value| {
+            match self.insert(path, value) {
+                Ok(..) => true,
+                Err(err) => {
+                    result = Err(err);
+                    false
+                }
+            }
+        });
+        result
+    }
 }
 
 /// A successful match consisting of the registered value
