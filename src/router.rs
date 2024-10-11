@@ -149,22 +149,20 @@ impl<T> Router<T> {
     /// let mut child = Router::new();
     /// child.insert("/users/{id}", "A User")?;
     ///
-    /// root.merge(child)?;
+    /// root.merge(child);
+    /// assert!(root.at("/users/1").is_ok());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn merge(&mut self, other: Self) -> Result<(), InsertError> {
-        let mut result = Ok(());
+    pub fn merge(&mut self, other: Self) -> Vec<InsertError> {
+        let mut errors = vec![];
         other.root.for_each(|path, value| {
-            match self.insert(path, value) {
-                Ok(..) => true,
-                Err(err) => {
-                    result = Err(err);
-                    false
-                }
+            if let Err(err) = self.insert(path, value) {
+                errors.push(err);
             }
+            true
         });
-        result
+        errors
     }
 }
 
