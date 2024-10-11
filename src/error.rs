@@ -15,8 +15,8 @@ pub enum InsertError {
     },
     /// Only one parameter per route segment is allowed.
     ///
-    /// Static segments are also allowed before a parameter, but not after it. For example,
-    /// `/foo-{bar}` is a valid route, but `/{bar}-foo` is not.
+    /// For example, `/foo-{bar}` and `/{bar}-foo` are valid routes, but `/{foo}-{bar}`
+    /// is not.
     InvalidParamSegment,
     /// Parameters must be registered with a valid name and matching braces.
     ///

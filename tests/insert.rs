@@ -48,6 +48,19 @@ fn wildcard_conflict() {
         ("/user_{bar}", Err(conflict("/user_{name}"))),
         ("/id{id}", Ok(())),
         ("/id/{id}", Ok(())),
+        ("/x/{id}", Ok(())),
+        ("/x/{id}/", Ok(())),
+        ("/x/{id}y", Err(conflict("/x/{id}/"))),
+        ("/x/{id}y/", Err(conflict("/x/{id}/"))),
+        ("/x/x{id}", Ok(())),
+        ("/x/x{id}y", Err(conflict("/x/x{id}"))),
+        ("/qux/id", Ok(())),
+        ("/qux/{id}y", Ok(())),
+        ("/qux/{id}", Err(conflict("/qux/{id}y"))),
+        ("/qux/{id}/", Err(conflict("/qux/{id}y"))),
+        ("/qux/{id}x", Err(conflict("/qux/{id}y"))),
+        ("/qux/x{id}y", Ok(())),
+        ("/qux/x{id}", Err(conflict("/qux/x{id}y"))),
     ])
     .run()
 }
@@ -210,7 +223,6 @@ fn invalid_param() {
         ("}", Err(InsertError::InvalidParam)),
         ("x{y", Err(InsertError::InvalidParam)),
         ("x}", Err(InsertError::InvalidParam)),
-        ("/{foo}s", Err(InsertError::InvalidParamSegment)),
     ])
     .run();
 }

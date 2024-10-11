@@ -581,11 +581,50 @@ fn escaped() {
 #[test]
 fn empty_param() {
     MatchTest {
-        routes: vec!["/y/{foo}", "/x/{foo}/z", "/z/{*xx}"],
+        routes: vec![
+            "/y/{foo}",
+            "/x/{foo}/z",
+            "/z/{*foo}",
+            "/a/x{foo}",
+            "/b/{foo}x",
+        ],
         matches: vec![
             ("/y/", "", Err(())),
             ("/x//z", "", Err(())),
             ("/z/", "", Err(())),
+            ("/a/x", "", Err(())),
+            ("/b/x", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+#[test]
+fn wildcard_suffix() {
+    MatchTest {
+        routes: vec![
+            "/",
+            "/{foo}x",
+            "/foox",
+            "/{foo}x/bar",
+            "/{foo}x/bar/baz",
+            "/x{foo}",
+            "/x{foo}/bar",
+        ],
+        matches: vec![
+            ("/", "/", p! {}),
+            ("/foox", "/foox", p! {}),
+            ("/barx", "/{foo}x", p! { "foo" => "bar" }),
+            ("/mx", "/{foo}x", p! { "foo" => "m" }),
+            ("/mx/", "", Err(())),
+            ("/mxm", "", Err(())),
+            ("/mx/bar", "/{foo}x/bar", p! { "foo" => "m" }),
+            ("/mxm/bar", "", Err(())),
+            ("/x", "", Err(())),
+            ("/xfoo", "/x{foo}", p! { "foo" => "foo" }),
+            ("/xfoox", "/x{foo}", p! { "foo" => "foox" }),
+            ("/xfoox/bar", "/x{foo}/bar", p! { "foo" => "foox" }),
+            ("/xfoox/bar/baz", "/{foo}x/bar/baz", p! { "foo" => "xfoo" }),
         ],
     }
     .run();
