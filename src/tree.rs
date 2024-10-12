@@ -664,19 +664,18 @@ impl<T> Node<T> {
 impl<T> Node<T> {
     /// Iterates over the tree and calls the given visitor function
     /// with fully resolved path and its value.
-    pub fn for_each<V: FnMut(String, T) -> bool>(&self, mut visitor: V) {
+    pub fn for_each<V: FnMut(String, T) -> bool>(self, mut visitor: V) {
         let mut queue = VecDeque::new();
         queue.push_back((self.prefix.clone(), self));
-        while let Some((mut prefix, node)) = queue.pop_front() {
+        while let Some((mut prefix, mut node)) = queue.pop_front() {
             denormalize_params(&mut prefix, &node.remapping);
-            if node.value.is_some() {
+            if let Some(value) = node.value.take() {
                 let path = String::from_utf8(prefix.unescaped().to_vec()).unwrap();
-                let value = unsafe { node.value.as_ref().map(|x| std::ptr::read(x.get())) };
-                if !visitor(path, value.unwrap()) {
+                if !visitor(path, value.into_inner()) {
                     return;
                 }
             }
-            for child in node.children.iter() {
+            for child in node.children {
                 let mut prefix = prefix.clone();
                 prefix.append(&child.prefix);
                 queue.push_front((prefix, child));

@@ -10,7 +10,7 @@ fn merge_ok() {
     assert!(child.insert("/baz", "baz").is_ok());
     assert!(child.insert("/xyz/{id}", "xyz").is_ok());
 
-    assert!(root.merge(child).is_empty());
+    assert!(root.merge(child).is_ok());
 
     assert_eq!(root.at("/foo").map(|m| *m.value), Ok("foo"));
     assert_eq!(root.at("/bar/1").map(|m| *m.value), Ok("bar"));
@@ -28,7 +28,7 @@ fn merge_conflict() {
     assert!(child.insert("/foo", "foo").is_ok());
     assert!(child.insert("/bar", "bar").is_ok());
 
-    let errors = root.merge(child);
+    let errors = root.merge(child).unwrap_err();
 
     assert_eq!(
         errors.get(0),
@@ -36,6 +36,7 @@ fn merge_conflict() {
             with: "/bar".into()
         })
     );
+
     assert_eq!(
         errors.get(1),
         Some(&InsertError::Conflict {
@@ -52,7 +53,7 @@ fn merge_nested() {
     let mut child = Router::new();
     assert!(child.insert("/foo/bar", "bar").is_ok());
 
-    assert!(root.merge(child).is_empty());
+    assert!(root.merge(child).is_ok());
 
     assert_eq!(root.at("/foo").map(|m| *m.value), Ok("foo"));
     assert_eq!(root.at("/foo/bar").map(|m| *m.value), Ok("bar"));
