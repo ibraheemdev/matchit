@@ -30,8 +30,18 @@ fn merge_conflict() {
 
     let errors = root.merge(child);
 
-    assert_eq!(errors.get(0), Some(&InsertError::Conflict {with: "/bar".into()}));
-    assert_eq!(errors.get(1), Some(&InsertError::Conflict {with: "/foo".into()}));
+    assert_eq!(
+        errors.get(0),
+        Some(&InsertError::Conflict {
+            with: "/bar".into()
+        })
+    );
+    assert_eq!(
+        errors.get(1),
+        Some(&InsertError::Conflict {
+            with: "/foo".into()
+        })
+    );
 }
 
 #[test]

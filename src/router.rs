@@ -134,7 +134,6 @@ impl<T> Router<T> {
         self.root.check_priorities()
     }
 
-
     /// Merge a given router into current one.
     ///
     ///
