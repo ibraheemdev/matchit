@@ -25,24 +25,29 @@ fn merge_conflict() {
     assert!(root.insert("/bar", "bar").is_ok());
 
     let mut child = Router::new();
-    assert!(child.insert("/foo", "foo").is_ok());
-    assert!(child.insert("/bar", "bar").is_ok());
+    assert!(child.insert("/foo", "changed").is_ok());
+    assert!(child.insert("/bar", "changed").is_ok());
+    assert!(child.insert("/baz", "baz").is_ok());
 
     let errors = root.merge(child).unwrap_err();
 
     assert_eq!(
         errors.get(0),
         Some(&InsertError::Conflict {
-            with: "/bar".into()
+            with: "/foo".into()
         })
     );
 
     assert_eq!(
         errors.get(1),
         Some(&InsertError::Conflict {
-            with: "/foo".into()
+            with: "/bar".into()
         })
     );
+
+    assert_eq!(root.at("/foo").map(|m| *m.value), Ok("foo"));
+    assert_eq!(root.at("/bar").map(|m| *m.value), Ok("bar"));
+    assert_eq!(root.at("/baz").map(|m| *m.value), Ok("baz"));
 }
 
 #[test]
