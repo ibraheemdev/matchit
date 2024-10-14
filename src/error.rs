@@ -2,6 +2,7 @@ use crate::escape::{UnescapedRef, UnescapedRoute};
 use crate::tree::{denormalize_params, Node};
 
 use std::fmt;
+use std::ops::Deref;
 
 /// Represents errors that can occur when inserting a new route.
 #[non_exhaustive]
@@ -94,6 +95,29 @@ impl InsertError {
         InsertError::Conflict {
             with: String::from_utf8(route.into_unescaped()).unwrap(),
         }
+    }
+}
+
+/// A failed merge attempt.
+#[derive(Debug, Clone)]
+pub struct MergeError(pub(crate) Vec<InsertError>);
+
+impl fmt::Display for MergeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for error in self.0.iter() {
+            writeln!(f, "{}", error)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for MergeError {}
+
+impl Deref for MergeError {
+    type Target = Vec<InsertError>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

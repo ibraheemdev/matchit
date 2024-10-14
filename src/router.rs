@@ -1,3 +1,4 @@
+use crate::error::MergeError;
 use crate::tree::Node;
 use crate::{InsertError, MatchError, Params};
 
@@ -132,6 +133,39 @@ impl<T> Router<T> {
     #[cfg(feature = "__test_helpers")]
     pub fn check_priorities(&self) -> Result<u32, (u32, u32)> {
         self.root.check_priorities()
+    }
+
+    /// Merge a given router into current one.
+    /// Returns a list of [`InsertError`] for every failed insertion.
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use matchit::Router;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut root = Router::new();
+    /// root.insert("/home", "Welcome!")?;
+    ///
+    /// let mut child = Router::new();
+    /// child.insert("/users/{id}", "A User")?;
+    ///
+    /// root.merge(child)?;
+    /// assert!(root.at("/users/1").is_ok());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn merge(&mut self, other: Self) -> Result<(), MergeError> {
+        let mut errors = vec![];
+        other.root.for_each(|path, value| {
+            if let Err(err) = self.insert(path, value) {
+                errors.push(err);
+            }
+            true
+        });
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(MergeError(errors))
+        }
     }
 }
 
