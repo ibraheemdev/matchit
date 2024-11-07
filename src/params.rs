@@ -51,6 +51,12 @@ pub struct Params<'k, 'v> {
     kind: ParamsKind<'k, 'v>,
 }
 
+impl Default for Params<'_, '_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Most routes have a small number of dynamic parameters, so we can avoid
 // heap allocations in the common case.
 const SMALL: usize = 3;
@@ -63,7 +69,8 @@ enum ParamsKind<'k, 'v> {
 }
 
 impl<'k, 'v> Params<'k, 'v> {
-    pub(crate) fn new() -> Self {
+    /// Create an empty list of parameters.
+    pub fn new() -> Self {
         Self {
             kind: ParamsKind::Small([Param::EMPTY; 3], 0),
         }
