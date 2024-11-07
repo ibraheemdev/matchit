@@ -136,7 +136,11 @@ impl<T> Router<T> {
     }
 
     /// Merge a given router into current one.
+    ///
     /// Returns a list of [`InsertError`] for every failed insertion.
+    /// Note that this can result in a partially successful merge if
+    /// a subset of routes conflict.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -154,13 +158,13 @@ impl<T> Router<T> {
     /// # }
     /// ```
     pub fn merge(&mut self, other: Self) -> Result<(), MergeError> {
-        let mut errors = vec![];
+        let mut errors = Vec::new();
         other.root.for_each(|path, value| {
             if let Err(err) = self.insert(path, value) {
                 errors.push(err);
             }
-            true
         });
+
         if errors.is_empty() {
             Ok(())
         } else {

@@ -664,16 +664,19 @@ impl<T> Node<T> {
 impl<T> Node<T> {
     /// Iterates over the tree and calls the given visitor function
     /// with fully resolved path and its value.
-    pub fn for_each<V: FnMut(String, T) -> bool>(self, mut visitor: V) {
+    pub fn for_each<V: FnMut(String, T)>(self, mut visitor: V) {
         let mut queue = VecDeque::from([(self.prefix.clone(), self)]);
+
+        // Perform a BFS on the routing tree.
         while let Some((mut prefix, mut node)) = queue.pop_front() {
             denormalize_params(&mut prefix, &node.remapping);
+
             if let Some(value) = node.value.take() {
                 let path = String::from_utf8(prefix.unescaped().to_vec()).unwrap();
-                if !visitor(path, value.into_inner()) {
-                    return;
-                }
+                visitor(path, value.into_inner());
             }
+
+            // Traverse the child nodes.
             for child in node.children {
                 let mut prefix = prefix.clone();
                 prefix.append(&child.prefix);
