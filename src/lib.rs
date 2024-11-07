@@ -119,7 +119,7 @@ mod params;
 mod router;
 mod tree;
 
-pub use error::{InsertError, MatchError};
+pub use error::{InsertError, MatchError, MergeError};
 pub use params::{Params, ParamsIter};
 pub use router::{Match, Router};
 

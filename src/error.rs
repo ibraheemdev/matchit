@@ -99,14 +99,25 @@ impl InsertError {
 }
 
 /// A failed merge attempt.
-#[derive(Debug, Clone)]
+///
+/// See [`Router::merge`](crate::Router::merge) for details.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MergeError(pub(crate) Vec<InsertError>);
+
+impl MergeError {
+    /// Returns a list of [`InsertError`] for every insertion that failed
+    /// during the merge.
+    pub fn into_errors(self) -> Vec<InsertError> {
+        self.0
+    }
+}
 
 impl fmt::Display for MergeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for error in self.0.iter() {
             writeln!(f, "{}", error)?;
         }
+
         Ok(())
     }
 }
