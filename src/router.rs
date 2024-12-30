@@ -117,12 +117,12 @@ impl<T> Router<T> {
     /// assert_eq!(router.remove("/home/{id}/"), None);
     ///
     /// router.insert("/home/{id}/", "Hello!");
-    /// // the route does not match
+    /// // The route does not match.
     /// assert_eq!(router.remove("/home/{user}"), None);
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     ///
     /// router.insert("/home/{id}/", "Hello!");
-    /// // invalid route
+    /// // Invalid route.
     /// assert_eq!(router.remove("/home/{id"), None);
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     /// ```

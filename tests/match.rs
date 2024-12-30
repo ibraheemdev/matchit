@@ -92,7 +92,11 @@ impl MatchTest {
                     assert!(router.at(path).unwrap().value.contains("Z"));
                     router.at_mut(path).unwrap().value.pop();
                 }
-                Err(_) => params.unwrap_err(),
+                Err(err) => {
+                    if let Ok(params) = params {
+                        panic!("{err} for {path} ({params:?})");
+                    }
+                }
             }
         }
     }
@@ -625,6 +629,38 @@ fn wildcard_suffix() {
             ("/xfoox", "/x{foo}", p! { "foo" => "foox" }),
             ("/xfoox/bar", "/x{foo}/bar", p! { "foo" => "foox" }),
             ("/xfoox/bar/baz", "/{foo}x/bar/baz", p! { "foo" => "xfoo" }),
+        ],
+    }
+    .run();
+}
+
+#[test]
+fn mixed_wildcard_suffix() {
+    MatchTest {
+        routes: vec![
+            "/",
+            "/foo/b",
+            "/foo/{b}",
+            "/foo/{b}one",
+            "/foo/{b}one/",
+            "/foo/{b}two",
+            "/foo/{b}/one",
+            "/foo/{b}one/one",
+            "/foo/{b}two/one",
+            "/foo/{b}one/one/",
+        ],
+        matches: vec![
+            ("/", "/", p! {}),
+            ("/foo/b", "/foo/b", p! {}),
+            ("/foo/bb", "/foo/{b}", p! { "b" => "bb" }),
+            ("/foo/bone", "/foo/{b}one", p! { "b" => "b" }),
+            ("/foo/bone/", "/foo/{b}one/", p! { "b" => "b" }),
+            ("/foo/btwo", "/foo/{b}two", p! { "b" => "b" }),
+            ("/foo/btwo/", "", Err(())),
+            ("/foo/b/one", "/foo/{b}/one", p! { "b" => "b" }),
+            ("/foo/bone/one", "/foo/{b}one/one", p! { "b" => "b" }),
+            ("/foo/bone/one/", "/foo/{b}one/one/", p! { "b" => "b" }),
+            ("/foo/btwo/one", "/foo/{b}two/one", p! { "b" => "b" }),
         ],
     }
     .run();

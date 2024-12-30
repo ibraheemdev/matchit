@@ -4,8 +4,8 @@ use std::{fmt, iter, mem, slice};
 #[derive(PartialEq, Eq, Ord, PartialOrd, Default, Copy, Clone)]
 struct Param<'k, 'v> {
     // Keys and values are stored as byte slices internally by the router
-    // to avoid UTF8 checks when slicing, but UTF8 is still respected,
-    // so these slices are valid strings.
+    // to avoid utf8 checks when slicing. This allows us to perform utf8
+    // validation lazily without resorting to unsafe code.
     key: &'k [u8],
     value: &'v [u8],
 }
@@ -125,6 +125,7 @@ impl<'k, 'v> Params<'k, 'v> {
     /// Inserts a key value parameter pair into the list.
     pub(crate) fn push(&mut self, key: &'k [u8], value: &'v [u8]) {
         #[cold]
+        #[inline(never)]
         fn drain_to_vec<T: Default>(len: usize, elem: T, arr: &mut [T; SMALL]) -> Vec<T> {
             let mut vec = Vec::with_capacity(len + 1);
             vec.extend(arr.iter_mut().map(mem::take));
@@ -143,6 +144,7 @@ impl<'k, 'v> Params<'k, 'v> {
                 arr[*len] = param;
                 *len += 1;
             }
+
             ParamsKind::Large(vec) => vec.push(param),
         }
     }
@@ -156,6 +158,7 @@ impl<'k, 'v> Params<'k, 'v> {
                 .map(|param| &mut param.key)
                 .enumerate()
                 .for_each(f),
+
             ParamsKind::Large(vec) => vec
                 .iter_mut()
                 .map(|param| &mut param.key)
@@ -191,7 +194,7 @@ enum ParamsIterKind<'ps, 'k, 'v> {
     Large(slice::Iter<'ps, Param<'k, 'v>>),
 }
 
-impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
+impl<'k, 'v> Iterator for ParamsIter<'_, 'k, 'v> {
     type Item = (&'k str, &'v str);
 
     fn next(&mut self) -> Option<Self::Item> {

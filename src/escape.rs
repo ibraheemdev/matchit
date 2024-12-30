@@ -173,7 +173,7 @@ impl<'a> std::ops::Deref for UnescapedRef<'a> {
     }
 }
 
-impl<'a> fmt::Debug for UnescapedRef<'a> {
+impl fmt::Debug for UnescapedRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UnescapedRef")
             .field("inner", &std::str::from_utf8(self.inner))
