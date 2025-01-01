@@ -48,12 +48,16 @@ pub(crate) enum NodeType {
 
     /// A route parameter, e.g. '/{id}'.
     ///
-    /// The leaves of a parameter node are suffixes within
-    /// the segment, i.e. before the next '/', sorted by length.
-    /// This allows for a reverse linear search to determine the
-    /// correct leaf. It would also be possible to use a reverse
-    /// prefix-tree here, but is likely not worth the complexity.
-    Param,
+    /// If `suffix` is `false`, the only child of this node is
+    /// a static '/', allowing for a fast path when searching.
+    /// Otherwise, the route may have static suffixes, e.g. '/{id}.png'.
+    ///
+    /// The leaves of a parameter node are the static suffixes
+    /// sorted by length. This allows for a reverse linear search
+    /// to determine the correct leaf. It would also be possible to
+    /// use a reverse prefix-tree here, but is likely not worth the
+    /// complexity.
+    Param { suffix: bool },
 
     /// A catch-all parameter, e.g. '/{*file}'.
     CatchAll,
@@ -144,7 +148,7 @@ impl<T> Node<T> {
 
             // For parameters with a suffix, we have to find the matching suffix or
             // create a new child node.
-            if current.node_type == NodeType::Param {
+            if matches!(current.node_type, NodeType::Param { .. }) {
                 let terminator = remaining
                     .iter()
                     .position(|&b| b == b'/')
@@ -169,14 +173,13 @@ impl<T> Node<T> {
                 }
 
                 // If there is no matching suffix, create a new suffix node.
-                let child = Node {
+                let child = current.add_suffix_child(Node {
                     prefix: suffix.to_owned(),
                     node_type: NodeType::Static,
                     priority: 1,
                     ..Node::default()
-                };
-
-                let child = current.add_suffix_child(child);
+                });
+                current.node_type = NodeType::Param { suffix: true };
                 current = &mut current.children[child];
 
                 // If this is the final route segment, insert the value.
@@ -477,8 +480,7 @@ impl<T> Node<T> {
             }
 
             // Otherwise, we're inserting a regular route parameter.
-            assert_eq!(prefix[wildcard.clone()][0], b'{');
-
+            //
             // Add the prefix before the wildcard into the current node.
             if wildcard.start > 0 {
                 current.prefix = prefix.slice_until(wildcard.start).to_owned();
@@ -503,9 +505,10 @@ impl<T> Node<T> {
             }
 
             // Add the parameter as a child node.
+            let has_suffix = !matches!(*suffix, b"" | b"/");
             let child = current.add_child(Node {
                 priority: 1,
-                node_type: NodeType::Param,
+                node_type: NodeType::Param { suffix: has_suffix },
                 prefix: wildcard.to_owned(),
                 ..Node::default()
             });
@@ -513,7 +516,14 @@ impl<T> Node<T> {
             current.wild_child = true;
             current = &mut current.children[child];
 
-            // Add the static suffix before the '/', if there is one.
+            // Add the static suffix until the '/', if there is one.
+            //
+            // Note that for '/' suffixes where `suffix: false`, this
+            // unconditionally introduces an extra node for the '/'
+            // without attempting to merge with the remaining route.
+            // This makes converting a non-suffix parameter node into
+            // a suffix one easier during insertion, but slightly hurts
+            // performance.
             if !suffix.is_empty() {
                 let child = current.add_suffix_child(Node {
                     priority: 1,
@@ -534,7 +544,6 @@ impl<T> Node<T> {
             // If there is a static segment after the '/', setup the node
             // for the rest of the route.
             if prefix[0] != b'{' || prefix.is_escaped(0) {
-                assert!(prefix[0] != b'{');
                 current.indices.push(prefix[0]);
                 let child = current.add_child(Node {
                     priority: 1,
@@ -638,7 +647,55 @@ impl<T> Node<T> {
                 // Continue searching in the wildcard child, which is kept at the end of the list.
                 node = node.children.last().unwrap();
                 match node.node_type {
-                    NodeType::Param => {
+                    NodeType::Param { suffix: false } => {
+                        // Check for more path segments.
+                        let terminator = match path.iter().position(|&c| c == b'/') {
+                            // Double `//` implying an empty parameter, no match.
+                            Some(0) => break 'walk,
+
+                            // Found another segment.
+                            Some(i) => i,
+
+                            // This is the last path segment.
+                            None => {
+                                // If this is the last path segment and there is a matching
+                                // value without a suffix, we have a match.
+                                let Some(ref value) = node.value else {
+                                    break 'walk;
+                                };
+
+                                // Store the parameter value.
+                                // Parameters are normalized so the key is irrelevant for now.
+                                params.push(b"", path);
+
+                                // Remap the keys of any route parameters we accumulated during the
+                                params
+                                    .for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
+
+                                return Ok((value, params));
+                            }
+                        };
+
+                        // Found another path segment.
+                        let (param, rest) = path.split_at(terminator);
+
+                        // If there is a static child, continue the search.
+                        let [child] = node.children.as_slice() else {
+                            break 'walk;
+                        };
+
+                        // Store the parameter value.
+                        // Parameters are normalized so the key is irrelevant for now.
+                        params.push(b"", param);
+
+                        // Continue searching.
+                        path = rest;
+                        node = child;
+                        backtracking = false;
+                        continue 'walk;
+                    }
+
+                    NodeType::Param { suffix: true } => {
                         // Check for more path segments.
                         let slash = path.iter().position(|&c| c == b'/');
                         let terminator = match slash {

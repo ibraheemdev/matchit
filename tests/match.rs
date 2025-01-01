@@ -648,6 +648,12 @@ fn mixed_wildcard_suffix() {
             "/foo/{b}one/one",
             "/foo/{b}two/one",
             "/foo/{b}one/one/",
+            "/bar/{b}one",
+            "/bar/{b}",
+            "/bar/{b}/baz",
+            "/bar/{b}one/baz",
+            "/baz/{b}/bar",
+            "/baz/{b}one/bar",
         ],
         matches: vec![
             ("/", "/", p! {}),
@@ -661,6 +667,12 @@ fn mixed_wildcard_suffix() {
             ("/foo/bone/one", "/foo/{b}one/one", p! { "b" => "b" }),
             ("/foo/bone/one/", "/foo/{b}one/one/", p! { "b" => "b" }),
             ("/foo/btwo/one", "/foo/{b}two/one", p! { "b" => "b" }),
+            ("/bar/b", "/bar/{b}", p! { "b" => "b" }),
+            ("/bar/b/baz", "/bar/{b}/baz", p! { "b" => "b" }),
+            ("/bar/bone", "/bar/{b}one", p! { "b" => "b" }),
+            ("/bar/bone/baz", "/bar/{b}one/baz", p! { "b" => "b" }),
+            ("/baz/b/bar", "/baz/{b}/bar", p! { "b" => "b" }),
+            ("/baz/bone/bar", "/baz/{b}one/bar", p! { "b" => "b" }),
         ],
     }
     .run();

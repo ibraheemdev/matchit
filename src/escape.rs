@@ -1,6 +1,7 @@
 use std::{fmt, ops::Range};
 
-/// An unescaped route that keeps track of the position of escaped characters ('{{' or '}}').
+/// An unescaped route that keeps track of the position of
+/// escaped characters, i.e. '{{' or '}}'.
 ///
 /// Note that this type dereferences to `&[u8]`.
 #[derive(Clone, Default)]
@@ -107,7 +108,7 @@ impl fmt::Debug for UnescapedRoute {
 /// A reference to an `UnescapedRoute`.
 #[derive(Copy, Clone)]
 pub struct UnescapedRef<'a> {
-    pub inner: &'a [u8],
+    inner: &'a [u8],
     escaped: &'a [usize],
     // An offset applied to each escaped index.
     offset: isize,
