@@ -74,6 +74,7 @@ fn invalid_catchall() {
     InsertTest(vec![
         ("/non-leading-{*catchall}", Ok(())),
         ("/foo/bar{*catchall}", Ok(())),
+        ("/src/{*filepath}x", Err(InsertError::InvalidCatchAll)),
         ("/src/{*filepath}/x", Err(InsertError::InvalidCatchAll)),
         ("/src2/", Ok(())),
         ("/src2/{*filepath}/x", Err(InsertError::InvalidCatchAll)),

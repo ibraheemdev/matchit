@@ -26,8 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The router supports dynamic route segments. These can either be named or catch-all parameters.
 
-Named parameters like `/{id}` match anything until the next `/` or the end of the path. Note that named parameters must be followed
-by a `/` or the end of the route. Dynamic suffixes are not currently supported.
+Named parameters like `/{id}` match anything until the next static segment or the end of the path.
 
 ```rust,ignore
 let mut m = Router::new();
@@ -36,6 +35,15 @@ m.insert("/users/{id}", true)?;
 assert_eq!(m.at("/users/1")?.params.get("id"), Some("1"));
 assert_eq!(m.at("/users/23")?.params.get("id"), Some("23"));
 assert!(m.at("/users").is_err());
+```
+
+Prefixes and suffixes within a segment are also supported. However, there may only be a single named parameter per route segment.
+```rust,ignore
+let mut m = Router::new();
+m.insert("/images/img{id}.png", true)?;
+
+assert_eq!(m.at("/images/img1.png")?.params.get("id"), Some("1"));
+assert!(m.at("/images/img1.jpg").is_err());
 ```
 
 Catch-all parameters start with `*` and match anything until the end of the path. They must always be at the **end** of the route.
@@ -47,7 +55,7 @@ m.insert("/{*p}", true)?;
 assert_eq!(m.at("/foo.js")?.params.get("p"), Some("foo.js"));
 assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 
-// note that this will not match
+// Note that this would lead to an empty parameter.
 assert!(m.at("/").is_err());
 ```
 
@@ -58,10 +66,10 @@ let mut m = Router::new();
 m.insert("/{{hello}}", true)?;
 m.insert("/{hello}", true)?;
 
-// match the static route
+// Match the static route.
 assert!(m.at("/{hello}")?.value);
 
-// match the dynamic route
+// Match the dynamic route.
 assert_eq!(m.at("/hello")?.params.get("hello"), Some("hello"));
 ```
 
@@ -71,9 +79,9 @@ Static and dynamic route segments are allowed to overlap. If they do, static seg
 
 ```rust,ignore
 let mut m = Router::new();
-m.insert("/", "Welcome!").unwrap();      // priority: 1
-m.insert("/about", "About Me").unwrap(); // priority: 1
-m.insert("/{*filepath}", "...").unwrap();  // priority: 2
+m.insert("/", "Welcome!").unwrap();      // Priority: 1
+m.insert("/about", "About Me").unwrap(); // Priority: 1
+m.insert("/{*filepath}", "...").unwrap();  // Priority: 2
 ```
 
 ## How does it work?
