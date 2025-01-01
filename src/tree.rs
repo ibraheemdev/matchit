@@ -145,13 +145,13 @@ impl<T> Node<T> {
             // For parameters with a suffix, we have to find the matching suffix or
             // create a new child node.
             if matches!(node.node_type, NodeType::Param { .. }) {
-                let rest = remaining
+                let terminator = remaining
                     .iter()
                     .position(|&b| b == b'/')
                     .map(|b| b + 1)
                     .unwrap_or(remaining.len());
 
-                let suffix = remaining.slice_until(rest);
+                let suffix = remaining.slice_until(terminator);
 
                 for (i, child) in node.children.iter().enumerate() {
                     // Find a matching suffix.
@@ -178,7 +178,7 @@ impl<T> Node<T> {
                 node = &mut node.children[child];
 
                 // If this is the final route segment, insert the value.
-                if rest == remaining.len() {
+                if terminator == remaining.len() {
                     node.value = Some(UnsafeCell::new(val));
                     node.remapping = remapping;
                     return Ok(());
@@ -186,7 +186,7 @@ impl<T> Node<T> {
 
                 // Otherwise, the previous node will hold only the suffix and we
                 // need to create a new child for the remaining route.
-                remaining = remaining.slice_off(rest);
+                remaining = remaining.slice_off(terminator);
 
                 // Create a static node unless we are inserting a parameter.
                 if remaining[0] != b'{' || remaining.is_escaped(0) {
@@ -468,16 +468,30 @@ impl<T> Node<T> {
             let next = rest[0];
             remaining = rest;
 
-            // If there is a single child node, we can continue searching in the child.
-            if node.children.len() == 1 {
-                // The route matches, remove the node.
-                if node.children[0].prefix.unescaped() == remaining {
-                    return node.remove_child(0, &remapping);
-                }
+            // If this is a parameter node, we have to find the matching suffix.
+            if matches!(node.node_type, NodeType::Param { .. }) {
+                let terminator = remaining
+                    .iter()
+                    .position(|&b| b == b'/')
+                    .map(|b| b + 1)
+                    .unwrap_or(remaining.len());
 
-                // Otherwise, continue searching.
-                node = &mut node.children[0];
-                continue 'walk;
+                let suffix = &remaining[..terminator];
+
+                for (i, child) in node.children.iter().enumerate() {
+                    // Find the matching suffix.
+                    if *child.prefix == *suffix {
+                        // If this is the end of the path, remove the suffix node.
+                        if terminator == remaining.len() {
+                            return node.remove_child(i, &remapping);
+                        }
+
+                        // Otherwise, continue searching.
+                        remaining = &remaining[terminator - child.prefix.len()..];
+                        node = &mut node.children[i];
+                        continue 'walk;
+                    }
+                }
             }
 
             // Find a child node that matches the next character in the route.
@@ -493,7 +507,7 @@ impl<T> Node<T> {
             }
 
             // If there is no matching wildcard child, there is no matching route.
-            if !node.wild_child || remaining.first().zip(remaining.get(2)) != Some((&b'{', &b'}')) {
+            if !node.wild_child {
                 return None;
             }
 
@@ -518,25 +532,21 @@ impl<T> Node<T> {
 
         // If the node does not have any children, we can remove it completely.
         let value = if self.children[i].children.is_empty() {
-            // Removing a single child with no indices.
-            if self.children.len() == 1 && self.indices.is_empty() {
-                self.wild_child = false;
-                self.children.remove(0).value.take()
-            } else {
-                // Remove the child node.
-                let child = self.children.remove(i);
+            // Remove the child node.
+            let child = self.children.remove(i);
 
-                match child.node_type {
-                    // Remove the index if we removed a static prefix.
-                    NodeType::Static => {
-                        self.indices.remove(i);
-                    }
-                    // Otherwise, we removed a wildcard.
-                    _ => self.wild_child = false,
+            match child.node_type {
+                // Remove the index if we removed a static prefix that is
+                // not a suffix node.
+                NodeType::Static if !matches!(self.node_type, NodeType::Param { .. }) => {
+                    self.indices.remove(i);
                 }
 
-                child.value
+                // Otherwise, we removed a wildcard.
+                _ => self.wild_child = false,
             }
+
+            child.value
         }
         // Otherwise, remove the value but preserve the node.
         else {
@@ -657,7 +667,6 @@ impl<T> Node<T> {
                                 };
 
                                 // Store the parameter value.
-                                // Parameters are normalized so the key is irrelevant for now.
                                 params.push(b"", path);
 
                                 // Remap the keys of any route parameters we accumulated during the
@@ -677,7 +686,7 @@ impl<T> Node<T> {
                         };
 
                         // Store the parameter value.
-                        // Parameters are normalized so the key is irrelevant for now.
+                        // Parameters are normalized so this key is irrelevant for now.
                         params.push(b"", param);
 
                         // Continue searching.
