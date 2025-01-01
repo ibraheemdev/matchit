@@ -639,6 +639,10 @@ fn mixed_wildcard_suffix() {
     MatchTest {
         routes: vec![
             "/",
+            "/{f}o/b",
+            "/{f}oo/b",
+            "/{f}ooo/b",
+            "/{f}oooo/b",
             "/foo/b",
             "/foo/{b}",
             "/foo/{b}one",
@@ -657,7 +661,12 @@ fn mixed_wildcard_suffix() {
         ],
         matches: vec![
             ("/", "/", p! {}),
+            ("/fo/b", "/{f}o/b", p! { "f" => "f" }),
             ("/foo/b", "/foo/b", p! {}),
+            ("/fooo/b", "/{f}ooo/b", p! { "f" => "f" }),
+            ("/foooo/b", "/{f}oooo/b", p! { "f" => "f" }),
+            ("/foo/b/", "", Err(())),
+            ("/foooo/b/", "", Err(())),
             ("/foo/bb", "/foo/{b}", p! { "b" => "bb" }),
             ("/foo/bone", "/foo/{b}one", p! { "b" => "b" }),
             ("/foo/bone/", "/foo/{b}one/", p! { "b" => "b" }),
