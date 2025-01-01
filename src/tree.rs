@@ -291,56 +291,60 @@ impl<T> Node<T> {
 
         let mut current = self;
         'walk: loop {
-            // The path is longer than this node's prefix, search deeper.
-            if remaining.len() > current.prefix.len() {
-                let (prefix, rest) = remaining.split_at(current.prefix.len());
-
-                // The prefix matches.
-                if prefix == current.prefix.unescaped() {
-                    let first = rest[0];
-                    remaining = rest;
-
-                    // If there is a single child node, we can continue searching in the child.
-                    if current.children.len() == 1 {
-                        // The route matches, remove the node.
-                        if current.children[0].prefix.unescaped() == remaining {
-                            return current.remove_child(0, &remapping);
-                        }
-
-                        // Otherwise, continue searching.
-                        current = &mut current.children[0];
-                        continue 'walk;
-                    }
-
-                    // Find a child node that matches the next character in the route.
-                    if let Some(i) = current.indices.iter().position(|&c| c == first) {
-                        // The route matches, remove the node.
-                        if current.children[i].prefix.unescaped() == remaining {
-                            return current.remove_child(i, &remapping);
-                        }
-
-                        // Otherwise, continue searching.
-                        current = &mut current.children[i];
-                        continue 'walk;
-                    }
-
-                    // If the node has a matching wildcard child, continue searching in the child.
-                    if current.wild_child
-                        && remaining.first().zip(remaining.get(2)) == Some((&b'{', &b'}'))
-                    {
-                        // The route matches, remove the node.
-                        if current.children.last_mut().unwrap().prefix.unescaped() == remaining {
-                            return current.remove_child(current.children.len() - 1, &remapping);
-                        }
-
-                        current = current.children.last_mut().unwrap();
-                        continue 'walk;
-                    }
-                }
+            // Could not find a match.
+            if remaining.len() <= current.prefix.len() {
+                return None;
             }
 
-            // Could not find a match.
-            return None;
+            // Otherwise, the path is longer than this node's prefix, search deeper.
+            let (prefix, rest) = remaining.split_at(current.prefix.len());
+
+            // The prefix does not match.
+            if prefix != current.prefix.unescaped() {
+                return None;
+            }
+
+            let first = rest[0];
+            remaining = rest;
+
+            // If there is a single child node, we can continue searching in the child.
+            if current.children.len() == 1 {
+                // The route matches, remove the node.
+                if current.children[0].prefix.unescaped() == remaining {
+                    return current.remove_child(0, &remapping);
+                }
+
+                // Otherwise, continue searching.
+                current = &mut current.children[0];
+                continue 'walk;
+            }
+
+            // Find a child node that matches the next character in the route.
+            if let Some(i) = current.indices.iter().position(|&c| c == first) {
+                // The route matches, remove the node.
+                if current.children[i].prefix.unescaped() == remaining {
+                    return current.remove_child(i, &remapping);
+                }
+
+                // Otherwise, continue searching.
+                current = &mut current.children[i];
+                continue 'walk;
+            }
+
+            // If there is no matching wildcard child, there is no matching route.
+            if !current.wild_child
+                || remaining.first().zip(remaining.get(2)) != Some((&b'{', &b'}'))
+            {
+                return None;
+            }
+
+            // If the route does match, remove the node.
+            if current.children.last_mut().unwrap().prefix.unescaped() == remaining {
+                return current.remove_child(current.children.len() - 1, &remapping);
+            }
+
+            // Otherwise, keep searching deeper.
+            current = current.children.last_mut().unwrap();
         }
     }
 
