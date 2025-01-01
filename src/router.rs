@@ -56,6 +56,7 @@ impl<T> Router<T> {
     /// # Ok(())
     /// # }
     /// ```
+    #[inline]
     pub fn at<'path>(&self, path: &'path str) -> Result<Match<'_, 'path, &T>, MatchError> {
         match self.root.at(path.as_bytes()) {
             Ok((value, params)) => Ok(Match {
@@ -83,6 +84,7 @@ impl<T> Router<T> {
     /// # Ok(())
     /// # }
     /// ```
+    #[inline]
     pub fn at_mut<'path>(
         &mut self,
         path: &'path str,

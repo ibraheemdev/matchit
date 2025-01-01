@@ -556,33 +556,12 @@ struct Skipped<'node, 'path, T> {
     params: usize,
 }
 
-#[rustfmt::skip]
-macro_rules! backtracker {
-    ($skipped:ident, $path:ident, $node:ident, $params:ident, $backtracking:ident, $walk:lifetime) => {
-        macro_rules! try_backtrack {
-            () => {
-                // Try backtracking to any matching wildcard nodes that we skipped while
-                // traversing the tree.
-                while let Some(skipped) = $skipped.pop() {
-                    if skipped.path.ends_with($path) {
-                        // Restore the search state.
-                        $path = skipped.path;
-                        $node = skipped.node;
-                        $params.truncate(skipped.params);
-                        $backtracking = true;
-                        continue $walk;
-                    }
-                }
-            };
-        }
-    };
-}
-
 impl<T> Node<T> {
     // Returns the node matching the given path.
     //
     // Returning an `UnsafeCell` allows us to avoid duplicating the logic between `Node::at` and
     // `Node::at_mut`, as Rust doesn't have a great way of abstracting over mutability.
+    #[inline]
     pub fn at<'node, 'path>(
         &'node self,
         mut path: &'path [u8],
@@ -592,154 +571,159 @@ impl<T> Node<T> {
         let mut params = Params::new();
         let mut skipped: Vec<Skipped<'_, '_, T>> = Vec::new();
 
-        'walk: loop {
-            // Initialize the backtracker.
-            backtracker!(skipped, path, node, params, backtracking, 'walk);
+        'backtrack: loop {
+            'walk: loop {
+                // Reached the end of the
+                if path.len() <= node.prefix.len() {
+                    // Check for an exact match.
+                    if *path == *node.prefix {
+                        // Found the matching value.
+                        if let Some(ref value) = node.value {
+                            // Remap the keys of any route parameters we accumulated during the
+                            params.for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
+                            return Ok((value, params));
+                        }
+                    }
 
-            // Reached the end of the
-            if path.len() <= node.prefix.len() {
-                // Check for an exact match.
-                if *path == *node.prefix {
-                    // Found the matching value.
-                    if let Some(ref value) = node.value {
+                    break 'walk;
+                }
+
+                // Otherwise, the path is longer than this node's prefix, search deeper.
+                let (prefix, rest) = path.split_at(node.prefix.len());
+
+                // The prefix does not match.
+                if *prefix != *node.prefix {
+                    break 'walk;
+                }
+
+                let previous = path;
+                path = rest;
+
+                // If we are currently backtracking, avoid searching static children
+                // that we already searched.
+                if !backtracking {
+                    let next = path[0];
+
+                    // Find a child node that matches the next character in the path.
+                    if let Some(i) = node.indices.iter().position(|&c| c == next) {
+                        // Keep track of wildcard routes that we skip.
+                        //
+                        // We may end up needing to backtrack later in case we do not find a
+                        // match.
+                        if node.wild_child {
+                            skipped.push(Skipped {
+                                node,
+                                path: previous,
+                                params: params.len(),
+                            });
+                        }
+
+                        // Continue searching.
+                        node = &node.children[i];
+                        continue 'walk;
+                    }
+                }
+
+                // We didn't find a matching static child.
+                //
+                // If there are no wildcards, then there are no matching routes in the tree.
+                if !node.wild_child {
+                    break 'walk;
+                }
+
+                // Continue searching in the wildcard child, which is kept at the end of the list.
+                node = node.children.last().unwrap();
+                match node.node_type {
+                    NodeType::Param => {
+                        // Check for more path segments.
+                        let slash = path.iter().position(|&c| c == b'/');
+                        let terminator = match slash {
+                            // Double `//` implying an empty parameter, no match.
+                            Some(0) => break 'walk,
+
+                            // Found another segment.
+                            Some(i) => i + 1,
+
+                            // This is the last path segment.
+                            None => path.len(),
+                        };
+
+                        for child in node.children.iter() {
+                            // Ensure there is a possible match with a non-zero suffix.
+                            if child.prefix.len() >= terminator {
+                                continue;
+                            }
+
+                            let suffix_start = terminator - child.prefix.len();
+                            let (param, suffix) = path[..terminator].split_at(suffix_start);
+
+                            // Continue searching if the suffix matches.
+                            if *suffix == *child.prefix {
+                                node = child;
+                                path = &path[suffix_start..];
+                                backtracking = false;
+                                params.push(b"", param);
+                                continue 'walk;
+                            }
+                        }
+
+                        // If this is the last path segment and there is a matching
+                        // value without a suffix, we have a match.
+                        let value = match node.value {
+                            // Found the matching value.
+                            Some(ref value) if slash.is_none() => value,
+                            _ => break 'walk,
+                        };
+
+                        // Store the parameter value.
+                        // Parameters are normalized so the key is irrelevant for now.
+                        params.push(b"", path);
+
                         // Remap the keys of any route parameters we accumulated during the
-                        params.for_each_key_mut(|(i, key)| *key = &node.remapping[i]);
+                        params.for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
+
                         return Ok((value, params));
                     }
-                }
 
-                try_backtrack!();
-                return Err(MatchError::NotFound);
-            }
+                    NodeType::CatchAll => {
+                        // Catch-all segments are only allowed at the end of the route, meaning
+                        // this node must contain the value.
+                        let value = match node.value {
+                            // Found the matching value.
+                            Some(ref value) => value,
 
-            // Otherwise, the path is longer than this node's prefix, search deeper.
-            let (prefix, rest) = path.split_at(node.prefix.len());
+                            // Otherwise, there are no matching routes in the tree.
+                            None => return Err(MatchError::NotFound),
+                        };
 
-            // The prefix does not match.
-            if *prefix != *node.prefix {
-                try_backtrack!();
-                return Err(MatchError::NotFound);
-            }
+                        // Remap the keys of any route parameters we accumulated during the
+                        params.for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
 
-            let previous = path;
-            path = rest;
+                        // Store the final catch-all parameter (`{*...}`).
+                        let key = &node.prefix[2..node.prefix.len() - 1];
+                        params.push(key, path);
 
-            // If we are currently backtracking, avoid searching static children
-            // that we already searched.
-            if !backtracking {
-                let next = path[0];
-
-                // Find a child node that matches the next character in the path.
-                if let Some(i) = node.indices.iter().position(|&c| c == next) {
-                    // Keep track of wildcard routes that we skip.
-                    //
-                    // We may end up needing to backtrack later in case we do not find a
-                    // match.
-                    if node.wild_child {
-                        skipped.push(Skipped {
-                            node,
-                            path: previous,
-                            params: params.len(),
-                        });
+                        return Ok((value, params));
                     }
 
-                    // Continue searching.
-                    node = &node.children[i];
-                    continue 'walk;
+                    _ => unreachable!(),
                 }
             }
 
-            // We didn't find a matching static child.
-            //
-            // If there are no wildcards, then there are no matching routes in the tree.
-            if !node.wild_child {
-                try_backtrack!();
-                return Err(MatchError::NotFound);
+            // Try backtracking to any matching wildcard nodes that we skipped while
+            // traversing the tree.
+            while let Some(skipped) = skipped.pop() {
+                if skipped.path.ends_with(path) {
+                    // Found a matching node, restore the search state.
+                    path = skipped.path;
+                    node = skipped.node;
+                    backtracking = true;
+                    params.truncate(skipped.params);
+                    continue 'backtrack;
+                }
             }
 
-            // Continue searching in the wildcard child, which is kept at the end of the list.
-            node = node.children.last().unwrap();
-            match node.node_type {
-                NodeType::Param => {
-                    // Check for more path segments.
-                    let slash = path.iter().position(|&c| c == b'/');
-                    let terminator = match slash {
-                        // Double `//` implying an empty parameter, no match.
-                        Some(0) => {
-                            try_backtrack!();
-                            return Err(MatchError::NotFound);
-                        }
-
-                        // Found another segment.
-                        Some(i) => i + 1,
-
-                        // This is the last path segment.
-                        None => path.len(),
-                    };
-
-                    for child in node.children.iter() {
-                        // Ensure there is a possible match with a non-zero suffix.
-                        if child.prefix.len() >= terminator {
-                            continue;
-                        }
-
-                        let suffix_start = terminator - child.prefix.len();
-                        let (param, suffix) = path[..terminator].split_at(suffix_start);
-
-                        // Continue searching if the suffix matches.
-                        if *suffix == *child.prefix {
-                            node = child;
-                            path = &path[suffix_start..];
-                            backtracking = false;
-                            params.push(b"", param);
-                            continue 'walk;
-                        }
-                    }
-
-                    // If this is the last path segment and there is a matching
-                    // value without a suffix, we have a match.
-                    let value = match node.value {
-                        // Found the matching value.
-                        Some(ref value) if slash.is_none() => value,
-
-                        _ => {
-                            try_backtrack!();
-                            return Err(MatchError::NotFound);
-                        }
-                    };
-
-                    // Store the parameter value.
-                    // Parameters are normalized so the key is irrelevant for now.
-                    params.push(b"", path);
-
-                    // Remap the keys of any route parameters we accumulated during the
-                    params.for_each_key_mut(|(i, key)| *key = &node.remapping[i]);
-
-                    return Ok((value, params));
-                }
-
-                NodeType::CatchAll => {
-                    // Catch-all segments are only allowed at the end of the route, meaning
-                    // this node must contain the value.
-                    let value = match node.value {
-                        // Found the matching value.
-                        Some(ref value) => value,
-                        // Otherwise, there are no matching routes in the tree.
-                        None => return Err(MatchError::NotFound),
-                    };
-
-                    // Remap the keys of any route parameters we accumulated during the
-                    params.for_each_key_mut(|(i, key)| *key = &node.remapping[i]);
-
-                    // Store the final catch-all parameter (`{*...}`).
-                    let key = &node.prefix[2..node.prefix.len() - 1];
-                    params.push(key, path);
-
-                    return Ok((value, params));
-                }
-
-                _ => unreachable!(),
-            }
+            return Err(MatchError::NotFound);
         }
     }
 
