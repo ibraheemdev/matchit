@@ -555,6 +555,29 @@ impl<T> Node<T> {
 
         value.map(UnsafeCell::into_inner)
     }
+
+    /// Iterates over the tree and calls the given visitor function
+    /// with fully resolved path and its value.
+    pub fn for_each<V: FnMut(String, T)>(self, mut visitor: V) {
+        let mut queue = VecDeque::from([(self.prefix.clone(), self)]);
+
+        // Perform a BFS on the routing tree.
+        while let Some((mut prefix, mut node)) = queue.pop_front() {
+            denormalize_params(&mut prefix, &node.remapping);
+
+            if let Some(value) = node.value.take() {
+                let path = String::from_utf8(prefix.unescaped().to_vec()).unwrap();
+                visitor(path, value.into_inner());
+            }
+
+            // Traverse the child nodes.
+            for child in node.children {
+                let mut prefix = prefix.clone();
+                prefix.append(&child.prefix);
+                queue.push_back((prefix, child));
+            }
+        }
+    }
 }
 
 /// A wildcard node that was skipped during a tree search.
@@ -594,7 +617,7 @@ impl<T> Node<T> {
                     if *path == *node.prefix {
                         // Found the matching value.
                         if let Some(ref value) = node.value {
-                            // Remap the keys of any route parameters we accumulated during the
+                            // Remap the keys of any route parameters we accumulated during the search.
                             params.for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
                             return Ok((value, params));
                         }
@@ -669,7 +692,7 @@ impl<T> Node<T> {
                                 // Store the parameter value.
                                 params.push(b"", path);
 
-                                // Remap the keys of any route parameters we accumulated during the
+                                // Remap the keys of any route parameters we accumulated during the search.
                                 params
                                     .for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
 
@@ -741,7 +764,7 @@ impl<T> Node<T> {
                         // Store the parameter value.
                         params.push(b"", path);
 
-                        // Remap the keys of any route parameters we accumulated during the
+                        // Remap the keys of any route parameters we accumulated during the search.
                         params.for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
 
                         return Ok((value, params));
@@ -758,7 +781,7 @@ impl<T> Node<T> {
                             None => return Err(MatchError::NotFound),
                         };
 
-                        // Remap the keys of any route parameters we accumulated during the
+                        // Remap the keys of any route parameters we accumulated during the search.
                         params.for_each_key_mut(|(i, param)| param.key = &node.remapping[i]);
 
                         // Store the final catch-all parameter (`{*...}`).
@@ -806,31 +829,6 @@ impl<T> Node<T> {
         }
 
         Ok(priority)
-    }
-}
-
-impl<T> Node<T> {
-    /// Iterates over the tree and calls the given visitor function
-    /// with fully resolved path and its value.
-    pub fn for_each<V: FnMut(String, T)>(self, mut visitor: V) {
-        let mut queue = VecDeque::from([(self.prefix.clone(), self)]);
-
-        // Perform a BFS on the routing tree.
-        while let Some((mut prefix, mut node)) = queue.pop_front() {
-            denormalize_params(&mut prefix, &node.remapping);
-
-            if let Some(value) = node.value.take() {
-                let path = String::from_utf8(prefix.unescaped().to_vec()).unwrap();
-                visitor(path, value.into_inner());
-            }
-
-            // Traverse the child nodes.
-            for child in node.children {
-                let mut prefix = prefix.clone();
-                prefix.append(&child.prefix);
-                queue.push_back((prefix, child));
-            }
-        }
     }
 }
 
