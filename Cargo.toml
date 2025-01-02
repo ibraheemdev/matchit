@@ -14,15 +14,16 @@ readme = "README.md"
 
 [dev-dependencies]
 # Benchmarks
-criterion = "0.3.4"
-actix-router = "0.2.7"
-regex = "1.5.4"
-route-recognizer = "0.3.0"
+criterion = "0.5"
+actix-router = "0.5"
+regex = "1"
+route-recognizer = "0.3"
 gonzales = "0.0.3-beta"
-path-tree = "0.2.2"
-routefinder = "0.5.2"
+path-tree = "0.8"
+routefinder = "0.5"
+wayfind = "0.7"
 
-# examples
+# Examples
 tower = { version = "0.4", features = ["make", "util"] }
 tokio = { version = "1", features = ["full"] }
 http-body-util = "0.1"

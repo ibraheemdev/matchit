@@ -1,93 +1,112 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-fn call() -> impl IntoIterator<Item = &'static str> {
-    [
-        "/user/repos",
-        "/repos/rust-lang/rust/stargazers",
-        "/orgs/rust-lang/public_members/nikomatsakis",
-        "/repos/rust-lang/rust/releases/1.51.0",
-    ]
-}
-
 fn compare_routers(c: &mut Criterion) {
     let mut group = c.benchmark_group("Compare Routers");
 
+    let paths = routes!(literal).to_vec();
+
     let mut matchit = matchit::Router::new();
-    for route in register!(brackets) {
+    for route in routes!(brackets) {
         matchit.insert(route, true).unwrap();
     }
     group.bench_function("matchit", |b| {
         b.iter(|| {
-            for route in black_box(call()) {
-                black_box(matchit.at(route).unwrap());
+            for path in black_box(&paths) {
+                let result = black_box(matchit.at(path).unwrap());
+                assert!(*result.value);
+            }
+        });
+    });
+
+    let mut wayfind = wayfind::Router::new();
+    for route in routes!(brackets) {
+        wayfind.insert(route, true).unwrap();
+    }
+    let wayfind_paths = paths
+        .iter()
+        .copied()
+        .flat_map(wayfind::Path::new)
+        .collect::<Vec<_>>();
+    group.bench_function("wayfind", |b| {
+        b.iter(|| {
+            for path in black_box(&wayfind_paths) {
+                let result = black_box(wayfind.search(&path).unwrap().unwrap());
+                assert!(*result.data);
             }
         });
     });
 
     let mut path_tree = path_tree::PathTree::new();
-    for route in register!(colon) {
-        path_tree.insert(route, true);
+    for route in routes!(colon) {
+        let _ = path_tree.insert(route, true);
     }
     group.bench_function("path-tree", |b| {
         b.iter(|| {
-            for route in black_box(call()) {
-                black_box(path_tree.find(route).unwrap());
+            for path in black_box(&paths) {
+                let result = black_box(path_tree.find(path).unwrap());
+                assert!(*result.0);
             }
         });
     });
 
-    let gonzales = gonzales::RouterBuilder::new().build(register!(brackets));
+    let registered = routes!(brackets);
+    let gonzales = gonzales::RouterBuilder::new().build(registered);
     group.bench_function("gonzales", |b| {
         b.iter(|| {
-            for route in black_box(call()) {
-                black_box(gonzales.route(route).unwrap());
+            for path in black_box(&paths) {
+                let result = black_box(gonzales.route(path).unwrap());
+                assert!(registered.get(result.get_index()).is_some());
             }
         });
     });
 
     let mut actix = actix_router::Router::<bool>::build();
-    for route in register!(brackets) {
+    for route in routes!(brackets) {
         actix.path(route, true);
     }
     let actix = actix.finish();
     group.bench_function("actix", |b| {
         b.iter(|| {
-            for route in black_box(call()) {
-                let mut path = actix_router::Path::new(route);
-                black_box(actix.recognize(&mut path).unwrap());
+            for path in black_box(&paths) {
+                let mut path = actix_router::Path::new(*path);
+                let result = black_box(actix.recognize(&mut path).unwrap());
+                assert!(*result.0);
             }
         });
     });
 
-    let regex_set = regex::RegexSet::new(register!(regex)).unwrap();
+    let regex_set = regex::RegexSet::new(routes!(regex)).unwrap();
     group.bench_function("regex", |b| {
         b.iter(|| {
-            for route in black_box(call()) {
-                black_box(regex_set.matches(route));
+            for path in black_box(&paths) {
+                let result = black_box(regex_set.matches(path));
+                assert!(result.matched_any());
             }
         });
     });
 
     let mut route_recognizer = route_recognizer::Router::new();
-    for route in register!(colon) {
+    for route in routes!(colon) {
         route_recognizer.add(route, true);
     }
     group.bench_function("route-recognizer", |b| {
         b.iter(|| {
-            for route in black_box(call()) {
-                black_box(route_recognizer.recognize(route).unwrap());
+            for path in black_box(&paths) {
+                let result = black_box(route_recognizer.recognize(path).unwrap());
+                assert!(**result.handler());
             }
         });
     });
 
     let mut routefinder = routefinder::Router::new();
-    for route in register!(colon) {
+    for route in routes!(colon) {
         routefinder.add(route, true).unwrap();
     }
     group.bench_function("routefinder", |b| {
         b.iter(|| {
-            for route in black_box(call()) {
-                black_box(routefinder.best_match(route).unwrap());
+            for path in black_box(&paths) {
+                let result = black_box(routefinder.best_match(path).unwrap());
+                assert!(*result.handler());
             }
         });
     });
@@ -98,15 +117,18 @@ fn compare_routers(c: &mut Criterion) {
 criterion_group!(benches, compare_routers);
 criterion_main!(benches);
 
-macro_rules! register {
+macro_rules! routes {
+    (literal) => {{
+        routes!(finish => "p1", "p2", "p3", "p4")
+    }};
     (colon) => {{
-        register!(finish => ":p1", ":p2", ":p3", ":p4")
+        routes!(finish => ":p1", ":p2", ":p3", ":p4")
     }};
     (brackets) => {{
-        register!(finish => "{p1}", "{p2}", "{p3}", "{p4}")
+        routes!(finish => "{p1}", "{p2}", "{p3}", "{p4}")
     }};
     (regex) => {{
-        register!(finish => "(.*)", "(.*)", "(.*)", "(.*)")
+        routes!(finish => "(.*)", "(.*)", "(.*)", "(.*)")
     }};
     (finish => $p1:literal, $p2:literal, $p3:literal, $p4:literal) => {{
         [
@@ -169,13 +191,13 @@ macro_rules! register {
             concat!("/user/orgs"),
             concat!("/orgs/", $p1),
             concat!("/orgs/", $p1, "/members"),
-            concat!("/orgs/", $p1, "/members", $p2),
+            concat!("/orgs/", $p1, "/members/", $p2),
             concat!("/orgs/", $p1, "/public_members"),
             concat!("/orgs/", $p1, "/public_members/", $p2),
             concat!("/orgs/", $p1, "/teams"),
             concat!("/teams/", $p1),
             concat!("/teams/", $p1, "/members"),
-            concat!("/teams/", $p1, "/members", $p2),
+            concat!("/teams/", $p1, "/members/", $p2),
             concat!("/teams/", $p1, "/repos"),
             concat!("/teams/", $p1, "/repos/", $p2, "/", $p3),
             concat!("/user/teams"),
@@ -204,12 +226,12 @@ macro_rules! register {
             concat!("/repos/", $p1, "/", $p2, "/commits/", $p3),
             concat!("/repos/", $p1, "/", $p2, "/readme"),
             concat!("/repos/", $p1, "/", $p2, "/keys"),
-            concat!("/repos/", $p1, "/", $p2, "/keys", $p3),
+            concat!("/repos/", $p1, "/", $p2, "/keys/", $p3),
             concat!("/repos/", $p1, "/", $p2, "/downloads"),
-            concat!("/repos/", $p1, "/", $p2, "/downloads", $p3),
+            concat!("/repos/", $p1, "/", $p2, "/downloads/", $p3),
             concat!("/repos/", $p1, "/", $p2, "/forks"),
             concat!("/repos/", $p1, "/", $p2, "/hooks"),
-            concat!("/repos/", $p1, "/", $p2, "/hooks", $p3),
+            concat!("/repos/", $p1, "/", $p2, "/hooks/", $p3),
             concat!("/repos/", $p1, "/", $p2, "/releases"),
             concat!("/repos/", $p1, "/", $p2, "/releases/", $p3),
             concat!("/repos/", $p1, "/", $p2, "/releases/", $p3, "/assets"),
@@ -236,7 +258,7 @@ macro_rules! register {
             concat!("/users/", $p1, "/following"),
             concat!("/user/following"),
             concat!("/user/following/", $p1),
-            concat!("/users/", $p1, "/following", $p2),
+            concat!("/users/", $p1, "/following/", $p2),
             concat!("/users/", $p1, "/keys"),
             concat!("/user/keys"),
             concat!("/user/keys/", $p1),
@@ -244,4 +266,4 @@ macro_rules! register {
     }};
 }
 
-use register;
+use routes;

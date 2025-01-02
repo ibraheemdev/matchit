@@ -59,7 +59,8 @@ assert_eq!(m.at("/c/bar.css")?.params.get("p"), Some("c/bar.css"));
 assert!(m.at("/").is_err());
 ```
 
-The literal characters `{` and `}` may be included in a static route by escaping them with the same character. For example, the `{` character is escaped with `{{` and the `}` character is escaped with `}}`.
+The literal characters `{` and `}` may be included in a static route by escaping them with the same character.
+For example, the `{` character is escaped with `{{` and the `}` character is escaped with `}}`.
 
 ```rust,ignore
 let mut m = Router::new();
@@ -86,7 +87,8 @@ m.insert("/{*filepath}", "...").unwrap();  // Priority: 2
 
 ## How does it work?
 
-The router takes advantage of the fact that URL routes generally follow a hierarchical structure. Routes are stored them in a radix trie that makes heavy use of common prefixes.
+The router takes advantage of the fact that URL routes generally follow a hierarchical structure.
+Routes are stored them in a radix trie that makes heavy use of common prefixes.
 
 ```text
 Priority   Path             Value
@@ -102,34 +104,40 @@ Priority   Path             Value
 1          └contact\        8
 ```
 
-This allows us to reduce the route search to a small number of branches. Child nodes on the same level of the tree are also prioritized
-by the number of children with registered values, increasing the chance of choosing the correct branch of the first try.
+This allows us to reduce the route search to a small number of branches. Child nodes on the same level of the tree are also
+prioritized by the number of children with registered values, increasing the chance of choosing the correct branch of the first try.
 
 ## Benchmarks
 
-As it turns out, this method of routing is extremely fast. In a benchmark matching 4 paths against 130 registered routes, `matchit` find the correct routes
-in under 200 nanoseconds, an order of magnitude faster than most other routers. You can view the benchmark code [here](https://github.com/ibraheemdev/matchit/blob/master/benches/bench.rs). 
+As it turns out, this method of routing is extremely fast. Below are the benchmark results matching against 130 registered routes.
+You can view the benchmark code [here](https://github.com/ibraheemdev/matchit/blob/master/benches/bench.rs). 
 
 ```text
 Compare Routers/matchit 
-time:   [175.96 ns 176.39 ns 176.84 ns]
+time:   [2.4451 µs 2.4456 µs 2.4462 µs]
 
-Compare Routers/actix
-time:   [26.805 us 26.811 us 26.816 us]
+Compare Routers/gonzales
+time:   [4.2618 µs 4.2632 µs 4.2646 µs]
 
 Compare Routers/path-tree
-time:   [468.95 ns 470.34 ns 471.65 ns]
+time:   [4.8666 µs 4.8696 µs 4.8728 µs]
 
-Compare Routers/regex
-time:   [22.539 us 22.584 us 22.639 us]
+Compare Routers/wayfind
+time:   [4.9440 µs 4.9539 µs 4.9668 µs]
 
 Compare Routers/route-recognizer
-time:   [3.7552 us 3.7732 us 3.8027 us]
+time:   [49.203 µs 49.214 µs 49.226 µs]
 
 Compare Routers/routefinder
-time:   [5.7313 us 5.7405 us 5.7514 us]
+time:   [70.598 µs 70.636 µs 70.670 µs]
+
+Compare Routers/actix
+time:   [453.91 µs 454.01 µs 454.11 µs]
+
+Compare Routers/regex
+time:   [421.76 µs 421.82 µs 421.89 µs]
 ```
 
 ## Credits
 
-A lot of the code in this package was based on Julien Schmidt's [`httprouter`](https://github.com/julienschmidt/httprouter).
+A lot of the code in this package was inspired by Julien Schmidt's [`httprouter`](https://github.com/julienschmidt/httprouter).
