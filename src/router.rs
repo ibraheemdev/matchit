@@ -56,6 +56,7 @@ impl<T> Router<T> {
     /// # Ok(())
     /// # }
     /// ```
+    #[inline]
     pub fn at<'path>(&self, path: &'path str) -> Result<Match<'_, 'path, &T>, MatchError> {
         match self.root.at(path.as_bytes()) {
             Ok((value, params)) => Ok(Match {
@@ -83,6 +84,7 @@ impl<T> Router<T> {
     /// # Ok(())
     /// # }
     /// ```
+    #[inline]
     pub fn at_mut<'path>(
         &mut self,
         path: &'path str,
@@ -117,12 +119,12 @@ impl<T> Router<T> {
     /// assert_eq!(router.remove("/home/{id}/"), None);
     ///
     /// router.insert("/home/{id}/", "Hello!");
-    /// // the route does not match
+    /// // The route does not match.
     /// assert_eq!(router.remove("/home/{user}"), None);
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     ///
     /// router.insert("/home/{id}/", "Hello!");
-    /// // invalid route
+    /// // Invalid route.
     /// assert_eq!(router.remove("/home/{id"), None);
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     /// ```

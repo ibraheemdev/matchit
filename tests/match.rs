@@ -92,7 +92,11 @@ impl MatchTest {
                     assert!(router.at(path).unwrap().value.contains("Z"));
                     router.at_mut(path).unwrap().value.pop();
                 }
-                Err(_) => params.unwrap_err(),
+                Err(err) => {
+                    if let Ok(params) = params {
+                        panic!("{err} for {path} ({params:?})");
+                    }
+                }
             }
         }
     }
@@ -581,11 +585,104 @@ fn escaped() {
 #[test]
 fn empty_param() {
     MatchTest {
-        routes: vec!["/y/{foo}", "/x/{foo}/z", "/z/{*xx}"],
+        routes: vec![
+            "/y/{foo}",
+            "/x/{foo}/z",
+            "/z/{*foo}",
+            "/a/x{foo}",
+            "/b/{foo}x",
+        ],
         matches: vec![
             ("/y/", "", Err(())),
             ("/x//z", "", Err(())),
             ("/z/", "", Err(())),
+            ("/a/x", "", Err(())),
+            ("/b/x", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+#[test]
+fn wildcard_suffix() {
+    MatchTest {
+        routes: vec![
+            "/",
+            "/{foo}x",
+            "/foox",
+            "/{foo}x/bar",
+            "/{foo}x/bar/baz",
+            "/x{foo}",
+            "/x{foo}/bar",
+        ],
+        matches: vec![
+            ("/", "/", p! {}),
+            ("/foox", "/foox", p! {}),
+            ("/barx", "/{foo}x", p! { "foo" => "bar" }),
+            ("/mx", "/{foo}x", p! { "foo" => "m" }),
+            ("/mx/", "", Err(())),
+            ("/mxm", "", Err(())),
+            ("/mx/bar", "/{foo}x/bar", p! { "foo" => "m" }),
+            ("/mxm/bar", "", Err(())),
+            ("/x", "", Err(())),
+            ("/xfoo", "/x{foo}", p! { "foo" => "foo" }),
+            ("/xfoox", "/x{foo}", p! { "foo" => "foox" }),
+            ("/xfoox/bar", "/x{foo}/bar", p! { "foo" => "foox" }),
+            ("/xfoox/bar/baz", "/{foo}x/bar/baz", p! { "foo" => "xfoo" }),
+        ],
+    }
+    .run();
+}
+
+#[test]
+fn mixed_wildcard_suffix() {
+    MatchTest {
+        routes: vec![
+            "/",
+            "/{f}o/b",
+            "/{f}oo/b",
+            "/{f}ooo/b",
+            "/{f}oooo/b",
+            "/foo/b",
+            "/foo/{b}",
+            "/foo/{b}one",
+            "/foo/{b}one/",
+            "/foo/{b}two",
+            "/foo/{b}/one",
+            "/foo/{b}one/one",
+            "/foo/{b}two/one",
+            "/foo/{b}one/one/",
+            "/bar/{b}one",
+            "/bar/{b}",
+            "/bar/{b}/baz",
+            "/bar/{b}one/baz",
+            "/baz/{b}/bar",
+            "/baz/{b}one/bar",
+        ],
+        matches: vec![
+            ("/", "/", p! {}),
+            ("/o/b", "", Err(())),
+            ("/fo/b", "/{f}o/b", p! { "f" => "f" }),
+            ("/foo/b", "/foo/b", p! {}),
+            ("/fooo/b", "/{f}ooo/b", p! { "f" => "f" }),
+            ("/foooo/b", "/{f}oooo/b", p! { "f" => "f" }),
+            ("/foo/b/", "", Err(())),
+            ("/foooo/b/", "", Err(())),
+            ("/foo/bb", "/foo/{b}", p! { "b" => "bb" }),
+            ("/foo/bone", "/foo/{b}one", p! { "b" => "b" }),
+            ("/foo/bone/", "/foo/{b}one/", p! { "b" => "b" }),
+            ("/foo/btwo", "/foo/{b}two", p! { "b" => "b" }),
+            ("/foo/btwo/", "", Err(())),
+            ("/foo/b/one", "/foo/{b}/one", p! { "b" => "b" }),
+            ("/foo/bone/one", "/foo/{b}one/one", p! { "b" => "b" }),
+            ("/foo/bone/one/", "/foo/{b}one/one/", p! { "b" => "b" }),
+            ("/foo/btwo/one", "/foo/{b}two/one", p! { "b" => "b" }),
+            ("/bar/b", "/bar/{b}", p! { "b" => "b" }),
+            ("/bar/b/baz", "/bar/{b}/baz", p! { "b" => "b" }),
+            ("/bar/bone", "/bar/{b}one", p! { "b" => "b" }),
+            ("/bar/bone/baz", "/bar/{b}one/baz", p! { "b" => "b" }),
+            ("/baz/b/bar", "/baz/{b}/bar", p! { "b" => "b" }),
+            ("/baz/bone/bar", "/baz/{b}one/bar", p! { "b" => "b" }),
         ],
     }
     .run();

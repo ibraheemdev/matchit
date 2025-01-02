@@ -13,15 +13,18 @@ pub enum InsertError {
         /// The existing route that the insertion is conflicting with.
         with: String,
     },
+
     /// Only one parameter per route segment is allowed.
     ///
-    /// Static segments are also allowed before a parameter, but not after it. For example,
-    /// `/foo-{bar}` is a valid route, but `/{bar}-foo` is not.
+    /// For example, `/foo-{bar}` and `/{bar}-foo` are valid routes, but `/{foo}-{bar}`
+    /// is not.
     InvalidParamSegment,
+
     /// Parameters must be registered with a valid name and matching braces.
     ///
     /// Note you can use `{{` or `}}` to escape literal brackets.
     InvalidParam,
+
     /// Catch-all parameters are only allowed at the end of a path.
     InvalidCatchAll,
 }
@@ -32,8 +35,7 @@ impl fmt::Display for InsertError {
             Self::Conflict { with } => {
                 write!(
                     f,
-                    "Insertion failed due to conflict with previously registered route: {}",
-                    with
+                    "Insertion failed due to conflict with previously registered route: {with}"
                 )
             }
             Self::InvalidParamSegment => {

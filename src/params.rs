@@ -2,12 +2,12 @@ use std::{fmt, iter, mem, slice};
 
 /// A single URL parameter, consisting of a key and a value.
 #[derive(PartialEq, Eq, Ord, PartialOrd, Default, Copy, Clone)]
-struct Param<'k, 'v> {
+pub(crate) struct Param<'k, 'v> {
     // Keys and values are stored as byte slices internally by the router
-    // to avoid UTF8 checks when slicing, but UTF8 is still respected,
-    // so these slices are valid strings.
-    key: &'k [u8],
-    value: &'v [u8],
+    // to avoid utf8 checks when slicing. This allows us to perform utf8
+    // validation lazily without resorting to unsafe code.
+    pub(crate) key: &'k [u8],
+    pub(crate) value: &'v [u8],
 }
 
 impl<'k, 'v> Param<'k, 'v> {
@@ -70,9 +70,10 @@ enum ParamsKind<'k, 'v> {
 
 impl<'k, 'v> Params<'k, 'v> {
     /// Create an empty list of parameters.
+    #[inline]
     pub fn new() -> Self {
         Self {
-            kind: ParamsKind::Small([Param::EMPTY; 3], 0),
+            kind: ParamsKind::Small([Param::EMPTY; SMALL], 0),
         }
     }
 
@@ -122,9 +123,11 @@ impl<'k, 'v> Params<'k, 'v> {
         }
     }
 
-    /// Inserts a key value parameter pair into the list.
+    /// Appends a key-value parameter to the list.
+    #[inline]
     pub(crate) fn push(&mut self, key: &'k [u8], value: &'v [u8]) {
         #[cold]
+        #[inline(never)]
         fn drain_to_vec<T: Default>(len: usize, elem: T, arr: &mut [T; SMALL]) -> Vec<T> {
             let mut vec = Vec::with_capacity(len + 1);
             vec.extend(arr.iter_mut().map(mem::take));
@@ -132,10 +135,16 @@ impl<'k, 'v> Params<'k, 'v> {
             vec
         }
 
+        #[cold]
+        #[inline(never)]
+        fn push_slow<'k, 'v>(vec: &mut Vec<Param<'k, 'v>>, param: Param<'k, 'v>) {
+            vec.push(param);
+        }
+
         let param = Param { key, value };
         match &mut self.kind {
             ParamsKind::Small(arr, len) => {
-                if *len == SMALL {
+                if *len >= SMALL {
                     self.kind = ParamsKind::Large(drain_to_vec(*len, param, arr));
                     return;
                 }
@@ -143,24 +152,17 @@ impl<'k, 'v> Params<'k, 'v> {
                 arr[*len] = param;
                 *len += 1;
             }
-            ParamsKind::Large(vec) => vec.push(param),
+
+            ParamsKind::Large(vec) => push_slow(vec, param),
         }
     }
 
     // Applies a transformation function to each key.
-    pub(crate) fn for_each_key_mut(&mut self, f: impl Fn((usize, &mut &'k [u8]))) {
+    #[inline]
+    pub(crate) fn for_each_key_mut(&mut self, f: impl Fn((usize, &mut Param<'k, 'v>))) {
         match &mut self.kind {
-            ParamsKind::Small(arr, len) => arr
-                .iter_mut()
-                .take(*len)
-                .map(|param| &mut param.key)
-                .enumerate()
-                .for_each(f),
-            ParamsKind::Large(vec) => vec
-                .iter_mut()
-                .map(|param| &mut param.key)
-                .enumerate()
-                .for_each(f),
+            ParamsKind::Small(arr, len) => arr.iter_mut().take(*len).enumerate().for_each(f),
+            ParamsKind::Large(vec) => vec.iter_mut().enumerate().for_each(f),
         }
     }
 }
@@ -191,7 +193,7 @@ enum ParamsIterKind<'ps, 'k, 'v> {
     Large(slice::Iter<'ps, Param<'k, 'v>>),
 }
 
-impl<'ps, 'k, 'v> Iterator for ParamsIter<'ps, 'k, 'v> {
+impl<'k, 'v> Iterator for ParamsIter<'_, 'k, 'v> {
     type Item = (&'k str, &'v str);
 
     fn next(&mut self) -> Option<Self::Item> {

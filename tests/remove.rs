@@ -134,6 +134,7 @@ fn catchall() {
     RemoveTest {
         routes: vec!["/foo/{*catchall}", "/bar", "/bar/", "/bar/{*catchall}"],
         ops: vec![
+            (Remove, "/foo/{catchall}", None),
             (Remove, "/foo/{*catchall}", Some("/foo/{*catchall}")),
             (Remove, "/bar/", Some("/bar/")),
             (Insert, "/foo/*catchall", Some("/foo/*catchall")),
@@ -259,6 +260,41 @@ fn check_escaped_params() {
             "/bar/{user}/{id}",
             "/bar/{user}/{id}/baz",
             "/baz/{product}/{user}/{id}",
+        ],
+    }
+    .run();
+}
+
+#[test]
+fn wildcard_suffix() {
+    RemoveTest {
+        routes: vec![
+            "/foo/{id}",
+            "/foo/{id}/bar",
+            "/foo/{id}bar",
+            "/foo/{id}bar/baz",
+            "/foo/{id}bar/baz/bax",
+            "/bar/x{id}y",
+            "/bar/x{id}y/",
+            "/baz/x{id}y",
+            "/baz/x{id}y/",
+        ],
+        ops: vec![
+            (Remove, "/foo/{id}", Some("/foo/{id}")),
+            (Remove, "/foo/{id}bar", Some("/foo/{id}bar")),
+            (Remove, "/foo/{id}bar/baz", Some("/foo/{id}bar/baz")),
+            (Insert, "/foo/{id}bax", Some("/foo/{id}bax")),
+            (Insert, "/foo/{id}bax/baz", Some("/foo/{id}bax/baz")),
+            (Remove, "/foo/{id}bax/baz", Some("/foo/{id}bax/baz")),
+            (Remove, "/bar/x{id}y", Some("/bar/x{id}y")),
+            (Remove, "/baz/x{id}y/", Some("/baz/x{id}y/")),
+        ],
+        remaining: vec![
+            "/foo/{id}/bar",
+            "/foo/{id}bar/baz/bax",
+            "/foo/{id}bax",
+            "/bar/x{id}y/",
+            "/baz/x{id}y",
         ],
     }
     .run();

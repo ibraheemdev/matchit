@@ -48,6 +48,23 @@ fn wildcard_conflict() {
         ("/user_{bar}", Err(conflict("/user_{name}"))),
         ("/id{id}", Ok(())),
         ("/id/{id}", Ok(())),
+        ("/x/{id}", Ok(())),
+        ("/x/{id}/", Ok(())),
+        ("/x/{id}y", Ok(())),
+        ("/x/{id}y/", Ok(())),
+        ("/x/x{id}", Ok(())),
+        ("/x/x{id}y", Ok(())),
+        ("/qux/id", Ok(())),
+        ("/qux/{id}y", Ok(())),
+        ("/qux/{id}", Ok(())),
+        ("/qux/{id}/", Ok(())),
+        ("/qux/{id}x", Ok(())),
+        ("/qux/x{id}y", Ok(())),
+        ("/qux/x{id}", Ok(())),
+        ("/qux/x{id}", Err(conflict("/qux/x{id}"))),
+        ("/qux/x{id}y", Err(conflict("/qux/x{id}y"))),
+        ("/bar/{id}", Ok(())),
+        ("/bar/x{id}y", Ok(())),
     ])
     .run()
 }
@@ -57,6 +74,7 @@ fn invalid_catchall() {
     InsertTest(vec![
         ("/non-leading-{*catchall}", Ok(())),
         ("/foo/bar{*catchall}", Ok(())),
+        ("/src/{*filepath}x", Err(InsertError::InvalidCatchAll)),
         ("/src/{*filepath}/x", Err(InsertError::InvalidCatchAll)),
         ("/src2/", Ok(())),
         ("/src2/{*filepath}/x", Err(InsertError::InvalidCatchAll)),
@@ -210,7 +228,6 @@ fn invalid_param() {
         ("}", Err(InsertError::InvalidParam)),
         ("x{y", Err(InsertError::InvalidParam)),
         ("x}", Err(InsertError::InvalidParam)),
-        ("/{foo}s", Err(InsertError::InvalidParamSegment)),
     ])
     .run();
 }
