@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
@@ -8,7 +8,6 @@ use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tower::service_fn;
-use tower::util::BoxCloneService;
 use tower::Service as _;
 
 type Body = Full<Bytes>;
@@ -31,11 +30,8 @@ async fn not_found(_req: Request<Incoming>) -> hyper::Result<Response<Body>> {
         .unwrap())
 }
 
-// We can use `BoxCloneService` to erase the type of each handler service.
-//
-// We still need a `Mutex` around each service because `BoxCloneService` doesn't
-// require the service to implement `Sync`.
-type Service = Mutex<BoxCloneService<Request<Incoming>, Response<Body>, hyper::Error>>;
+// We can use `BoxCloneSyncService` to erase the type of each handler service.
+type Service = tower::util::BoxCloneSyncService<Request<Incoming>, Response<Body>, hyper::Error>;
 
 // We use a `HashMap` to hold a `Router` for each HTTP method. This allows us
 // to register the same route for multiple methods.
@@ -57,8 +53,7 @@ async fn route(router: Arc<Router>, req: Request<Incoming>) -> hyper::Result<Res
         return not_found(req).await;
     };
 
-    // lock the service for a very short time, just to clone the service
-    let mut service = found.value.lock().unwrap().clone();
+    let mut service = found.value.clone();
     service.call(req).await
 }
 
@@ -71,14 +66,14 @@ async fn main() {
     router
         .entry(Method::GET)
         .or_default()
-        .insert("/", BoxCloneService::new(service_fn(index)).into())
+        .insert("/", Service::new(service_fn(index)))
         .unwrap();
 
     // GET /blog => `blog`
     router
         .entry(Method::GET)
         .or_default()
-        .insert("/blog", BoxCloneService::new(service_fn(blog)).into())
+        .insert("/blog", Service::new(service_fn(blog)))
         .unwrap();
 
     let listener = TcpListener::bind(("127.0.0.1", 3000)).await.unwrap();

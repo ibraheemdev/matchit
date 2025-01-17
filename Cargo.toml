@@ -24,7 +24,7 @@ routefinder = "0.5"
 wayfind = "0.7"
 
 # Examples
-tower = { version = "0.4", features = ["make", "util"] }
+tower = { version = "0.5.2", features = ["make", "util"] }
 tokio = { version = "1", features = ["full"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["http1", "server"] }
