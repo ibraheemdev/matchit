@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future;
 use std::sync::Arc;
 
 use http_body_util::Full;
@@ -54,6 +55,9 @@ async fn route(router: Arc<Router>, req: Request<Incoming>) -> hyper::Result<Res
     };
 
     let mut service = found.value.clone();
+
+    future::poll_fn(|cx| service.poll_ready(cx)).await?;
+
     service.call(req).await
 }
 
