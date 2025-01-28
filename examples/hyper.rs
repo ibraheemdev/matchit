@@ -92,9 +92,7 @@ async fn main() {
             if let Err(err) = ConnectionBuilder::new()
                 .serve_connection(
                     TokioIo::new(tcp),
-                    hyper::service::service_fn(|request| async {
-                        route(router.clone(), request).await
-                    }),
+                    hyper::service::service_fn(|request| route(router.clone(), request)),
                 )
                 .await
             {
