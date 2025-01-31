@@ -22,15 +22,11 @@ fn compare_routers(c: &mut Criterion) {
     for route in routes!(brackets) {
         wayfind.insert(route, true).unwrap();
     }
-    let wayfind_paths = paths
-        .iter()
-        .copied()
-        .flat_map(wayfind::Path::new)
-        .collect::<Vec<_>>();
+    let wayfind_paths = paths.to_vec();
     group.bench_function("wayfind", |b| {
         b.iter(|| {
             for path in black_box(&wayfind_paths) {
-                let result = black_box(wayfind.search(&path).unwrap().unwrap());
+                let result = black_box(wayfind.search(path).unwrap());
                 assert!(*result.data);
             }
         });

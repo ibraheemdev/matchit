@@ -21,7 +21,7 @@ route-recognizer = "0.3"
 gonzales = "0.0.3-beta"
 path-tree = "0.8"
 routefinder = "0.5"
-wayfind = "0.7"
+wayfind = "0.8"
 
 # Examples
 tower = { version = "0.5.2", features = ["make", "util"] }
