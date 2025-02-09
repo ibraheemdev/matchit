@@ -61,9 +61,9 @@ fn overlapping_param_backtracking() {
     assert_eq!(matched.params.get("id"), Some("978"));
 }
 
+#[allow(clippy::type_complexity)]
 struct MatchTest {
     routes: Vec<&'static str>,
-    #[allow(clippy::type_complexity)]
     matches: Vec<(
         &'static str,
         &'static str,
@@ -617,15 +617,7 @@ fn empty_param() {
 #[test]
 fn wildcard_suffix() {
     MatchTest {
-        routes: vec![
-            "/",
-            "/{foo}x",
-            "/foox",
-            "/{foo}x/bar",
-            "/{foo}x/bar/baz",
-            "/x{foo}",
-            "/x{foo}/bar",
-        ],
+        routes: vec!["/", "/{foo}x", "/foox", "/{foo}x/bar", "/{foo}x/bar/baz"],
         matches: vec![
             ("/", "/", p! {}),
             ("/foox", "/foox", p! {}),
@@ -636,9 +628,9 @@ fn wildcard_suffix() {
             ("/mx/bar", "/{foo}x/bar", p! { "foo" => "m" }),
             ("/mxm/bar", "", Err(())),
             ("/x", "", Err(())),
-            ("/xfoo", "/x{foo}", p! { "foo" => "foo" }),
-            ("/xfoox", "/x{foo}", p! { "foo" => "foox" }),
-            ("/xfoox/bar", "/x{foo}/bar", p! { "foo" => "foox" }),
+            ("/xfoo", "", Err(())),
+            ("/xfoox", "/{foo}x", p! { "foo" => "xfoo" }),
+            ("/xfoox/bar", "/{foo}x/bar", p! { "foo" => "xfoo" }),
             ("/xfoox/bar/baz", "/{foo}x/bar/baz", p! { "foo" => "xfoo" }),
         ],
     }

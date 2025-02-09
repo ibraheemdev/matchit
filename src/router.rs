@@ -125,7 +125,7 @@ impl<T> Router<T> {
     ///
     /// router.insert("/home/{id}/", "Hello!");
     /// // Invalid route.
-    /// assert_eq!(router.remove("/home/{id"), None);
+    /// assert_eq!(router.remove("/home/{id}"), None);
     /// assert_eq!(router.remove("/home/{id}/"), Some("Hello!"));
     /// ```
     pub fn remove(&mut self, path: impl Into<String>) -> Option<T> {

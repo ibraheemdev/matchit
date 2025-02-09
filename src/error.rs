@@ -79,7 +79,7 @@ impl InsertError {
             route.append(&current.prefix);
         }
 
-        // Add the prefixes of any conflicting children.
+        // Add the prefixes of the first conflicting child.
         let mut child = current.children.first();
         while let Some(node) = child {
             route.append(&node.prefix);
