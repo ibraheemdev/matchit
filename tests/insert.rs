@@ -21,18 +21,22 @@ fn wildcard_conflict() {
     InsertTest(vec![
         ("/cmd/{tool}/{sub}", Ok(())),
         ("/cmd/vet", Ok(())),
+
         ("/foo/bar", Ok(())),
         ("/foo/{name}", Ok(())),
         ("/foo/{names}", Err(conflict("/foo/{name}"))),
+
         ("/cmd/{*path}", Err(conflict("/cmd/{tool}/{sub}"))),
         ("/cmd/{xxx}/names", Ok(())),
         ("/cmd/{tool}/{xxx}/foo", Ok(())),
+
         ("/src/{*filepath}", Ok(())),
         ("/src/{file}", Err(conflict("/src/{*filepath}"))),
         ("/src/static.json", Ok(())),
         ("/src/$filepathx", Ok(())),
         ("/src/", Ok(())),
         ("/src/foo/bar", Ok(())),
+
         ("/src1/", Ok(())),
         ("/src1/{*filepath}", Ok(())),
         ("/src2{*filepath}", Ok(())),
@@ -41,30 +45,116 @@ fn wildcard_conflict() {
         ("/src2", Ok(())),
         ("/src3", Ok(())),
         ("/src3/{*filepath}", Ok(())),
+
         ("/search/{query}", Ok(())),
         ("/search/valid", Ok(())),
+
         ("/user_{name}", Ok(())),
         ("/user_x", Ok(())),
         ("/user_{bar}", Err(conflict("/user_{name}"))),
+
         ("/id{id}", Ok(())),
         ("/id/{id}", Ok(())),
+
         ("/x/{id}", Ok(())),
         ("/x/{id}/", Ok(())),
         ("/x/{id}y", Ok(())),
         ("/x/{id}y/", Ok(())),
-        ("/x/x{id}", Ok(())),
-        ("/x/x{id}y", Ok(())),
-        ("/qux/id", Ok(())),
-        ("/qux/{id}y", Ok(())),
-        ("/qux/{id}", Ok(())),
-        ("/qux/{id}/", Ok(())),
-        ("/qux/{id}x", Ok(())),
-        ("/qux/x{id}y", Ok(())),
-        ("/qux/x{id}", Ok(())),
-        ("/qux/x{id}", Err(conflict("/qux/x{id}"))),
-        ("/qux/x{id}y", Err(conflict("/qux/x{id}y"))),
+        ("/x/{id}y", Err(conflict("/x/{id}y"))),
+        ("/x/x{id}", Err(conflict("/x/{id}y/"))),
+        ("/x/x{id}y", Err(conflict("/x/{id}y/"))),
+
+        ("/y/{id}", Ok(())),
+        ("/y/{id}/", Ok(())),
+        ("/y/y{id}", Ok(())),
+        ("/y/y{id}/", Ok(())),
+        ("/y/{id}y", Err(conflict("/x/y{id}/"))),
+        ("/y/{id}y/", Err(conflict("/x/y{id}/"))),
+        ("/y/x{id}y", Err(conflict("/x/y{id}/"))),
+
+        ("/z/x{id}y", Ok(())),
+        ("/z/{id}", Ok(())),
+        ("/z/{id}y", Err(conflict("/z/x{id}y/"))),
+        ("/z/x{id}", Err(conflict("/z/x{id}y/"))),
+        ("/z/y{id}", Err(conflict("/z/x{id}y/"))),
+        ("/z/x{id}z", Err(conflict("/z/x{id}y/"))),
+        ("/z/z{id}y", Err(conflict("/z/x{id}y/"))),
+
         ("/bar/{id}", Ok(())),
         ("/bar/x{id}y", Ok(())),
+    ])
+    .run()
+}
+
+#[test]
+fn prefix_suffix_conflict() {
+    InsertTest(vec![
+        ("/a/{a}suffix", Ok(())),
+        ("/a/foo/prefix{a}", Ok(())),
+        ("/a/prefix{a}", Err(conflict("/a/{a}suffix"))),
+
+        ("/b/{a}suffix", Ok(())),
+        ("/b/prefix{a}", Err(conflict("/b/{a}suffix"))),
+        ("/b/prefix{a}suff", Err(conflict("/b/{a}suffix"))),
+        ("/b/prefix{a}suffix", Err(conflict("/b/{a}suffix"))),
+        ("/b/prefix{a}suffixabc", Err(conflict("/b/{a}suffix"))),
+
+        ("/c/prefix{a}", Ok(())),
+        ("/c/{a}suffix", Err(conflict("/c/prefix{a}"))),
+        ("/c/prefix{a}suffix", Err(conflict("/c/prefix{a}"))),
+        ("/c/prefixabc{a}suffix", Err(conflict("/c/prefix{a}"))),
+        ("/c/pre{a}suffix", Err(conflict("/c/prefix{a}"))),
+
+        ("/d/{a}", Ok(())),
+        ("/d/prefix{a}", Ok(())),
+        ("/d/{a}suffix", Err(conflict("/d/prefix{a}"))),
+        ("/d/prefix{a}suffix", Err(conflict("/d/prefix{a}"))),
+        ("/d/prefixabc{a}suffix", Err(conflict("/d/prefix{a}"))),
+        ("/d/pre{a}suffix", Err(conflict("/d/prefix{a}"))),
+
+        ("/e/{a}", Ok(())),
+        ("/e/{a}suffix", Ok(())),
+        ("/e/prefix{a}", Err(conflict("/e/{a}suffix"))),
+        ("/e/prefix{a}suff", Err(conflict("/e/{a}suffix"))),
+        ("/e/prefix{a}suffix", Err(conflict("/e/{a}suffix"))),
+        ("/e/prefix{a}suffixabc", Err(conflict("/e/{a}suffix"))),
+
+        ("/f/prefix{a}suffix", Ok(())),
+
+        ("/f/pre{a}", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/prefix{a}", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/prefixabc{a}", Err(conflict("/f/prefix{a}suffix"))),
+
+        ("/f/pre{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/prefix{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/prefixabc{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+
+        ("/f/prefix{a}suff", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/prefix{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/prefix{a}suffixabc", Err(conflict("/f/prefix{a}suffix"))),
+
+        ("/f/{a}suff", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/f/{a}suffixabc", Err(conflict("/f/prefix{a}suffix"))),
+
+        ("/g/{a}", Ok(())),
+        ("/g/prefix{a}suffix", Ok(())),
+
+        ("/g/pre{a}", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/prefix{a}", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/prefixabc{a}", Err(conflict("/f/prefix{a}suffix"))),
+
+        ("/g/pre{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/prefix{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/prefixabc{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+
+        ("/g/prefix{a}suff", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/prefix{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/prefix{a}suffixabc", Err(conflict("/f/prefix{a}suffix"))),
+
+        ("/g/{a}suff", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/{a}suffix", Err(conflict("/f/prefix{a}suffix"))),
+        ("/g/{a}suffixabc", Err(conflict("/f/prefix{a}suffix"))),
     ])
     .run()
 }
