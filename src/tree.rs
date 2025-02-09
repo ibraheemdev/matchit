@@ -34,7 +34,7 @@ pub struct Node<T> {
     // The value stored at this node.
     //
     // See `Node::at` for why an `UnsafeCell` is necessary.
-    value: Option<UnsafeCell<T>>,
+    pub(crate) value: Option<UnsafeCell<T>>,
 
     // A parameter name remapping, stored at nodes that hold values.
     pub(crate) remapping: ParamRemapping,
@@ -71,6 +71,52 @@ pub(crate) enum NodeType {
 unsafe impl<T: Send> Send for Node<T> {}
 unsafe impl<T: Sync> Sync for Node<T> {}
 
+/// Tracks the current node and its parent during insertion.
+struct InsertState<'node, T> {
+    parent: &'node mut Node<T>,
+    child: Option<usize>,
+}
+
+impl<'node, T> InsertState<'node, T> {
+    /// Returns a reference to the parent node for the traversal.
+    fn parent(&self) -> Option<&Node<T>> {
+        match self.child {
+            None => None,
+            Some(_) => Some(self.parent),
+        }
+    }
+
+    /// Returns a reference to the current node in the traversal.
+    fn node(&self) -> &Node<T> {
+        match self.child {
+            None => self.parent,
+            Some(i) => &self.parent.children[i],
+        }
+    }
+
+    /// Returns a mutable reference to the current node in the traversal.
+    fn node_mut(&mut self) -> &mut Node<T> {
+        match self.child {
+            None => self.parent,
+            Some(i) => &mut self.parent.children[i],
+        }
+    }
+
+    /// Move the current node to its i'th child.
+    fn set_child(self, i: usize) -> InsertState<'node, T> {
+        match self.child {
+            None => InsertState {
+                parent: self.parent,
+                child: Some(i),
+            },
+            Some(prev) => InsertState {
+                parent: &mut self.parent.children[prev],
+                child: Some(i),
+            },
+        }
+    }
+}
+
 impl<T> Node<T> {
     // Insert a route into the tree.
     pub fn insert(&mut self, route: String, val: T) -> Result<(), InsertError> {
@@ -88,21 +134,27 @@ impl<T> Node<T> {
             return Ok(());
         }
 
-        let mut node = self;
+        let mut state = InsertState {
+            parent: self,
+            child: None,
+        };
+
         'walk: loop {
             // Find the common prefix between the route and the current node.
-            let len = min(remaining.len(), node.prefix.len());
+            let len = min(remaining.len(), state.node().prefix.len());
             let common_prefix = (0..len)
                 .find(|&i| {
-                    remaining[i] != node.prefix[i]
+                    remaining[i] != state.node().prefix[i]
                     // Make sure not confuse the start of a wildcard with an escaped `{`.
-                        || remaining.is_escaped(i) != node.prefix.is_escaped(i)
+                        || remaining.is_escaped(i) != state.node().prefix.is_escaped(i)
                 })
                 .unwrap_or(len);
 
             // If this node has a longer prefix than we need, we have to fork and extract the
             // common prefix into a shared parent.
-            if node.prefix.len() > common_prefix {
+            if state.node().prefix.len() > common_prefix {
+                let node = state.node_mut();
+
                 // Move the non-matching suffix into a child node.
                 let suffix = node.prefix.as_ref().slice_off(common_prefix).to_owned();
                 let child = Node {
@@ -125,6 +177,8 @@ impl<T> Node<T> {
             }
 
             if remaining.len() == common_prefix {
+                let node = state.node_mut();
+
                 // This node must not already contain a value.
                 if node.value.is_some() {
                     return Err(InsertError::conflict(&route, remaining, node));
@@ -136,15 +190,16 @@ impl<T> Node<T> {
                 return Ok(());
             }
 
+            let common_remaining = remaining;
+
             // Otherwise, the route has a remaining non-matching suffix.
             //
             // We have to search deeper.
             remaining = remaining.slice_off(common_prefix);
             let next = remaining[0];
 
-            // For parameters with a suffix, we have to find the matching suffix or
-            // create a new child node.
-            if matches!(node.node_type, NodeType::Param { .. }) {
+            // For parameters with a suffix, we have to find the matching suffix or create a new child node.
+            if matches!(state.node().node_type, NodeType::Param { .. }) {
                 let terminator = remaining
                     .iter()
                     .position(|&b| b == b'/')
@@ -153,12 +208,31 @@ impl<T> Node<T> {
 
                 let suffix = remaining.slice_until(terminator);
 
-                for (i, child) in node.children.iter().enumerate() {
+                let mut extra_trailing_slash = false;
+                for (i, child) in state.node().children.iter().enumerate() {
                     // Find a matching suffix.
                     if *child.prefix == **suffix {
-                        node = &mut node.children[i];
-                        node.priority += 1;
+                        state = state.set_child(i);
+                        state.node_mut().priority += 1;
                         continue 'walk;
+                    }
+
+                    // The suffix matches except for an extra trailing slash.
+                    if child.prefix.len() <= suffix.len() {
+                        let (common, remaining) = suffix.split_at(child.prefix.len());
+                        if *common == *child.prefix && remaining == *b"/" {
+                            extra_trailing_slash = true;
+                        }
+                    }
+                }
+
+                // If we are inserting a conflicting suffix, and there is a static prefix that
+                // already leads to this route parameter, we have a prefix-suffix conflict.
+                if !extra_trailing_slash && !matches!(*suffix, b"" | b"/") {
+                    if let Some(parent) = state.parent() {
+                        if parent.prefix_wild_child_in_segment() {
+                            return Err(InsertError::conflict(&route, common_remaining, parent));
+                        }
                     }
                 }
 
@@ -168,19 +242,20 @@ impl<T> Node<T> {
                 }
 
                 // If there is no matching suffix, create a new suffix node.
-                let child = node.add_suffix_child(Node {
+                let child = state.node_mut().add_suffix_child(Node {
                     prefix: suffix.to_owned(),
                     node_type: NodeType::Static,
                     priority: 1,
                     ..Node::default()
                 });
-                node.node_type = NodeType::Param { suffix: true };
-                node = &mut node.children[child];
+                let has_suffix = !matches!(*suffix, b"" | b"/");
+                state.node_mut().node_type = NodeType::Param { suffix: has_suffix };
+                state = state.set_child(child);
 
                 // If this is the final route segment, insert the value.
                 if terminator == remaining.len() {
-                    node.value = Some(UnsafeCell::new(val));
-                    node.remapping = remapping;
+                    state.node_mut().value = Some(UnsafeCell::new(val));
+                    state.node_mut().remapping = remapping;
                     return Ok(());
                 }
 
@@ -190,32 +265,32 @@ impl<T> Node<T> {
 
                 // Create a static node unless we are inserting a parameter.
                 if remaining[0] != b'{' || remaining.is_escaped(0) {
-                    let child = node.add_child(Node {
+                    let child = state.node_mut().add_child(Node {
                         node_type: NodeType::Static,
                         priority: 1,
                         ..Node::default()
                     });
-                    node.indices.push(remaining[0]);
-                    node = &mut node.children[child];
+                    state.node_mut().indices.push(remaining[0]);
+                    state = state.set_child(child);
                 }
 
                 // Insert the remaining route.
-                let last = node.insert_route(remaining, val)?;
+                let last = state.node_mut().insert_route(remaining, val)?;
                 last.remapping = remapping;
                 return Ok(());
             }
 
             // Find a child node that matches the next character in the route.
-            for mut i in 0..node.indices.len() {
-                if next == node.indices[i] {
+            for mut i in 0..state.node().indices.len() {
+                if next == state.node().indices[i] {
                     // Make sure not confuse the start of a wildcard with an escaped `{` or `}`.
                     if matches!(next, b'{' | b'}') && !remaining.is_escaped(0) {
                         continue;
                     }
 
                     // Continue searching in the child.
-                    i = node.update_child_priority(i);
-                    node = &mut node.children[i];
+                    i = state.node_mut().update_child_priority(i);
+                    state = state.set_child(i);
                     continue 'walk;
                 }
             }
@@ -223,7 +298,31 @@ impl<T> Node<T> {
             // We couldn't find a matching child.
             //
             // If we're not inserting a wildcard we have to create a static child.
-            if (next != b'{' || remaining.is_escaped(0)) && node.node_type != NodeType::CatchAll {
+            if (next != b'{' || remaining.is_escaped(0))
+                && state.node().node_type != NodeType::CatchAll
+            {
+                let node = state.node_mut();
+
+                let terminator = remaining
+                    .iter()
+                    .position(|&b| b == b'/')
+                    .unwrap_or(remaining.len());
+
+                if let Ok(Some(wildcard)) = find_wildcard(remaining.slice_until(terminator)) {
+                    // If we are inserting a parameter prefix and this node already has a parameter suffix,
+                    // we have a prefix-suffix conflict.
+                    if wildcard.start > 0 && node.suffix_wild_child_in_segment() {
+                        return Err(InsertError::conflict(&route, remaining, node));
+                    }
+
+                    // Similarly, we are inserting a parameter suffix and this node already has a parameter
+                    // prefix, we have a prefix-suffix conflict.
+                    let suffix = remaining.slice_off(wildcard.end);
+                    if !matches!(*suffix, b"" | b"/") && node.prefix_wild_child_in_segment() {
+                        return Err(InsertError::conflict(&route, remaining, node));
+                    }
+                }
+
                 node.indices.push(next);
                 let child = node.add_child(Node::default());
                 let child = node.update_child_priority(child);
@@ -237,32 +336,114 @@ impl<T> Node<T> {
             // We're trying to insert a wildcard.
             //
             // If this node already has a wildcard child, we have to make sure it matches.
-            if node.wild_child {
+            if state.node().wild_child {
                 // Wildcards are always the last child.
-                node = node.children.last_mut().unwrap();
-                node.priority += 1;
+                let wild_child = state.node().children.len() - 1;
+                state = state.set_child(wild_child);
+                state.node_mut().priority += 1;
 
                 // Make sure the route parameter matches.
-                if let Some(wildcard) = remaining.get(..node.prefix.len()) {
-                    if *wildcard != *node.prefix {
-                        return Err(InsertError::conflict(&route, remaining, node));
+                if let Some(wildcard) = remaining.get(..state.node().prefix.len()) {
+                    if *wildcard != *state.node().prefix {
+                        return Err(InsertError::conflict(&route, remaining, state.node()));
                     }
                 }
 
                 // Catch-all routes cannot have children.
-                if node.node_type == NodeType::CatchAll {
-                    return Err(InsertError::conflict(&route, remaining, node));
+                if state.node().node_type == NodeType::CatchAll {
+                    return Err(InsertError::conflict(&route, remaining, state.node()));
+                }
+
+                if let Some(parent) = state.parent() {
+                    // If there is a route with both a prefix and a suffix, and we are inserting a route with
+                    // a matching prefix but _without_ a suffix, we have a prefix-suffix conflict.
+                    if !parent.prefix.ends_with(b"/")
+                        && matches!(state.node().node_type, NodeType::Param { suffix: true })
+                    {
+                        let terminator = remaining
+                            .iter()
+                            .position(|&b| b == b'/')
+                            .map(|b| b + 1)
+                            .unwrap_or(remaining.len());
+
+                        if let Ok(Some(wildcard)) = find_wildcard(remaining.slice_until(terminator))
+                        {
+                            let suffix = remaining.slice_off(wildcard.end);
+                            if matches!(*suffix, b"" | b"/") {
+                                return Err(InsertError::conflict(&route, remaining, parent));
+                            }
+                        }
+                    }
                 }
 
                 // Continue with the wildcard node.
                 continue 'walk;
             }
 
+            if let Ok(Some(wildcard)) = find_wildcard(remaining) {
+                let node = state.node();
+                let suffix = remaining.slice_off(wildcard.end);
+
+                // If we are inserting a suffix and there is a static prefix that already leads to this
+                // route parameter, we have a prefix-suffix conflict.
+                if !matches!(*suffix, b"" | b"/") && node.prefix_wild_child_in_segment() {
+                    return Err(InsertError::conflict(&route, remaining, node));
+                }
+
+                // Similarly, if we are inserting a longer prefix, and there is a route that leads to this
+                // parameter that includes a suffix, we have a prefix-suffix conflicts.
+                if common_remaining[common_prefix - 1] != b'/'
+                    && node.suffix_wild_child_in_segment()
+                {
+                    return Err(InsertError::conflict(&route, remaining, node));
+                }
+            }
+
             // Otherwise, create a new node for the wildcard and insert the route.
-            let last = node.insert_route(remaining, val)?;
+            let last = state.node_mut().insert_route(remaining, val)?;
             last.remapping = remapping;
             return Ok(());
         }
+    }
+
+    /// Returns `true` if there is a wildcard node that contains a prefix within the current route segment,
+    /// i.e. before the next trailing slash
+    fn prefix_wild_child_in_segment(&self) -> bool {
+        if self.prefix.ends_with(b"/") {
+            self.children.iter().any(Node::prefix_wild_child_in_segment)
+        } else {
+            self.children.iter().any(Node::wild_child_in_segment)
+        }
+    }
+
+    /// Returns `true` if there is a wildcard node within the current route segment, i.e. before the
+    /// next trailing slash.
+    fn wild_child_in_segment(&self) -> bool {
+        if self.prefix.contains(&b'/') {
+            return false;
+        }
+
+        if matches!(self.node_type, NodeType::Param { .. }) {
+            return true;
+        }
+
+        self.children.iter().any(Node::wild_child_in_segment)
+    }
+
+    /// Returns `true` if there is a wildcard parameter node that contains a suffix within the current route
+    /// segment, i.e. before a trailing slash.
+    fn suffix_wild_child_in_segment(&self) -> bool {
+        if matches!(self.node_type, NodeType::Param { suffix: true }) {
+            return true;
+        }
+
+        self.children.iter().any(|child| {
+            if child.prefix.contains(&b'/') {
+                return false;
+            }
+
+            child.suffix_wild_child_in_segment()
+        })
     }
 
     // Insert a route at this node.
@@ -322,7 +503,6 @@ impl<T> Node<T> {
             let terminator = prefix
                 .iter()
                 .position(|&b| b == b'/')
-                // Include the '/' in the suffix.
                 .map(|b| b + 1)
                 .unwrap_or(prefix.len());
 
