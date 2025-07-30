@@ -108,6 +108,16 @@ macro_rules! p {
     };
 }
 
+// https://github.com/ibraheemdev/matchit/issues/75
+#[test]
+fn empty_route() {
+    MatchTest {
+        routes: vec!["", "/foo"],
+        matches: vec![("", "", p! {}), ("/foo", "/foo", p! {})],
+    }
+    .run()
+}
+
 // https://github.com/ibraheemdev/matchit/issues/42
 #[test]
 fn bare_catchall() {
