@@ -81,7 +81,7 @@ impl<T> Node<T> {
         self.priority += 1;
 
         // If the tree is empty, insert the root node.
-        if self.prefix.is_empty() && self.children.is_empty() {
+        if self.value.is_none() && self.children.is_empty() {
             let last = self.insert_route(remaining, val)?;
             last.remapping = remapping;
             self.node_type = NodeType::Root;
