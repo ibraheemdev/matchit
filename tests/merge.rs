@@ -32,7 +32,7 @@ fn merge_conflict() {
     let errors = root.merge(child).unwrap_err();
 
     assert_eq!(
-        errors.get(0),
+        errors.first(),
         Some(&InsertError::Conflict {
             with: "/foo".into()
         })

@@ -33,7 +33,7 @@ impl RemoveTest {
         }
 
         for route in self.remaining {
-            assert!(matches!(router.at(route), Ok(_)), "remaining {route}");
+            assert!(router.at(route).is_ok(), "remaining {route}");
         }
     }
 }

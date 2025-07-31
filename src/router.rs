@@ -132,6 +132,7 @@ impl<T> Router<T> {
         self.root.remove(path.into())
     }
 
+    /// Test helper that ensures route priorities are consistent.
     #[cfg(feature = "__test_helpers")]
     pub fn check_priorities(&self) -> Result<u32, (u32, u32)> {
         self.root.check_priorities()
