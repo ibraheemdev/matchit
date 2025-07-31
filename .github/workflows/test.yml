@@ -1,0 +1,64 @@
+# This is the main CI workflow that runs the test suite on all pushes to main and all pull requests.
+# It runs the following jobs:
+# - required: runs the test suite on ubuntu with stable and beta rust toolchains
+#   requirements of this crate, and its dependencies
+# - os-check: runs the test suite on mac and windows
+# See check.yml for information about how the concurrency cancellation and workflow triggering works
+permissions:
+  contents: read
+on:
+  push:
+    branches: [master]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: test
+jobs:
+  required:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    name: ubuntu / ${{ matrix.toolchain }}
+    strategy:
+      matrix:
+        # run on stable and beta to ensure that tests won't break on the next version of the rust
+        # toolchain
+        toolchain: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - name: cargo generate-lockfile
+        # enable this ci template to run regardless of whether the lockfile is checked in or not
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+      # https://twitter.com/jonhoo/status/1571290371124260865
+      - name: cargo test --locked
+        run: cargo test --locked --all-features --all-targets
+      # https://github.com/rust-lang/cargo/issues/6669
+      - name: cargo test --doc
+        run: cargo test --locked --all-features --doc
+  os-check:
+    # run cargo test on mac and windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    name: ${{ matrix.os }} / stable
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: cargo generate-lockfile
+        if: hashFiles('Cargo.lock') == ''
+        run: cargo generate-lockfile
+      - name: cargo test
+        run: cargo test --locked --all-features --all-targets
