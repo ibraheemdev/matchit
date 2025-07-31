@@ -96,7 +96,7 @@ async fn main() {
                 )
                 .await
             {
-                println!("Error serving connection: {:?}", err);
+                println!("Error serving connection: {err:?}");
             }
         });
     }

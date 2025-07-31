@@ -63,6 +63,7 @@ fn overlapping_param_backtracking() {
 
 struct MatchTest {
     routes: Vec<&'static str>,
+    #[allow(clippy::type_complexity)]
     matches: Vec<(
         &'static str,
         &'static str,
@@ -88,8 +89,8 @@ impl MatchTest {
                     let got = x.params.iter().collect::<Vec<_>>();
                     assert_eq!(params.unwrap(), got);
 
-                    router.at_mut(path).unwrap().value.push_str("Z");
-                    assert!(router.at(path).unwrap().value.contains("Z"));
+                    router.at_mut(path).unwrap().value.push('Z');
+                    assert!(router.at(path).unwrap().value.contains('Z'));
                     router.at_mut(path).unwrap().value.pop();
                 }
                 Err(err) => {

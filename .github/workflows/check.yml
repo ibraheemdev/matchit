@@ -57,6 +57,7 @@ jobs:
       - name: cargo clippy
         uses: giraffate/clippy-action@v1
         with:
+          clippy_flags: --workspace --all-targets --all-features -- -Dclippy::all
           reporter: 'github-pr-check'
           github_token: ${{ secrets.GITHUB_TOKEN }}
   semver:

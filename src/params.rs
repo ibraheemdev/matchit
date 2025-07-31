@@ -27,6 +27,15 @@ impl<'k, 'v> Param<'k, 'v> {
     }
 }
 
+impl<'k, 'v> fmt::Debug for Param<'k, 'v> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Param")
+            .field("key", &self.key_str())
+            .field("value", &self.value_str())
+            .finish()
+    }
+}
+
 /// A list of parameters returned by a route match.
 ///
 /// ```rust
@@ -174,6 +183,7 @@ impl fmt::Debug for Params<'_, '_> {
 }
 
 /// An iterator over the keys and values of a route's [parameters](crate::Params).
+#[derive(Debug)]
 pub struct ParamsIter<'ps, 'k, 'v> {
     kind: ParamsIterKind<'ps, 'k, 'v>,
 }
@@ -188,6 +198,7 @@ impl<'ps, 'k, 'v> ParamsIter<'ps, 'k, 'v> {
     }
 }
 
+#[derive(Debug)]
 enum ParamsIterKind<'ps, 'k, 'v> {
     Small(iter::Take<slice::Iter<'ps, Param<'k, 'v>>>),
     Large(slice::Iter<'ps, Param<'k, 'v>>),

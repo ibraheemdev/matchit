@@ -117,7 +117,7 @@ impl MergeError {
 impl fmt::Display for MergeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for error in self.0.iter() {
-            writeln!(f, "{}", error)?;
+            writeln!(f, "{error}")?;
         }
 
         Ok(())

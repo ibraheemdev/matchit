@@ -123,7 +123,13 @@ by the number of children with registered values, increasing the chance of choos
 As it turns out, this method of routing is extremely fast. See the [benchmark results](https://github.com/ibraheemdev/matchit?tab=readme-ov-file#benchmarks) for details.
 */
 
-#![deny(rust_2018_idioms, clippy::all)]
+#![deny(
+    missing_debug_implementations,
+    missing_docs,
+    dead_code,
+    unsafe_op_in_unsafe_fn,
+    rustdoc::broken_intra_doc_links
+)]
 
 mod error;
 mod escape;
