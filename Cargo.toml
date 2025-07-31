@@ -4,6 +4,7 @@ version = "0.8.6"
 license = "MIT AND BSD-3-Clause"
 authors = ["Ibraheem Ahmed <ibraheem@ibraheem.ca>"]
 edition = "2021"
+rust-version = "1.66"
 description = "A high performance, zero-copy URL router."
 categories = ["network-programming", "algorithms"]
 keywords = ["router", "path", "tree", "match", "url"]
