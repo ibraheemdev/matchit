@@ -466,7 +466,7 @@ impl<T> Node<T> {
                 return Ok(node);
             };
 
-            // Insering a catch-all route.
+            // Inserting a catch-all route.
             if prefix[wildcard.clone()][1] == b'*' {
                 // Ensure there is no suffix after the parameter, e.g. `/foo/{*x}/bar`.
                 if wildcard.end != prefix.len() {
