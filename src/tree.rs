@@ -248,7 +248,8 @@ impl<T> Node<T> {
                     priority: 1,
                     ..Node::default()
                 });
-                let has_suffix = !matches!(*suffix, b"" | b"/");
+                let has_suffix = matches!(state.node().node_type, NodeType::Param { suffix: true })
+                    || !matches!(*suffix, b"" | b"/");
                 state.node_mut().node_type = NodeType::Param { suffix: has_suffix };
                 state = state.set_child(child);
 
@@ -409,6 +410,10 @@ impl<T> Node<T> {
     /// Returns `true` if there is a wildcard node that contains a prefix within the current route segment,
     /// i.e. before the next trailing slash
     fn prefix_wild_child_in_segment(&self) -> bool {
+        if matches!(self.node_type, NodeType::Root) && self.prefix.is_empty() {
+            return false;
+        }
+
         if self.prefix.ends_with(b"/") {
             self.children.iter().any(Node::prefix_wild_child_in_segment)
         } else {
