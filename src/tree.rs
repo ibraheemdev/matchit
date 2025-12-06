@@ -248,7 +248,8 @@ impl<T> Node<T> {
                     priority: 1,
                     ..Node::default()
                 });
-                let has_suffix = !matches!(*suffix, b"" | b"/");
+                let has_suffix = matches!(state.node().node_type, NodeType::Param { suffix: true })
+                    || !matches!(*suffix, b"" | b"/");
                 state.node_mut().node_type = NodeType::Param { suffix: has_suffix };
                 state = state.set_child(child);
 
