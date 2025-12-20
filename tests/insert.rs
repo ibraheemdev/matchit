@@ -16,6 +16,12 @@ fn conflict(with: &'static str) -> InsertError {
     InsertError::Conflict { with: with.into() }
 }
 
+// https://github.com/ibraheemdev/matchit/issues/84
+#[test]
+fn root_prefix_issue() {
+    InsertTest(vec![("{foo}", Ok(())), ("{foo}suffix", Ok(()))]).run()
+}
+
 #[test]
 fn wildcard_conflict() {
     InsertTest(vec![

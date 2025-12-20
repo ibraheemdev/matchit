@@ -134,6 +134,16 @@ fn bare_catchall() {
     .run()
 }
 
+// https://github.com/ibraheemdev/matchit/issues/83
+#[test]
+fn param_suffix_flag_issue() {
+    MatchTest {
+        routes: vec!["/foo/{foo}suffix", "/foo/{foo}/bar"],
+        matches: vec![("/foo/barsuffix", "/foo/{foo}suffix", p! { "foo" => "bar" })],
+    }
+    .run()
+}
+
 #[test]
 fn normalized() {
     MatchTest {
