@@ -16,10 +16,18 @@ fn conflict(with: &'static str) -> InsertError {
     InsertError::Conflict { with: with.into() }
 }
 
-// https://github.com/ibraheemdev/matchit/issues/84
+// Regression test for https://github.com/ibraheemdev/matchit/issues/84.
 #[test]
-fn root_prefix_issue() {
-    InsertTest(vec![("{foo}", Ok(())), ("{foo}suffix", Ok(()))]).run()
+fn missing_leading_slash_suffix() {
+    InsertTest(vec![("/{foo}", Ok(())), ("/{foo}suffix", Ok(()))]).run();
+    InsertTest(vec![("{foo}", Ok(())), ("{foo}suffix", Ok(()))]).run();
+}
+
+// Regression test for https://github.com/ibraheemdev/matchit/issues/82.
+#[test]
+fn missing_leading_slash_conflict() {
+    InsertTest(vec![("{foo}/", Ok(())), ("foo/", Ok(()))]).run();
+    InsertTest(vec![("foo/", Ok(())), ("{foo}/", Ok(()))]).run();
 }
 
 #[test]

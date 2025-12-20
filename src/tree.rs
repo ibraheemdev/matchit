@@ -393,11 +393,11 @@ impl<T> Node<T> {
                 }
 
                 // Similarly, if we are inserting a longer prefix, and there is a route that leads to this
-                // parameter that includes a suffix, we have a prefix-suffix conflicts.
-                if common_remaining[common_prefix - 1] != b'/'
-                    && node.suffix_wild_child_in_segment()
-                {
-                    return Err(InsertError::conflict(&route, remaining, node));
+                // parameter that includes a suffix, we have a prefix-suffix conflict.
+                if let Some(i) = common_prefix.checked_sub(1) {
+                    if common_remaining[i] != b'/' && node.suffix_wild_child_in_segment() {
+                        return Err(InsertError::conflict(&route, remaining, node));
+                    }
                 }
             }
 
