@@ -554,6 +554,279 @@ fn catchall_overlap() {
 }
 
 #[test]
+fn non_terminal_catchalls() {
+    MatchTest {
+        routes: vec![
+            "/v2/{*name}/",
+            "/v2/{*name}/blobs/{digest}",
+            "/v2/{*name}/manifests/{reference}",
+        ],
+        matches: vec![
+            (
+                "/v2/library/ubuntu/",
+                "/v2/{*name}/",
+                p! { "name" => "library/ubuntu" },
+            ),
+            (
+                "/v2/library/ubuntu/blobs/sha256:abc",
+                "/v2/{*name}/blobs/{digest}",
+                p! { "name" => "library/ubuntu", "digest" => "sha256:abc" },
+            ),
+            (
+                "/v2/team/project/image/manifests/latest",
+                "/v2/{*name}/manifests/{reference}",
+                p! { "name" => "team/project/image", "reference" => "latest" },
+            ),
+            (
+                "/v2/library/blobs/sha256:abc",
+                "/v2/{*name}/blobs/{digest}",
+                p! { "name" => "library", "digest" => "sha256:abc" },
+            ),
+            (
+                "/v2/blobs/blobs/sha256:abc",
+                "/v2/{*name}/blobs/{digest}",
+                p! { "name" => "blobs", "digest" => "sha256:abc" },
+            ),
+            (
+                "/v2/ubuntu/blobs/sha256:abc",
+                "/v2/{*name}/blobs/{digest}",
+                p! { "name" => "ubuntu", "digest" => "sha256:abc" },
+            ),
+            ("/v2/library/ubuntu/tags/list", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+// A non-terminal catch-all followed by sibling literals must be able to backtrack across boundary
+// positions when the greediest boundary leads to a dead end.
+#[test]
+fn non_terminal_catchall_boundary_backtracking() {
+    let mut router = Router::new();
+    router
+        .insert("/v2/{repository}/{*image}/blobs/{digest}", "blob")
+        .unwrap();
+    router
+        .insert(
+            "/v2/{repository}/{*image}/manifests/{reference}",
+            "manifest",
+        )
+        .unwrap();
+    router
+        .insert("/v2/{repository}/{*image}/tags/list", "tags")
+        .unwrap();
+    router
+        .insert("/v2/{repository}/{*image}/referrers/{digest}", "referrers")
+        .unwrap();
+
+    // The shared `/` node has children with indices b, m, t, r. A final `manifests/{tag}` segment
+    // must route regardless of the tag's first character.
+    for tag in [
+        "latest",
+        "v1",
+        "test",
+        "main",
+        "master",
+        "beta",
+        "release",
+        "rc1",
+        "bookworm",
+        "tags",
+        "blobs",
+        "referrers",
+        "manifests",
+    ] {
+        let path = format!("/v2/repo/myimg/manifests/{tag}");
+        let m = router
+            .at(&path)
+            .unwrap_or_else(|e| panic!("{e} for {path}"));
+        assert_eq!(*m.value, "manifest", "value for {path}");
+        assert_eq!(m.params.get("image"), Some("myimg"), "image for {path}");
+        assert_eq!(m.params.get("reference"), Some(tag), "reference for {path}");
+    }
+
+    // Multi-segment image is still captured greedily.
+    let m = router.at("/v2/repo/team/sub/manifests/latest").unwrap();
+    assert_eq!(*m.value, "manifest");
+    assert_eq!(m.params.get("image"), Some("team/sub"));
+    assert_eq!(m.params.get("reference"), Some("latest"));
+
+    // An image name that itself contains a sibling literal: the boundary must
+    // be the LAST occurrence, leaving the trailing literal to route.
+    let m = router
+        .at("/v2/repo/team/manifests/blobs/sha256abc")
+        .unwrap();
+    assert_eq!(*m.value, "blob");
+    assert_eq!(m.params.get("image"), Some("team/manifests"));
+    assert_eq!(m.params.get("digest"), Some("sha256abc"));
+
+    let m = router.at("/v2/repo/team/blobs/manifests/v1").unwrap();
+    assert_eq!(*m.value, "manifest");
+    assert_eq!(m.params.get("image"), Some("team/blobs"));
+    assert_eq!(m.params.get("reference"), Some("v1"));
+
+    // Other sibling routes still work.
+    let m = router.at("/v2/repo/myimg/tags/list").unwrap();
+    assert_eq!(*m.value, "tags");
+    assert_eq!(m.params.get("image"), Some("myimg"));
+
+    let m = router.at("/v2/repo/myimg/blobs/sha256abc").unwrap();
+    assert_eq!(*m.value, "blob");
+    assert_eq!(m.params.get("image"), Some("myimg"));
+    assert_eq!(m.params.get("digest"), Some("sha256abc"));
+
+    let m = router.at("/v2/repo/myimg/referrers/sha256abc").unwrap();
+    assert_eq!(*m.value, "referrers");
+    assert_eq!(m.params.get("image"), Some("myimg"));
+    assert_eq!(m.params.get("digest"), Some("sha256abc"));
+
+    // A genuinely unmatched path still returns NotFound.
+    assert_eq!(
+        router.at("/v2/repo/img/bogus/x").unwrap_err(),
+        MatchError::NotFound,
+    );
+}
+
+#[test]
+fn multiple_non_terminal_catchalls() {
+    MatchTest {
+        routes: vec!["/api/{*namespace}/repos/{*name}/manifests/{reference}"],
+        matches: vec![
+            (
+                "/api/org/team/repos/library/ubuntu/manifests/latest",
+                "/api/{*namespace}/repos/{*name}/manifests/{reference}",
+                p! { "namespace" => "org/team", "name" => "library/ubuntu", "reference" => "latest" },
+            ),
+            (
+                "/api/repos/repos/library/ubuntu/manifests/latest",
+                "/api/{*namespace}/repos/{*name}/manifests/{reference}",
+                p! { "namespace" => "repos", "name" => "library/ubuntu", "reference" => "latest" },
+            ),
+            (
+                "/api/org/team/repos/manifests/manifests/latest",
+                "/api/{*namespace}/repos/{*name}/manifests/{reference}",
+                p! { "namespace" => "org/team", "name" => "manifests", "reference" => "latest" },
+            ),
+            (
+                "/api/repos/repos/manifests/manifests/latest",
+                "/api/{*namespace}/repos/{*name}/manifests/{reference}",
+                p! { "namespace" => "repos", "name" => "manifests", "reference" => "latest" },
+            ),
+            (
+                "/api/org/repos/repos/library/repos/ubuntu/manifests/latest",
+                "/api/{*namespace}/repos/{*name}/manifests/{reference}",
+                p! { "namespace" => "org/repos/repos/library", "name" => "ubuntu", "reference" => "latest" },
+            ),
+            ("/api/org/team/repos/library/ubuntu/tags/list", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+// With sibling literals after a non-terminal catch-all, boundary backtracking must pick the correct
+// branch even when the final segment's first character collides with a sibling literal's first
+// character. Here `manifests` and `tags` share no first character, but `m` (from a tag like `main`)
+// collides with `manifests`, and `t` (from `test`) collides with `tags`.
+#[test]
+fn non_terminal_catchall_sibling_literal_collisions() {
+    MatchTest {
+        routes: vec![
+            "/v2/{*image}/blobs/{digest}",
+            "/v2/{*image}/manifests/{reference}",
+            "/v2/{*image}/tags/list",
+            "/v2/{*image}/referrers/{digest}",
+        ],
+        matches: vec![
+            (
+                "/v2/myimg/manifests/test",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "myimg", "reference" => "test" },
+            ),
+            (
+                "/v2/myimg/manifests/main",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "myimg", "reference" => "main" },
+            ),
+            (
+                "/v2/myimg/manifests/bookworm",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "myimg", "reference" => "bookworm" },
+            ),
+            (
+                "/v2/myimg/manifests/rc1",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "myimg", "reference" => "rc1" },
+            ),
+            (
+                "/v2/myimg/manifests/release",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "myimg", "reference" => "release" },
+            ),
+            (
+                "/v2/myimg/manifests/tags",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "myimg", "reference" => "tags" },
+            ),
+            (
+                "/v2/myimg/manifests/blobs",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "myimg", "reference" => "blobs" },
+            ),
+            // Image name itself contains a sibling literal segment.
+            (
+                "/v2/team/manifests/blobs/sha256abc",
+                "/v2/{*image}/blobs/{digest}",
+                p! { "image" => "team/manifests", "digest" => "sha256abc" },
+            ),
+            (
+                "/v2/team/blobs/manifests/v1",
+                "/v2/{*image}/manifests/{reference}",
+                p! { "image" => "team/blobs", "reference" => "v1" },
+            ),
+            // No matching route after the catch-all.
+            ("/v2/img/bogus/x", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+#[test]
+fn multiple_non_terminal_catchalls_with_terminal_catchall() {
+    MatchTest {
+        routes: vec!["/api/{*namespace}/repos/{*name}/blobs/{*digest}"],
+        matches: vec![
+            (
+                "/api/org/team/repos/library/ubuntu/blobs/sha256/abc",
+                "/api/{*namespace}/repos/{*name}/blobs/{*digest}",
+                p! { "namespace" => "org/team", "name" => "library/ubuntu", "digest" => "sha256/abc" },
+            ),
+            (
+                "/api/repos/repos/library/ubuntu/blobs/sha256/abc",
+                "/api/{*namespace}/repos/{*name}/blobs/{*digest}",
+                p! { "namespace" => "repos", "name" => "library/ubuntu", "digest" => "sha256/abc" },
+            ),
+            (
+                "/api/org/team/repos/blobs/blobs/sha256/abc",
+                "/api/{*namespace}/repos/{*name}/blobs/{*digest}",
+                p! { "namespace" => "org/team", "name" => "blobs", "digest" => "sha256/abc" },
+            ),
+            (
+                "/api/repos/repos/blobs/blobs/sha256/abc",
+                "/api/{*namespace}/repos/{*name}/blobs/{*digest}",
+                p! { "namespace" => "repos", "name" => "blobs", "digest" => "sha256/abc" },
+            ),
+            (
+                "/api/org/repos/repos/library/repos/ubuntu/blobs/sha256/abc",
+                "/api/{*namespace}/repos/{*name}/blobs/{*digest}",
+                p! { "namespace" => "org/repos/repos/library", "name" => "ubuntu", "digest" => "sha256/abc" },
+            ),
+            ("/api/org/team/repos/library/ubuntu/tags/list", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+#[test]
 fn escaped() {
     MatchTest {
         routes: vec![

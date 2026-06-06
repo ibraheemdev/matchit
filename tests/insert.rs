@@ -271,9 +271,9 @@ fn invalid_catchall() {
         ("/non-leading-{*catchall}", Ok(())),
         ("/foo/bar{*catchall}", Ok(())),
         ("/src/{*filepath}x", Err(InsertError::InvalidCatchAll)),
-        ("/src/{*filepath}/x", Err(InsertError::InvalidCatchAll)),
+        ("/src/{*filepath}/x", Ok(())),
         ("/src2/", Ok(())),
-        ("/src2/{*filepath}/x", Err(InsertError::InvalidCatchAll)),
+        ("/src2/{*filepath}/x", Ok(())),
     ])
     .run()
 }

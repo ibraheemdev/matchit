@@ -168,10 +168,10 @@ impl<'k, 'v> Params<'k, 'v> {
 
     // Applies a transformation function to each key.
     #[inline]
-    pub(crate) fn for_each_key_mut(&mut self, f: impl Fn((usize, &mut Param<'k, 'v>))) {
+    pub(crate) fn for_each_key_mut(&mut self, mut f: impl FnMut((usize, &mut Param<'k, 'v>))) {
         match &mut self.kind {
-            ParamsKind::Small(arr, len) => arr.iter_mut().take(*len).enumerate().for_each(f),
-            ParamsKind::Large(vec) => vec.iter_mut().enumerate().for_each(f),
+            ParamsKind::Small(arr, len) => arr.iter_mut().take(*len).enumerate().for_each(&mut f),
+            ParamsKind::Large(vec) => vec.iter_mut().enumerate().for_each(&mut f),
         }
     }
 }

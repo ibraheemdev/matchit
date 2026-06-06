@@ -52,17 +52,22 @@ assert_eq!(matched.params.get("id"), Some("1"));
 assert!(router.at("/images/img-1.jpg").is_err());
 ```
 
-Catch-all parameters start with a `*` and match anything until the end of the path. They must always be at the *end* of the route.
+Catch-all parameters start with a `*` and match anything until the next static segment, or the end of the path.
 
 ```rust,ignore
 let mut router = Router::new();
 router.insert("/{*rest}", true)?;
+router.insert("/v2/{*name}/manifests/{reference}", true)?;
 
 let matched = router.at("/foo.html")?;
 assert_eq!(matched.params.get("rest"), Some("foo.html"));
 
 let matched = router.at("/static/bar.css")?;
 assert_eq!(matched.params.get("rest"), Some("static/bar.css"));
+
+let matched = router.at("/v2/library/ubuntu/manifests/latest")?;
+assert_eq!(matched.params.get("name"), Some("library/ubuntu"));
+assert_eq!(matched.params.get("reference"), Some("latest"));
 
 // Note that this would lead to an empty parameter value.
 assert!(router.at("/").is_err());
@@ -107,7 +112,7 @@ Given set of routes, their overlapping segments may include, in order of priorit
   - A single route parameter with both a prefix and a suffix (`/a{x}b`).
 - *One* of the following;
   - A single standalone parameter (`/{x}`).
-  - A single standalone catch-all parameter (`/{*rest}`). Note this only applies to the final route segment.
+  - A single standalone catch-all parameter (`/{*segments}/foo`, `/{*rest}`).
 
 Any other combination of route segments is considered ambiguous, and attempting to insert such a route will result in an error.
 

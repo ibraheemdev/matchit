@@ -25,7 +25,7 @@ pub enum InsertError {
     /// Note you can use `{{` or `}}` to escape literal brackets.
     InvalidParam,
 
-    /// Catch-all parameters are only allowed at the end of a path.
+    /// Catch-all parameters cannot have a suffix in the same path segment.
     InvalidCatchAll,
 }
 
@@ -42,10 +42,12 @@ impl fmt::Display for InsertError {
                 write!(f, "Only one parameter is allowed per path segment")
             }
             Self::InvalidParam => write!(f, "Parameters must be registered with a valid name"),
-            Self::InvalidCatchAll => write!(
-                f,
-                "Catch-all parameters are only allowed at the end of a route"
-            ),
+            Self::InvalidCatchAll => {
+                write!(
+                    f,
+                    "Catch-all parameters cannot have a suffix in the same path segment",
+                )
+            }
         }
     }
 }

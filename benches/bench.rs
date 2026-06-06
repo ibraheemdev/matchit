@@ -111,7 +111,50 @@ fn compare_routers(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, compare_routers);
+fn catchall(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Catch-all");
+
+    let mut terminal = matchit::Router::new();
+    terminal.insert("/src/{*path}", true).unwrap();
+    group.bench_function("terminal", |b| {
+        b.iter(|| {
+            let result = black_box(terminal.at(black_box("/src/some/nested/file.png")).unwrap());
+            assert!(*result.value);
+            assert_eq!(result.params.get("path"), Some("some/nested/file.png"));
+        });
+    });
+
+    let mut non_terminal = matchit::Router::new();
+    non_terminal
+        .insert("/v2/{*name}/blobs/{digest}", true)
+        .unwrap();
+    non_terminal
+        .insert("/v2/{*name}/manifests/{reference}", true)
+        .unwrap();
+    group.bench_function("non-terminal", |b| {
+        b.iter(|| {
+            let result = black_box(
+                non_terminal
+                    .at(black_box("/v2/team/project/image/blobs/sha256:abc"))
+                    .unwrap(),
+            );
+            assert!(*result.value);
+            assert_eq!(result.params.get("name"), Some("team/project/image"));
+            assert_eq!(result.params.get("digest"), Some("sha256:abc"));
+        });
+    });
+
+    group.bench_function("non-terminal repeated-boundary miss", |b| {
+        b.iter(|| {
+            let result = black_box(non_terminal.at(black_box("/v2/a/blobs/b/blobs/c/tags/list")));
+            assert!(result.is_err());
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, compare_routers, catchall);
 criterion_main!(benches);
 
 macro_rules! routes {
