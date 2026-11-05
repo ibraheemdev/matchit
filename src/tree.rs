@@ -785,6 +785,35 @@ struct Skipped<'node, 'path, T> {
     params: usize,
 }
 
+// Most searches skip at most one wildcard, so we can avoid
+// a heap allocation in the common case.
+struct SkippedStack<'node, 'path, T> {
+    // The most recently skipped node.
+    last: Option<Skipped<'node, 'path, T>>,
+    rest: Vec<Skipped<'node, 'path, T>>,
+}
+
+impl<'node, 'path, T> SkippedStack<'node, 'path, T> {
+    fn new() -> Self {
+        Self {
+            last: None,
+            rest: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, skipped: Skipped<'node, 'path, T>) {
+        if let Some(prev) = self.last.replace(skipped) {
+            self.rest.push(prev);
+        }
+    }
+
+    fn pop(&mut self) -> Option<Skipped<'node, 'path, T>> {
+        let skipped = self.last.take()?;
+        self.last = self.rest.pop();
+        Some(skipped)
+    }
+}
+
 impl<T> Node<T> {
     // Returns the node matching the given path.
     //
@@ -798,7 +827,7 @@ impl<T> Node<T> {
         let mut node = self;
         let mut backtracking = false;
         let mut params = Params::new();
-        let mut skipped: Vec<Skipped<'_, '_, T>> = Vec::new();
+        let mut skipped = SkippedStack::new();
 
         'backtrack: loop {
             'walk: loop {

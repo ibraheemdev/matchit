@@ -1168,3 +1168,29 @@ fn wildcard() {
     }
     .run()
 }
+
+#[test]
+fn deep_backtracking() {
+    MatchTest {
+        routes: vec![
+            "/{*rest}",
+            "/a/{x}/never",
+            "/a/b/{x}/never",
+            "/a/b/c/{x}/never",
+            "/a/b/c/d/{x}/never",
+            "/a/b/c/d/e/{x}/never",
+            "/a/b/c/d/e/f",
+        ],
+        matches: vec![
+            ("/a/b/c/d/e/f", "/a/b/c/d/e/f", p! {}),
+            ("/a/b/x/never", "/a/b/{x}/never", p! { "x" => "x" }),
+            ("/a/b/c/d/x/never", "/a/b/c/d/{x}/never", p! { "x" => "x" }),
+            (
+                "/a/b/c/d/e/zzz",
+                "/{*rest}",
+                p! { "rest" => "a/b/c/d/e/zzz" },
+            ),
+        ],
+    }
+    .run()
+}
