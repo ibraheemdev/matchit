@@ -648,6 +648,35 @@ fn wildcard_suffix() {
 }
 
 #[test]
+fn wildcard_suffix_backtracking() {
+    MatchTest {
+        routes: vec![
+            "/{a}.png/x",
+            "/{a}/y",
+            "/files/{a}.tar.gz/x",
+            "/files/{a}.gz/y",
+        ],
+        matches: vec![
+            ("/foo.png/x", "/{a}.png/x", p! { "a" => "foo" }),
+            ("/foo.png/y", "/{a}/y", p! { "a" => "foo.png" }),
+            ("/foo.png/z", "", Err(())),
+            (
+                "/files/foo.tar.gz/x",
+                "/files/{a}.tar.gz/x",
+                p! { "a" => "foo" },
+            ),
+            (
+                "/files/foo.tar.gz/y",
+                "/files/{a}.gz/y",
+                p! { "a" => "foo.tar" },
+            ),
+            ("/files/foo.tar.gz/z", "", Err(())),
+        ],
+    }
+    .run();
+}
+
+#[test]
 fn mixed_wildcard_suffix() {
     MatchTest {
         routes: vec![

@@ -783,6 +783,9 @@ struct Skipped<'node, 'path, T> {
 
     // The number of parameters that were present.
     params: usize,
+
+    // The index of the suffix child to resume the search from.
+    suffix: usize,
 }
 
 impl<T> Node<T> {
@@ -799,6 +802,7 @@ impl<T> Node<T> {
         let mut backtracking = false;
         let mut params = Params::new();
         let mut skipped: Vec<Skipped<'_, '_, T>> = Vec::new();
+        let mut resume_suffix = 0;
 
         'backtrack: loop {
             'walk: loop {
@@ -844,6 +848,7 @@ impl<T> Node<T> {
                                 node,
                                 path: previous,
                                 params: params.len(),
+                                suffix: 0,
                             });
                         }
 
@@ -861,6 +866,7 @@ impl<T> Node<T> {
                 }
 
                 // Continue searching in the wildcard child, which is kept at the end of the list.
+                let parent = node;
                 node = node.children.last().unwrap();
                 match node.node_type {
                     NodeType::Param { suffix: false } => {
@@ -924,7 +930,12 @@ impl<T> Node<T> {
                             None => path.len(),
                         };
 
-                        for child in node.children.iter() {
+                        for (i, child) in node
+                            .children
+                            .iter()
+                            .enumerate()
+                            .skip(mem::take(&mut resume_suffix))
+                        {
                             // Ensure there is a possible match with a non-zero suffix.
                             if child.prefix.len() >= terminator {
                                 continue;
@@ -935,6 +946,17 @@ impl<T> Node<T> {
 
                             // Continue searching if the suffix matches.
                             if *suffix == *child.prefix {
+                                // A shorter suffix, or no suffix at all, may still match if
+                                // this one does not.
+                                if i + 1 < node.children.len() || node.value.is_some() {
+                                    skipped.push(Skipped {
+                                        node: parent,
+                                        path: previous,
+                                        params: params.len(),
+                                        suffix: i + 1,
+                                    });
+                                }
+
                                 node = child;
                                 path = &path[suffix_start..];
                                 backtracking = false;
@@ -995,6 +1017,7 @@ impl<T> Node<T> {
                     node = skipped.node;
                     backtracking = true;
                     params.truncate(skipped.params);
+                    resume_suffix = skipped.suffix;
                     continue 'backtrack;
                 }
             }
