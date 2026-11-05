@@ -90,6 +90,16 @@ fn wildcard_conflict() {
 }
 
 #[test]
+fn prefix_suffix_in_different_segments() {
+    InsertTest(vec![("/api/v{version}", Ok(())), ("/{file}.png", Ok(()))]).run();
+    InsertTest(vec![
+        ("/x/api/v{version}", Ok(())),
+        ("/x/{file}.png", Ok(())),
+    ])
+    .run();
+}
+
+#[test]
 fn prefix_suffix_conflict() {
     InsertTest(vec![
         ("/x1/{a}suffix", Ok(())),

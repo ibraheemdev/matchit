@@ -421,7 +421,11 @@ impl<T> Node<T> {
         }
 
         if self.prefix.ends_with(b"/") {
-            self.children.iter().any(Node::prefix_wild_child_in_segment)
+            // A parameter child here starts the segment, so only a static child can be its prefix.
+            self.children
+                .iter()
+                .filter(|child| child.node_type == NodeType::Static)
+                .any(Node::wild_child_in_segment)
         } else {
             self.children.iter().any(Node::wild_child_in_segment)
         }
