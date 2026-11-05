@@ -636,13 +636,18 @@ impl<T> Node<T> {
             // If the root node has no children, we can reset it.
             if self.children.is_empty() {
                 *self = Node::default();
+            } else if value.is_some() {
+                self.priority -= 1;
             }
 
             return value;
         }
 
-        let mut node = self;
-        'walk: loop {
+        // The child indices leading to the removed route.
+        let mut path = Vec::new();
+
+        let mut node = &mut *self;
+        let value = 'walk: loop {
             // Could not find a match.
             if remaining.len() <= node.prefix.len() {
                 return None;
@@ -672,9 +677,11 @@ impl<T> Node<T> {
                 for (i, child) in node.children.iter().enumerate() {
                     // Find the matching suffix.
                     if *child.prefix == *suffix {
+                        path.push(i);
+
                         // If this is the end of the path, remove the suffix node.
                         if terminator == remaining.len() {
-                            return node.remove_child(i, &remapping);
+                            break 'walk node.children[i].take_value(&remapping)?;
                         }
 
                         // Otherwise, continue searching.
@@ -687,9 +694,11 @@ impl<T> Node<T> {
 
             // Find a child node that matches the next character in the route.
             if let Some(i) = node.indices.iter().position(|&c| c == next) {
+                path.push(i);
+
                 // The route matches, remove the node.
                 if node.children[i].prefix.unescaped() == remaining {
-                    return node.remove_child(i, &remapping);
+                    break 'walk node.children[i].take_value(&remapping)?;
                 }
 
                 // Otherwise, continue searching.
@@ -702,49 +711,62 @@ impl<T> Node<T> {
                 return None;
             }
 
+            path.push(node.children.len() - 1);
+            let wild_child = node.children.last_mut().unwrap();
+
             // If the route does match, remove the node.
-            if node.children.last_mut().unwrap().prefix.unescaped() == remaining {
-                return node.remove_child(node.children.len() - 1, &remapping);
+            if wild_child.prefix.unescaped() == remaining {
+                break 'walk wild_child.take_value(&remapping)?;
             }
 
             // Otherwise, keep searching deeper.
-            node = node.children.last_mut().unwrap();
-        }
+            node = wild_child;
+        };
+
+        self.remove_priority(&path);
+        Some(value)
     }
 
-    /// Remove the child node at the given index, if the route parameters match.
-    fn remove_child(&mut self, i: usize, remapping: &ParamRemapping) -> Option<T> {
+    /// Take the value stored at this node, if the route parameters match.
+    fn take_value(&mut self, remapping: &ParamRemapping) -> Option<T> {
         // Require an exact match to remove a route.
         //
         // For example, `/{a}` cannot be used to remove `/{b}`.
-        if self.children[i].remapping != *remapping {
+        if self.remapping != *remapping {
             return None;
         }
 
-        // If the node does not have any children, we can remove it completely.
-        let value = if self.children[i].children.is_empty() {
-            // Remove the child node.
-            let child = self.children.remove(i);
+        self.value.take().map(UnsafeCell::into_inner)
+    }
 
+    /// Decrements the priority of each node along the path to a removed route,
+    /// removing the first node that no longer leads to any values.
+    fn remove_priority(&mut self, path: &[usize]) {
+        self.priority -= 1;
+
+        let mut node = self;
+        for &i in path {
+            node.children[i].priority -= 1;
+
+            if node.children[i].priority > 0 {
+                node = &mut node.children[i];
+                continue;
+            }
+
+            let child = node.children.remove(i);
             match child.node_type {
                 // Remove the index if we removed a static prefix that is
                 // not a suffix node.
-                NodeType::Static if !matches!(self.node_type, NodeType::Param { .. }) => {
-                    self.indices.remove(i);
+                NodeType::Static if !matches!(node.node_type, NodeType::Param { .. }) => {
+                    node.indices.remove(i);
                 }
 
                 // Otherwise, we removed a wildcard.
-                _ => self.wild_child = false,
+                _ => node.wild_child = false,
             }
 
-            child.value
+            return;
         }
-        // Otherwise, remove the value but preserve the node.
-        else {
-            self.children[i].value.take()
-        };
-
-        value.map(UnsafeCell::into_inner)
     }
 
     /// Iterates over the tree and calls the given visitor function

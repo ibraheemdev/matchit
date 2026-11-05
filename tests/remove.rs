@@ -32,6 +32,8 @@ impl RemoveTest {
             }
         }
 
+        router.check_priorities().unwrap();
+
         for route in self.remaining {
             assert!(router.at(route).is_ok(), "remaining {route}");
         }
@@ -298,4 +300,35 @@ fn wildcard_suffix() {
         ],
     }
     .run();
+}
+
+#[test]
+fn remove_unused_nodes() {
+    let mut router = Router::new();
+    // Inserted first so that churning under `/static/` does not reorder the root's children.
+    router.insert("/static/{*file}", 0).unwrap();
+    router.insert("/users/{id}", 0).unwrap();
+
+    let churn = |router: &mut Router<i32>, i: usize| {
+        for route in [
+            format!("/tenant-{i}/items/{{id}}"),
+            format!("/tenant-{i}/items/{{id}}.json"),
+            format!("/static/v{i}/{{*file}}"),
+        ] {
+            router.insert(route.clone(), 1).unwrap();
+            assert_eq!(router.remove(route), Some(1));
+        }
+    };
+
+    let tree = format!("{router:?}");
+
+    // Removed routes should not leave behind any nodes.
+    for i in 0..10 {
+        churn(&mut router, i);
+        assert_eq!(format!("{router:?}"), tree);
+    }
+
+    router.check_priorities().unwrap();
+    assert_eq!(router.at("/users/1").map(|m| *m.value), Ok(0));
+    assert_eq!(router.at("/static/app.js").map(|m| *m.value), Ok(0));
 }
